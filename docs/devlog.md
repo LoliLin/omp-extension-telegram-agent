@@ -96,3 +96,39 @@
 - 测试：bun test 50/50 ✅；e2e-compaction（threshold=1500 强制）epoch 2→3→4 持久化、重启恢复 epoch=4 ✅；分析脚本回放 50 runs：hit ratio 90.0%，估算 $0.00038/turn，当前规模各候选 threshold 均不触发 compaction（128K 基线维持）
 - Cache impact: INTENTIONAL（compaction summary 是新 prefix 边界，由设计保证只发生在 epoch 切换时）；golden test 从此锁住意外变化
 - 下一步：Phase 9 Stabilization（长运行 smoke、error recovery、restart/reconnect、文档清理）
+
+## 2026-08-07 (11) — 引入 large-repo-agent-kit 文档体系（单人适配版）
+
+- 做了：新增根 AGENTS.md（路由/硬约束/验证漏斗/已知坑）、docs/index.md、docs/engineering/{development-guide,documentation-guide,traceability}.md、docs/requirements/REQ-TEMPLATE.md、docs/plans/PLAN-TEMPLATE.md、docs/adr/ADR-TEMPLATE.md、docs/runbooks/README.md；docs/testing.md 并入验证策略（漏斗/选择规则/失败诊断）；docs/project.md 指向开发指南
+- 适配：删掉多人协作内容（PR 模板、CONTRIBUTING、分支命名、CI 检查、team/owner 字段）；traceability 保留 git trailer 但只约束新工作，历史追溯仍靠 devlog；开发指南与本项目既有 devlog/handoff/签名提交流程合并，新增 cache impact 评估为每个任务的强制环节
+- 文件：AGENTS.md, docs/index.md, docs/engineering/*, docs/requirements/, docs/plans/, docs/adr/, docs/runbooks/, docs/testing.md, docs/project.md
+- 测试：纯文档，无代码改动
+- Cache impact: NONE
+- 下一步：按新流程继续 Phase 9
+
+## 2026-08-07 (12) — 全量 code review（5 路并行，未修代码）
+
+- 做了：对 src/ 全部模块 + scripts/ + test/ 做并行 review，关键怀疑点（vm 逃逸、二次编辑丢 revision、生产日志中的 flush 竞态）均已实证
+- 最重要发现：
+  1. **Critical**：run_js 的 node:vm sandbox 被经典 constructor 逃逸打穿（实测可达 host process/文件系统）→ 群成员 prompt injection 可读到 .env 全部 secret；现有隔离测试只测表面
+  2. **High**：runtime.flush() 可重入 + markExposed 先于 sendUserMessage → 生产 daemon.log 已出现 "Agent is already processing a prompt"，消息被标 exposed 却没进 context（持久丢失）
+  3. **High**：message_revisions 主键用旧 edit_date，第二次编辑起中间版本被 INSERT OR IGNORE 静默丢弃（实测）
+  4. **High**：ipc.ts FrameDecoder 非 streaming TextDecoder，多字节字符跨 chunk 被切碎
+  5. **High**：poller ingest 失败仍推进 offset（静默丢消息）；run-js spawn 无 error 监听且依赖 PATH 里的 bun（可打死 daemon）
+  6. **Medium**：.env.example 是 `KEY=value` 而 parser 只认 `key: value`（模板即坏配置）；`data/` 未进 .gitignore（agent.db/sessions 含敏感数据，一次 git add data/ 即泄漏）；数值 env 无校验（NaN 静默失效）；compaction_end 不区分成功/失败；search/run_js fetch 无超时；IPC 分页同 ts 丢消息、socket write -1 未处理、队列无上限；TUI 未过滤 ANSI 转义；stop 按裸 pid 杀进程
+  7. **测试盲区**：runjs.test.ts 里混了真实 TinyFish 网络调用（与"testing 不触网络"矛盾）；cache golden 未锁 tools_hash；bot 消息不触发的 invariant 在 daemon 层而无测试；e2e 脚本永不 fail
+- 测试：bun test 50/50 ✅、bun run check ✅（review 期间基线）
+- Cache impact: NONE
+- 下一步：用户决定修复优先级（建议顺序：run_js 威胁模型 → flush 状态机 → revision key → FrameDecoder → 配置校验/gitignore）
+
+## 2026-08-07 (13) — REQ 文档集 + README 路径图 + cache/成本全局要求
+
+- 做了：
+  - review 结论 + 用户 REQ-LIST 转成 11 篇 REQ（docs/requirements/REQ-{SEC,AGENT,TG,IPC,OPS,TEST,CONF,STICKER,UI}-*.md），README.md 清单含建议实施顺序与依赖关系；REQ-LIST.md 已吸收删除
+  - 新增根 README.md：项目简介 + 文档路径图（新 agent 入场路径 AGENTS.md → handoff → development-guide）
+  - 「cache hit 率 / token 成本」升级为全局开发要求：development-guide 第三节扩展为 Cache 与成本（两问 + 设计取向 + 遥测验证），AGENTS.md 实现规则加对应条目
+  - handoff 更新为「REQ 待审核」状态
+- 旧文档处理：无纯废弃文档——project/architecture/cache/data-model/testing/research/devlog/handoff 全部保留并被新索引引用；唯一删除的是被吸收的 REQ-LIST.md
+- 测试：纯文档，无代码改动
+- Cache impact: NONE
+- 下一步：用户审核 REQ（重点：REQ-SEC-0001 威胁模型拍板、REQ-CONF-0001 配置载体拍板）→ 按建议顺序开工

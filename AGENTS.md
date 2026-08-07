@@ -60,6 +60,7 @@
 ## 6. 实现规则
 
 - 满足验收标准的最小改动；复用现有抽象，不过早泛化。
+- **任何功能必须评估 cache hit 率与 token 成本影响**：确定性内容进稳定 prefix 而非动态 suffix；能用确定性代码解决的不花 LLM token；每 turn 新增 token 有界（细则见 `docs/engineering/development-guide.md` 第三节）。
 - 行为变化与机械重构尽量分开提交。
 - 行为变化加 / 更新测试；能确定性复现的 bug 必须有回归测试。
 - Agent / LLM 行为测可观察的轨迹与结果，不断言 prompt 字符串。

@@ -13,7 +13,8 @@ Phase 9 — Stabilization（长运行 smoke、error recovery、restart/reconnect
 
 ## 正在做
 
-Phase 9：长运行稳定性验证（daemon 长跑 + TUI 反复 attach/detach + restart + error recovery）
+- 文档体系已切换为 agent-kit 衍生版（根 AGENTS.md + docs/engineering/development-guide.md 为流程权威）；11 篇 REQ 已建（docs/requirements/README.md 有清单与建议顺序），**等用户审核后按 REQ 开工**
+- Phase 9：长运行稳定性验证（daemon 长跑 + TUI 反复 attach/detach + restart + error recovery）
 
 ## 下一步（按序）
 

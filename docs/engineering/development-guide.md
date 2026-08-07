@@ -54,15 +54,24 @@
 7. **提交**：用户授权后，一个 task 一个原子签名 commit；基于 REQ/PLAN 的工作加 trailer（见 `traceability.md`）。
 8. **报告**：明确说出未验证区域、假设、遗留风险。
 
-## 三、Cache impact 评估（每个任务必做）
+## 三、Cache 与成本（每个任务必做，全局要求）
 
-本项目第一优先级是 provider cache 命中。每个任务结束前自问：**这次改动会不会改变任何 provider 可见字节？**
+本项目第一优先级是 **provider cache hit 率**与**整体 token 成本**。开发任何功能——包括纯修复——都必须回答两个问题：
 
-- `NONE` — 不触 provider payload，devlog 里写明。
-- `INTENTIONAL` — 触了 cache-visible 协议：bump `CACHE_SCHEMA_VERSION`、开新 context epoch、更新 `docs/cache.md`、跑 `test/cache.test.ts` golden 确认新 hash 是预期的。
-- 意外变化 = golden test 失败，这是设计上的报警，不要随手更新 golden 让它过。
+1. **会不会改变任何 provider 可见字节？**
+   - `NONE` — 不触 provider payload，devlog 里写明。
+   - `INTENTIONAL` — 触了 cache-visible 协议：bump `CACHE_SCHEMA_VERSION`、开新 context epoch、更新 `docs/cache.md`、跑 `test/cache.test.ts` golden 确认新 hash 是预期的。
+   - 意外变化 = golden test 失败，这是设计上的报警，不要随手更新 golden 让它过。
+2. **对 hit 率和成本的影响是正还是负？** 负影响必须有明确理由写进 REQ/PLAN；正影响（提高 hit 率、降低每 turn 成本）用遥测验证，不靠感觉。
 
-UI-only 改动若改变了 provider payload，是边界设计 bug，不是 cache 变化。
+设计取向（SHOULD）：
+
+- 确定性、变化频率低的内容放**稳定 prefix**；动态内容只以 append-only suffix 追加。
+- 能用确定性代码（router / SQL / 规则）解决的判断，不花 LLM token。
+- 每 bot turn 的新增 provider-visible token 必须有界；无界增长的设计一票否决。
+- UI-only 改动若改变了 provider payload，是边界设计 bug，不是 cache 变化。
+
+验证依据是 `llm_runs` 遥测与 `scripts/analyze-context-window.ts`，改完看数据说话。
 
 ## 四、何时写哪种文档
 
