@@ -4,41 +4,41 @@
 
 ## 当前 phase
 
-Phase 2 — Telegram persistence（ingestion + normalization + SQLite + dedupe + restart）
+Phase 9 — Stabilization（长运行 smoke、error recovery、restart/reconnect、文档清理）
 
 ## 已完成
 
-- 需求通读；GPG 签名提交链路；Pi@f562a1a 研究（docs/research.md）
-- 文档套件（project/architecture/cache/data-model/testing/devlog/handoff）
-- 骨架：config loader（.env 冒号格式）、bun:sqlite schema（11 表）、personas/ 原文提取
-- **Bun×Pi SDK×DeepSeek smoke 通过**（scripts/smoke-pi.ts，真实 API 调用成功）
+- Phase 1–8 全部完成并提交（见 docs/devlog.md）：骨架、Telegram persistence、Basic Agent、TUI、双 bot routing、search/run_js、media pipeline、context refinement
+- Phase 8：自定义 compaction（状态导向摘要、threshold=128K 触发、epoch 持久化+exposure 重置）、cache golden 回归测试、threshold 分析脚本、e2e-compaction 验证
 
 ## 正在做
 
-Phase 2：Telegram Bot API client（raw fetch long polling）→ raw_updates → normalize → messages → dedupe → offset 持久化 → restart 验证
+Phase 9：长运行稳定性验证（daemon 长跑 + TUI 反复 attach/detach + restart + error recovery）
 
 ## 下一步（按序）
 
-1. src/telegram/client.ts（getUpdates 长轮询，getMe 拿 bot 身份）
-2. src/telegram/normalize.ts（update → canonical message）
-3. src/daemon/ 主循环 + start/stop/status CLI（src/main.ts）
-4. fixture replay 测试 + 真实群 ingestion 测试 + restart 测试
+1. 长运行 smoke：daemon 跑数小时/过夜，观察 daemon.log、遥测、内存
+2. error recovery 边界：DeepSeek 报错/超时、Telegram 网络断开、poller 409、codex vision 失败路径
+3. restart + TUI reconnect 再验证（Phase 2/4 已做过单点，这次配合长跑）
+4. 文档清理：architecture/cache/data-model 与代码最终一致性
 
 ## 当前架构决定
 
-Bun runtime（已验证）；daemon 单进程双 AgentSession（SDK createAgentSession）；raw Bot API fetch；bun:sqlite；TUI 独立进程 + Unix socket IPC；send tool terminate:true；compaction 关自动、Phase 8 自定义 128K policy
+Bun 单进程 daemon 双 AgentSession；raw Bot API 长轮询；bun:sqlite；TUI 独立进程 + Unix socket IPC；send terminate:true；自定义 compaction（session_before_compact extension，threshold 128K via reserveTokens，keepRecent 20K）；send/search/run_js 三工具固定顺序；lazy vision via codex exec；deterministic routing（mention>reply>名字>HMAC 概率）
 
 ## 重要文件
 
-- src/config.ts / src/db/schema.sql / src/db/db.ts
-- scripts/smoke-pi.ts（SDK 用法范本：DefaultResourceLoader 需 cwd+agentDir+systemPrompt）
-- docs/research.md（Pi 结论）；personas/（原文，Phase 3 适配工具段）
-- Pi 源码 ../pi @ f562a1a
+- src/agent/runtime.ts（BotRuntime：session、tools、compaction ext、exposure、epoch）
+- src/agent/serialize.ts / prompt.ts（cache grammar v1，test/cache.test.ts golden 锁定）
+- src/config.ts（compaction_threshold / compaction_keep_recent）
+- scripts/analyze-context-window.ts / e2e-compaction.ts
+- Pi 源码 ../pi @ f562a1a（docs/research.md 结论对应此 commit）
 
 ## 最后测试状态
 
-smoke-pi ✅（DeepSeek 真实调用）；schema ✅。见 docs/testing.md。
+bun test 50/50 ✅；e2e-compaction ✅（epoch 2→3→4，重启恢复）；真实遥测 50 runs hit ratio 90.0%。见 docs/testing.md。
 
 ## 已知问题
 
-- personas/ 里工具相关段落（send 参数名、sticker_id、gpt-researcher、/data 工作区）还是原系统的，Phase 3 建 agent 前必须适配成本项目 schema
+- personas/ 工具段已适配（Phase 3 完成），无遗留
+- bun test 强制 UTC：涉时间序列化的测试必须 pin TZ（cache.test.ts 已处理）

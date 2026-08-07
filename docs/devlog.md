@@ -87,3 +87,12 @@
 - 测试：47/47 unit ✅；真实群：sticker vision 语义正确（"撒娇卖萌地表示委屈…大眼含泪"）、photo OCR 正确（识别出终端截图里的 todo 清单）、双 bot file_id 映射 ✅
 - Cache impact: NONE for provider payload（sticker candidates 是动态 suffix，追加式）；序列化 placeholder 对同一媒体确定
 - 下一步：Phase 8 context refinement（compaction policy/telemetry 分析脚本/cache 回归测试）
+
+## 2026-08-07 (10) — Phase 8 完成：Context refinement
+
+- 做了：runtime.ts 自定义 compaction（session_before_compact extension：serializeConversation + 状态导向中文摘要 prompt ≤800字、previousSummary 合并、completeSimple cacheRetention:"none" maxTokens 4096；reserveTokens=max(16K, window-threshold) 使触发点=threshold；compaction_end → epoch+1 持久化 + exposure 重置 + 最近 40 条重标 exposed）；config 增加 compaction_threshold(128K)/compaction_keep_recent(20K)；scripts/analyze-context-window.ts（遥测回放模拟候选 threshold）；scripts/e2e-compaction.ts；test/cache.test.ts（golden：schema version + systemA/B hash + serialize hash）
+- 踩坑：bun test 强制 UTC（Date offset=0），而 daemon 按本地时区序列化 → golden hash 不一致；测试内 pin TZ=Asia/Singapore 解决
+- 顺手修：sticker short_id 分配改 rowid-based（原 COUNT+1 在并发/删除下会撞号）
+- 测试：bun test 50/50 ✅；e2e-compaction（threshold=1500 强制）epoch 2→3→4 持久化、重启恢复 epoch=4 ✅；分析脚本回放 50 runs：hit ratio 90.0%，估算 $0.00038/turn，当前规模各候选 threshold 均不触发 compaction（128K 基线维持）
+- Cache impact: INTENTIONAL（compaction summary 是新 prefix 边界，由设计保证只发生在 epoch 切换时）；golden test 从此锁住意外变化
+- 下一步：Phase 9 Stabilization（长运行 smoke、error recovery、restart/reconnect、文档清理）

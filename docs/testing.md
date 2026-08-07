@@ -24,9 +24,11 @@ bun run test:telegram   # 真实 Telegram integration（需 .env，Phase 2+）
 | local assistant 不进群 | ✅ | e2e：assistant_text/thinking 只进 agent_events |
 | TUI attach/detach | ✅ | 2026-08-07 screen 实测：attach 实时流/退出 daemon 存活/重进历史完整 |
 | deterministic routing property tests | ✅ | 2026-08-07 33/33 + 真实群双 bot 实况 |
-| run_js sandbox isolation | ⏳ Phase 6 | - |
-| vision lazy/cache | ⏳ Phase 7 | - |
-| cache regression（prefix hash 稳定） | ⏳ Phase 8 | - |
+| run_js sandbox isolation | ✅ | 2026-08-07 46/46 + 真实 TinyFish 调用 |
+| vision lazy/cache | ✅ | 2026-08-07 真实群 sticker/photo 语义正确，双 bot file_id 映射 |
+| compaction（threshold→summary→epoch） | ✅ | 2026-08-07 e2e-compaction 强制触发，epoch 持久化+重启恢复 |
+| cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |
+| threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ⏳ Phase 9 | - |
 
 ## 已知 flaky

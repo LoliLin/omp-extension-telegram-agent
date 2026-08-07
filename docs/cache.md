@@ -46,7 +46,18 @@ DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`
 
 - 初始 threshold：**128K tokens**（provisional，依据：compaction 后基础 ≈10K + summary ≈6K，平均每 bot turn 新增 2K–8K）
 - compaction 后新 epoch：summary（ persona 导向、倾向"状态"）+ 保留近期消息
-- 架构不得硬编码 128K；threshold 在 model config
+- 架构不得硬编码 128K；threshold 在 model config（`compaction_threshold` / `compaction_keep_recent` env）
+
+## Compaction 实现（Phase 8，runtime.ts）
+
+- Pi 自动 compaction 开启：`reserveTokens = max(16384, contextWindow - threshold)`，DeepSeek 1M window 下触发点即 threshold
+- 自定义 `session_before_compact` extension：用 `serializeConversation(messagesToSummarize)` + chat-oriented 中文摘要 prompt（状态导向，≤800 字，保留人物关系/未决事项/#id 引用），有 previousSummary 时合并；`completeSimple(model, …, {cacheRetention:"none", maxTokens:4096})`
+- `compaction_end` → `onCompactionEnd()`：epoch+1 持久化、清空 exposure、把最近 40 条 telegram 消息重新标记 exposed（kept tail 内消息不再重复喂给 LLM）、写 agent_events `compaction`
+- keepRecentTokens = `compaction_keep_recent`（默认 20000）
+
+## Threshold 分析脚本
+
+`bun run scripts/analyze-context-window.ts [db]`：重放 llm_runs 遥测，模拟 64K/96K/128K/160K/192K/256K 候选 threshold 的 compaction 次数、miss/turn、read/turn、$/turn。估算工具，不是 runtime 组件。
 
 ## Telemetry（每次 provider 请求记录）
 
@@ -54,4 +65,6 @@ bot、model、provider、timestamp、context epoch、context tokens、cache read
 
 ## 测试结果
 
-（暂无，Phase 3 起记录真实 cache hit/miss 数据）
+- 2026-08-07（50 runs，bots A/B，DeepSeek deepseek-v4-flash）：cache read 734,208 / miss 81,659，**hit ratio 90.0%**；典型 turn read≈14.7K miss≈1.6K，估算 $0.00038/turn
+- 2026-08-07 e2e-compaction：`compaction_threshold=1500` 强制两轮触发，compaction → epoch 2→3→4 持久化、exposure 重置、摘要调用成功；重启后 epoch=4 恢复
+- cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=1、systemA/B hash、serialize hash 锁定；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
