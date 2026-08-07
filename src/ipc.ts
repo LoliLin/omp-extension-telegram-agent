@@ -21,6 +21,10 @@ export interface MsgItem {
 	text: string | null;
 	mediaKind: string | null;
 	stickerEmoji: string | null;
+	/** local cache path for the media file (same uid as the TUI); absent when not downloaded (REQ-UI-0001 R5). */
+	mediaPath?: string | null;
+	/** vision description text for the media, if recognized (REQ-UI-0001 R3). */
+	mediaDesc?: string | null;
 	replyTo: number | null;
 	edited: boolean;
 }
@@ -45,14 +49,47 @@ export interface TimelineCursor {
 	rank: 0 | 1;
 }
 
+/** One provider run's telemetry, pushed live and aggregated in snapshots (REQ-UI-0003). */
+export interface UsageRun {
+	id: number; // llm_runs.id — dedupes snapshot/push races
+	botId: string;
+	ts: number;
+	model: string;
+	epoch: number;
+	contextTokens: number;
+	cacheRead: number;
+	cacheMiss: number;
+	outputTokens: number;
+	cost: number;
+}
+
+/** Cumulative stats per bot (full-history aggregation, daemon-side). */
+export interface BotStats {
+	runs: number;
+	contextTokens: number;
+	cacheRead: number;
+	cacheMiss: number;
+	outputTokens: number;
+	cost: number;
+	epoch: number;
+	last: UsageRun | null;
+}
+
+/** Snapshot stats: lastId = max llm_runs.id included; pushes with id <= lastId are already inside. */
+export interface StatsSnapshot {
+	lastId: number;
+	bots: Record<string, BotStats>;
+}
+
 export type ClientRequest =
-	| { type: "hello" }
+	| { type: "hello"; filter?: string } // filter = bot id; absent = global view (REQ-UI-0002)
 	| { type: "history"; beforeTs?: number; before?: TimelineCursor; limit: number };
 
 export type ServerMessage =
-	| { type: "snapshot"; items: TimelineItem[] }
+	| { type: "snapshot"; items: TimelineItem[]; stats?: StatsSnapshot }
 	| { type: "history"; items: TimelineItem[]; hasMore: boolean }
-	| { type: "append"; item: TimelineItem };
+	| { type: "append"; item: TimelineItem }
+	| { type: "usage"; run: UsageRun };
 
 export function encodeFrame(msg: unknown): string {
 	return `${JSON.stringify(msg)}\n`;

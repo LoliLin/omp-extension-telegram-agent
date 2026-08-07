@@ -59,6 +59,19 @@ export class BotRuntime {
 	eventSink: ((kind: string, payload: unknown) => void) | null = null;
 	/** Optional sink for messages this bot sent (poller echo dedupes them, so TUI needs this path). */
 	sentMessageSink: ((rawMsg: unknown) => void) | null = null;
+	/** Optional sink for llm_run telemetry (REQ-UI-0003: live usage push). */
+	usageSink: ((run: {
+		id: number;
+		botId: string;
+		ts: number;
+		model: string;
+		epoch: number;
+		contextTokens: number;
+		cacheRead: number;
+		cacheMiss: number;
+		outputTokens: number;
+		cost: number;
+	}) => void) | null = null;
 
 	constructor(db: Database, bot: BotConfig, config: AppConfig, modelRuntime: ModelRuntime) {
 		this.db = db;
@@ -516,7 +529,8 @@ export class BotRuntime {
 		usage: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning?: number; cost: { total: number } },
 		now: number,
 	): void {
-		this.db
+		const contextTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+		const res = this.db
 			.query(
 				`INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost, system_hash, tools_hash)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -526,7 +540,7 @@ export class BotRuntime {
 				now,
 				this.bot.model,
 				this.epoch,
-				usage.input + usage.cacheRead + usage.cacheWrite,
+				contextTokens,
 				usage.cacheRead,
 				usage.input,
 				usage.output,
@@ -536,6 +550,18 @@ export class BotRuntime {
 				this.systemHash,
 				this.toolsHash,
 			);
+		this.usageSink?.({
+			id: Number(res.lastInsertRowid),
+			botId: this.bot.id,
+			ts: now,
+			model: this.bot.model,
+			epoch: this.epoch,
+			contextTokens,
+			cacheRead: usage.cacheRead,
+			cacheMiss: usage.input,
+			outputTokens: usage.output,
+			cost: usage.cost.total,
+		});
 	}
 
 	/** Record a cache-schema bump (CACHE_SCHEMA_VERSION change) as a new context epoch. */

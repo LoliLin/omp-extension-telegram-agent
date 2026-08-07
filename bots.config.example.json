@@ -4,7 +4,7 @@
 	"router_secret_env": "router_secret",
 	"deepseek_key_env": "deepseek_api_key",
 	"tinyfish_key_env": "tiny_fish_api_key",
-	"auxiliary_visual_model": "gpt-5-mini",
+	"auxiliary_visual_model": "gpt-5.6-luna-low",
 	"db_path": "data/agent.db",
 	"model": "deepseek-v4-flash",
 	"reasoning_effort": "medium",

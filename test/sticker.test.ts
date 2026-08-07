@@ -161,7 +161,7 @@ describe("send from catalog (R3)", () => {
 		};
 		(rt as any).exposed = new Set();
 		const result = await (rt as any).executeSend({ sticker: "s7" });
-		expect(sentSticker).toBe("fid-c1");
+		expect(sentSticker as string | null).toBe("fid-c1");
 		expect(result.terminate).toBe(true);
 	});
 

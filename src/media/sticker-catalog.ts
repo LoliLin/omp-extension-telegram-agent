@@ -103,6 +103,8 @@ export async function ensureStickerCatalog(
 		.all(JSON.stringify(sets)) as { file_unique_id: string }[];
 	const workers = Math.min(4, pending.length);
 	let next = 0;
+	let doneCount = 0;
+	if (pending.length > 0) console.log(`[sticker-catalog] ${botId}: pre-recognizing vision for ${pending.length} stickers (first start can take minutes)`);
 	const results = await Promise.all(
 		Array.from({ length: workers }, async () => {
 			while (next < pending.length) {
@@ -111,6 +113,10 @@ export async function ensureStickerCatalog(
 					await ensureVision(db, api, botId, envModel, fid);
 				} catch (err) {
 					console.error(`[sticker-catalog] ${botId}: vision failed for ${fid}: ${err}`);
+				}
+				doneCount++;
+				if (doneCount % 10 === 0) {
+					console.log(`[sticker-catalog] ${botId}: vision ${doneCount}/${pending.length}`);
 				}
 			}
 		}),

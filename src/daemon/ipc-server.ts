@@ -2,7 +2,16 @@
 
 import type { Database } from "bun:sqlite";
 import { rmSync, existsSync, chmodSync } from "node:fs";
-import type { TimelineItem, MsgItem, EvtItem, ClientRequest, ServerMessage, TimelineCursor } from "../ipc.ts";
+import type {
+	TimelineItem,
+	MsgItem,
+	EvtItem,
+	ClientRequest,
+	ServerMessage,
+	TimelineCursor,
+	StatsSnapshot,
+	UsageRun,
+} from "../ipc.ts";
 import { encodeFrame, FrameDecoder, FrameOverflowError } from "../ipc.ts";
 import type { MessageRow } from "../agent/serialize.ts";
 
@@ -29,6 +38,8 @@ export class IpcServer {
 	private listeners = new Set<SocketLike>();
 	private decoders = new WeakMap<object, FrameDecoder>();
 	private outQueues = new WeakMap<object, OutQueue>();
+	/** Per-listener bot filter from hello (REQ-UI-0002); null = global view. */
+	private filters = new WeakMap<object, string | null>();
 	private encoder = new TextEncoder();
 	private server: ReturnType<typeof Bun.listen> | null = null;
 
@@ -111,6 +122,7 @@ export class IpcServer {
 					this.listeners.add(socket);
 					this.decoders.set(socket, new FrameDecoder());
 					this.outQueues.set(socket, { chunks: [], total: 0 });
+					this.filters.set(socket, null);
 				},
 				data: (socket, chunk) => {
 					try {
@@ -150,16 +162,39 @@ export class IpcServer {
 		if (existsSync(this.sockPath)) rmSync(this.sockPath);
 	}
 
-	/** Push a live item to all attached TUIs. */
+	/** Push a live item to all attached TUIs, honoring per-listener filters. */
 	broadcast(item: TimelineItem): void {
 		if (this.listeners.size === 0) return;
 		const frame = encodeFrame({ type: "append", item } satisfies ServerMessage);
-		for (const socket of this.listeners) this.writeFrame(socket, frame);
+		for (const socket of this.listeners) {
+			const filter = this.filters.get(socket) ?? null;
+			if (filter && item.kind === "evt" && item.botId !== filter) continue;
+			this.writeFrame(socket, frame);
+		}
+	}
+
+	/** Push a live usage run (REQ-UI-0003 R2), honoring per-listener filters. */
+	broadcastUsage(run: UsageRun): void {
+		if (this.listeners.size === 0) return;
+		const frame = encodeFrame({ type: "usage", run } satisfies ServerMessage);
+		for (const socket of this.listeners) {
+			const filter = this.filters.get(socket) ?? null;
+			if (filter && run.botId !== filter) continue;
+			this.writeFrame(socket, frame);
+		}
 	}
 
 	private handleRequest(socket: SocketLike, req: ClientRequest): void {
 		if (req.type === "hello") {
-			const frame = encodeFrame({ type: "snapshot", items: this.loadTimeline(null, SNAPSHOT_LIMIT) } satisfies ServerMessage);
+			const filter =
+				typeof req.filter === "string" && this.botNames.has(req.filter) ? req.filter : null;
+			if (req.filter && !filter) console.warn(`[ipc] unknown hello filter "${req.filter}" ignored`);
+			this.filters.set(socket, filter);
+			const frame = encodeFrame({
+				type: "snapshot",
+				items: this.loadTimeline(null, SNAPSHOT_LIMIT, filter),
+				stats: this.loadStats(filter),
+			} satisfies ServerMessage);
 			this.writeFrame(socket, frame);
 		} else if (req.type === "history") {
 			// R4: clamp the limit server-side; a crafted 1e9 must not read the whole table.
@@ -169,7 +204,7 @@ export class IpcServer {
 			const cursor: TimelineCursor | null =
 				req.before ??
 				(req.beforeTs != null ? { ts: req.beforeTs, id: 0, rank: 0 } : null);
-			const items = this.loadTimeline(cursor, limit);
+			const items = this.loadTimeline(cursor, limit, this.filters.get(socket) ?? null);
 			this.writeFrame(
 				socket,
 				encodeFrame({ type: "history", items, hasMore: items.length >= limit } satisfies ServerMessage),
@@ -183,7 +218,7 @@ export class IpcServer {
 	 * Each table is queried with the cursor bound and its newest `limit` rows taken; the union's
 	 * newest `limit` must lie within them, so the merge is lossless (R3).
 	 */
-	private loadTimeline(cursor: TimelineCursor | null, limit: number): TimelineItem[] {
+	private loadTimeline(cursor: TimelineCursor | null, limit: number, filter: string | null = null): TimelineItem[] {
 		const ts = cursor?.ts ?? Number.MAX_SAFE_INTEGER;
 		const id = cursor?.id ?? Number.MAX_SAFE_INTEGER;
 		const rank = cursor?.rank ?? 1;
@@ -194,13 +229,21 @@ export class IpcServer {
 				 ORDER BY date DESC, message_id DESC LIMIT ?4`,
 			)
 			.all(ts, rank, id, limit) as MessageRow[];
-		const evts = this.db
-			.query(
-				`SELECT * FROM agent_events
-				 WHERE (ts < ?1) OR (?2 = 0 AND ts = ?1 AND id < ?3) OR (?2 = 1 AND ts = ?1)
-				 ORDER BY ts DESC, id DESC LIMIT ?4`,
-			)
-			.all(ts, rank, id, limit) as { id: number; bot_id: string; ts: number; kind: string; payload: string }[];
+		const evts = (filter
+			? this.db
+					.query(
+						`SELECT * FROM agent_events
+						 WHERE bot_id = ?5 AND ((ts < ?1) OR (?2 = 0 AND ts = ?1 AND id < ?3) OR (?2 = 1 AND ts = ?1))
+						 ORDER BY ts DESC, id DESC LIMIT ?4`,
+					)
+					.all(ts, rank, id, limit, filter)
+			: this.db
+					.query(
+						`SELECT * FROM agent_events
+						 WHERE (ts < ?1) OR (?2 = 0 AND ts = ?1 AND id < ?3) OR (?2 = 1 AND ts = ?1)
+						 ORDER BY ts DESC, id DESC LIMIT ?4`,
+					)
+					.all(ts, rank, id, limit)) as { id: number; bot_id: string; ts: number; kind: string; payload: string }[];
 
 		const items: TimelineItem[] = [
 			...msgs.map((m) => this.msgToItem(m)),
@@ -219,10 +262,24 @@ export class IpcServer {
 		}
 		let mediaKind: string | null = null;
 		let stickerEmoji: string | null = null;
+		let mediaPath: string | null = null;
+		let mediaDesc: string | null = null;
 		if (m.media) {
-			const media = JSON.parse(m.media) as { kind: string; sticker_emoji?: string };
+			const media = JSON.parse(m.media) as { kind: string; sticker_emoji?: string; file_unique_id?: string };
 			mediaKind = media.kind;
 			stickerEmoji = media.sticker_emoji ?? null;
+			if (media.file_unique_id) {
+				const row = this.db.query("SELECT local_path, vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as
+					| { local_path: string | null; vision: string | null }
+					| null;
+				if (row) {
+					mediaPath = row.local_path ?? null;
+					if (row.vision) {
+						const v = JSON.parse(row.vision) as { text: string | null };
+						mediaDesc = v.text ?? null;
+					}
+				}
+			}
 		}
 		return {
 			kind: "msg",
@@ -236,9 +293,46 @@ export class IpcServer {
 			text: m.text ?? m.caption,
 			mediaKind,
 			stickerEmoji,
+			mediaPath,
+			mediaDesc,
 			replyTo: m.reply_to_message_id,
 			edited: m.edit_date != null,
 		};
+	}
+
+	/** Full-history cumulative stats per bot (REQ-UI-0003 R2/R3: daemon-side aggregation). */
+	private loadStats(filter: string | null): StatsSnapshot {
+		const bots = filter ? [filter] : [...this.botNames.keys()];
+		const out: StatsSnapshot = { lastId: 0, bots: {} };
+		const maxId = this.db.query("SELECT COALESCE(MAX(id), 0) m FROM llm_runs").get() as { m: number };
+		out.lastId = maxId.m;
+		for (const botId of bots) {
+			const agg = this.db
+				.query(
+					`SELECT COUNT(*) runs, COALESCE(SUM(context_tokens),0) contextTokens, COALESCE(SUM(cache_read),0) cacheRead,
+					        COALESCE(SUM(cache_miss),0) cacheMiss, COALESCE(SUM(output_tokens),0) outputTokens,
+					        COALESCE(SUM(cost),0) cost, COALESCE(MAX(epoch),0) epoch
+					 FROM llm_runs WHERE bot_id = ?`,
+				)
+				.get(botId) as {
+				runs: number;
+				contextTokens: number;
+				cacheRead: number;
+				cacheMiss: number;
+				outputTokens: number;
+				cost: number;
+				epoch: number;
+			};
+			const last = this.db
+				.query(
+					`SELECT id, bot_id botId, ts, model, epoch, context_tokens contextTokens, cache_read cacheRead,
+					        cache_miss cacheMiss, output_tokens outputTokens, cost
+					 FROM llm_runs WHERE bot_id = ? ORDER BY ts DESC, id DESC LIMIT 1`,
+				)
+				.get(botId) as UsageRun | null;
+			out.bots[botId] = { ...agg, last };
+		}
+		return out;
 	}
 
 	evtToItem(e: { id: number; bot_id: string; ts: number; kind: string; payload: string }): EvtItem {

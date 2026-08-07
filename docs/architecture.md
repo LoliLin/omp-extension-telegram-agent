@@ -71,16 +71,19 @@
 
 - 见 docs/data-model.md。WAL 模式，直接 SQL
 
-## TUI（Phase 4，REQ-IPC-0001 加固）
+## TUI（Phase 4，REQ-IPC-0001 加固 + REQ-UI-0001/2/3）
 
 - `@earendil-works/pi-tui`：`TuiAltScreen` + `ScrollView(follow:"end")` + transcript Container
 - 每条群消息一个组件；bot 内部行为以 `Bot X · LOCAL` 标记
-- IPC：Unix socket JSONL，daemon 为 server；协议 = hello / history 分页拉取 / event 订阅
+- IPC：Unix socket JSONL，daemon 为 server；协议 = hello（可带 bot filter）/ history 分页拉取 / event 订阅 / usage 增量推送（REQ-UI-0003）
 - **传输层**：FrameDecoder 持单个 streaming TextDecoder（多字节字符跨 chunk 不腐蚀）；接收缓冲 4MB 上限，超限断开；socket.write <0 即踢连接，出站队列 1MB 上限，超限断开（TUI 挂起时 daemon 内存有界）
 - **分页**：merged timeline 统一排序键 (ts, rank, id)（rank 0=agent 事件，1=群消息），history 用复合游标，同秒多条消息不丢不重；旧客户端只发 beforeTs 时保持严格 `ts<` 语义（双向兼容，新客户端同时发送两字段）
 - **本机暴露面**：socket 文件 chmod 600；history limit 服务端夹取 [1,500]
 - **终端注入防护**：渲染前 strip ANSI/OSC/DCS 转义与控制字符（保留 \n/\t），群消息无法清屏/改色/写剪贴板（OSC 52）
 - **竞态去重**：snapshot 与 broadcast 重复条目按 (chatId,messageId)/(evtId) 去重；翻页补日期分隔线
+- **attach 过滤（REQ-UI-0002）**：`attach <bot-id>` 以单 bot 视角观察——daemon 端对 snapshot / history / broadcast / usage 过滤 agent_events（群消息始终全量）；不指定时全局视角；非法 id 由 main.ts 校验并列出配置的 bot 清单
+- **底部可观测性面板（REQ-UI-0003）**：每 bot 一行（当前 epoch / 最近一次 run 的 context/read/miss / 全历史累计 input/output/成本 / hit ratio）；snapshot 附全历史聚合基线（`lastId` 防止与推送竞态双计），llm_run 落库时经 IPC 增量推送，TUI 不直连 DB
+- **媒体内联（REQ-UI-0001）**：pi-tui `Image` 组件渲染本地缓存的 photo/sticker（kitty 协议，自动探测终端；非 kitty 降级占位符）；IPC 只传 `mediaPath`/`mediaDesc`（同 uid 读文件，不扩大暴露面）；tgs/webm/无缓存/超 1MB 降级为占位符 + vision 描述文本；研究结论见 docs/research.md（REQ-UI-0001 R1）
 
 ## Vision（Phase 7）
 

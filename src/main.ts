@@ -50,16 +50,24 @@ switch (cmd) {
 		// R6: don't claim success before the daemon is ready — wait for its socket.
 		// A config error kills the child within the first second; report the log tail then.
 		const sockPath = join(dataDir, "daemon.sock");
-		const deadline = Date.now() + 15_000;
+		// Wait a bounded window for readiness; first start can be slow (sticker catalog
+		// downloads + vision pre-recognition, minutes). If not ready in time we do NOT claim
+		// failure — the daemon may still be initializing — but never claim success (R6);
+		// a dead child is the only hard failure.
+		const deadline = Date.now() + 60_000;
 		while (Date.now() < deadline) {
 			if (existsSync(sockPath)) break;
-			await sleep(250);
+			await sleep(500);
 		}
 		if (!existsSync(sockPath)) {
-			console.error(`daemon failed to become ready within 15s; logs: ${logPath}`);
-			const tail = readFileSync(logPath, "utf8").trim().split("\n").slice(-15).join("\n");
-			if (tail) console.error(tail);
-			process.exit(1);
+			if (!pidAlive(child.pid ?? -1)) {
+				console.error(`daemon exited during startup; logs: ${logPath}`);
+				const tail = readFileSync(logPath, "utf8").trim().split("\n").slice(-15).join("\n");
+				if (tail) console.error(tail);
+				process.exit(1);
+			}
+			console.log(`daemon starting (pid ${child.pid}, first start may take minutes: sticker catalog vision pre-recognition); use "bun run src/main.ts status" or ${logPath} to confirm`);
+			process.exit(0);
 		}
 		const pid = readPid(pidPath) ?? child.pid;
 		console.log(`daemon started (pid ${pid}), logs: ${logPath}`);
@@ -93,6 +101,22 @@ switch (cmd) {
 		break;
 	}
 	case "attach": {
+		// optional bot filter (REQ-UI-0002): validate against the configured bot list here
+		const botId = process.argv[3];
+		if (botId) {
+			const { loadConfig } = await import("./config.ts");
+			try {
+				const ids = loadConfig(rootDir).bots.map((b) => b.id);
+				if (!ids.includes(botId)) {
+					console.error(`unknown bot id "${botId}"; configured bots: ${ids.join(", ") || "(none)"}`);
+					process.exit(1);
+				}
+			} catch (err) {
+				console.error(`attach ${botId}: ${(err as Error).message}`);
+				process.exit(1);
+			}
+		}
+		process.env.TG_ATTACH_BOT = botId ?? "";
 		await import("./tui/index.ts");
 		break;
 	}

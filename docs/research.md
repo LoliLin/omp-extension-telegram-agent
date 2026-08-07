@@ -144,3 +144,20 @@ session.sendUserMessage(text)             // 空闲时直接触发
 // 事件
 session.subscribe(e => { /* message_update/message_end/turn_end/agent_settled/entry_appended/... */ });
 ```
+
+---
+
+## REQ-UI-0001 R1 研究：pi-tui 插件形态 vs 独立进程 + kitty 图像（2026-08-07）
+
+**问题**：Telegram 历史界面要不要写成 pi 插件（extension）形态，以复用 pi 主程序的 TUI 与 kitty 图像能力？
+
+**结论：不采用插件形态，保持独立 TUI 进程；kitty 图像支持直接复用 pi-tui 的 `Image` 组件。**
+
+依据（pi docs tui.md + extensions.md + packages/tui/src/components/image.ts）：
+
+1. **插件 UI 只能活在 pi 主程序布局内**：extension 通过 `ctx.ui.custom()` / `setWidget` / `setFooter` 渲染组件，它们是 pi 会话屏幕的一部分（overlay / 底部 widget / footer），没有「接管整个终端」的形态。我们的 Telegram 观察者需要独占全屏（TuiAltScreen）、随时 attach/detach、与后台 daemon 走独立 IPC——这些都不属于 pi 主程序的会话模型。强行插件化 = 每次观察都要开一个 pi 会话，且 UI 被夹在编辑区/输入区之间。
+2. **pi-tui 是独立包**（`@earendil-works/pi-tui`），我们本来就直接依赖它（TuiAltScreen/ScrollView/Text）。复用组件与插件形态互斥无关——独立进程同样用全套组件。
+3. **kitty 图像协议在 pi-tui 里是原生 `Image` 组件**：`getCapabilities()` 探测终端（KITTY_WINDOW_ID / TERM_PROGRAM kitty|ghostty|wezterm|warp），kitty 协议用 image placement（imageId 复用/清理），非 kitty 自动降级为 `imageFallback` 文本占位符。`Image(base64, mime, {fallbackColor}, {maxWidthCells, maxHeightCells, filename})` 可直接嵌入 ScrollView，行列高度按单元尺寸换算——resize/滚动由 TUI 层重绘处理（pi 自身聊天渲染即此路径）。
+4. **媒体传输路径**（R5）：daemon 的 media 缓存已有稳定本地路径 `data/media/<file_unique_id>.<ext>`（vision.ts local_path），TUI 与 daemon 同 uid、socket chmod 600 —— IPC 只传路径字符串，TUI 自行读文件转 base64；tgs/webm/超限文件降级占位符。不扩大本机暴露面。
+
+**落地**（REQ-UI-0001 R2–R5）：TUI 保持独立进程；`MsgItem` 增加 `mediaPath`/`mediaDesc`（additive 协议字段）；有本地缓存且 ≤1MB 的 photo/sticker 渲染 `Image`，其余（tgs/webm/大图/无缓存）保持现有占位符 + vision 描述文本。

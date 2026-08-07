@@ -239,6 +239,52 @@ describe("socket hardening (R4)", () => {
 	});
 });
 
+describe("per-bot filter + stats (REQ-UI-0002/0003)", () => {
+	test("hello filter: events filtered daemon-side; broadcast/usage filtered; stats aggregates match DB", () => {
+		const server = makeServer();
+		const chatId = -1004402809405;
+		insertMsg(chatId, 100, 1754600000, "a");
+		insertEvt("A", 1754600000 * 1000 + 1, "thinking", "{}");
+		insertEvt("B", 1754600000 * 1000 + 2, "thinking", "{}");
+		db.query("INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, cost) VALUES ('A', 1, 'm', 1, 1000, 800, 200, 50, 0.01)").run();
+		db.query("INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, cost) VALUES ('A', 2, 'm', 1, 2000, 1800, 200, 60, 0.02)").run();
+		db.query("INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, cost) VALUES ('B', 3, 'm', 2, 5000, 0, 5000, 100, 0.05)").run();
+
+		const frames: unknown[] = [];
+		const socket = fakeSocket(() => 1 << 20, (f) => frames.push(f));
+		attach(server, socket);
+		(server as any).handleRequest(socket, { type: "hello", filter: "A" });
+		const snap = frames[0] as {
+			type: string;
+			items: { kind: string; botId?: string }[];
+			stats: { lastId: number; bots: Record<string, { runs: number; cost: number; epoch: number; last: { botId: string } | null }> };
+		};
+		expect(snap.type).toBe("snapshot");
+		// events filtered to bot A only; messages always present
+		expect(snap.items.filter((i) => i.kind === "evt").map((i) => i.botId)).toEqual(["A"]);
+		// stats: full history for A; B excluded entirely in per-bot view
+		expect(snap.stats.lastId).toBe(3);
+		expect(snap.stats.bots.A.runs).toBe(2);
+		expect(snap.stats.bots.A.cost).toBeCloseTo(0.03);
+		expect(snap.stats.bots.A.epoch).toBe(1);
+		expect(snap.stats.bots.A.last?.botId).toBe("A");
+		expect(snap.stats.bots.B).toBeUndefined();
+
+		// broadcast is filtered too
+		(server as any).broadcast({ kind: "evt", ts: 1, botId: "B", botName: "B", evtKind: "x", payload: "{}" });
+		(server as any).broadcast({ kind: "evt", ts: 2, botId: "A", botName: "A", evtKind: "x", payload: "{}" });
+		(server as any).broadcast({ kind: "msg", ts: 3, chatId: 1, messageId: 9 });
+		const appendFrames = frames.filter((f) => (f as { type: string }).type === "append") as { item: { kind: string; botId?: string } }[];
+		expect(appendFrames.map((f) => (f.item.kind === "evt" ? f.item.botId : "msg"))).toEqual(["A", "msg"]);
+
+		// usage push is filtered per bot
+		(server as any).broadcastUsage({ id: 4, botId: "B", ts: 4, model: "m", epoch: 1, contextTokens: 1, cacheRead: 0, cacheMiss: 1, outputTokens: 0, cost: 0 });
+		(server as any).broadcastUsage({ id: 5, botId: "A", ts: 5, model: "m", epoch: 1, contextTokens: 1, cacheRead: 0, cacheMiss: 1, outputTokens: 0, cost: 0 });
+		const usageFrames = frames.filter((f) => (f as { type: string }).type === "usage") as { run: { botId: string } }[];
+		expect(usageFrames.map((f) => f.run.botId)).toEqual(["A"]);
+	});
+});
+
 describe("sanitization (R5)", () => {
 	test("AC5: ANSI clear-screen and colors are removed, text survives", () => {
 		const dirty = "hello \x1b[2J\x1b[31mred\x1b[0m world";

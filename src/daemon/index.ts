@@ -86,6 +86,7 @@ for (const [botId, rt] of runtimes) {
 		const row = db.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?").get(m.chat.id, m.message_id) as MessageRow | null;
 		if (row) ipc.broadcast(ipc.msgToItem(row));
 	};
+	rt.usageSink = (run) => ipc.broadcastUsage(run);
 }
 ipc.start();
 
