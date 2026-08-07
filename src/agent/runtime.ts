@@ -9,8 +9,11 @@ import {
 	DefaultResourceLoader,
 	SessionManager,
 	SettingsManager,
+	serializeConversation,
 	type AgentSession,
+	type ExtensionAPI,
 	type ModelRuntime,
+	type SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { BotConfig, AppConfig } from "../config.ts";
@@ -26,6 +29,19 @@ import { ensureVision, fileIdForBot } from "../media/vision.ts";
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
 const EXPOSED_KEY = "exposed_ids";
 const EPOCH_KEY = "context_epoch";
+
+// Chat-oriented compaction summary prompt (state, not replay). Part of cache protocol.
+const COMPACTION_SUMMARY_PROMPT = `你在为一个长期住在 Telegram 群里的 AI 群友压缩记忆。把被压缩的群聊历史总结成"状态"而不是逐条复述，供它之后延续人设和上下文。
+
+保留：
+- 重要人物关系、称呼和互动模式
+- 已知稳定事实和长期话题
+- 正在讨论的问题、结论和争议点
+- 承诺和未解决事项
+- 必要的消息引用（#消息id）
+- 这个人设真正会关心的信息
+
+输出中文，分段，直接给摘要正文，控制在 800 字以内。`;
 
 interface SendParams {
 	reply_to?: number;
@@ -134,6 +150,49 @@ export class BotRuntime {
 		const tools = [sendTool, searchTool, runJsTool];
 		this.toolsHash = sha256Short(JSON.stringify(tools.map((t) => ({ name: t.name, params: t.parameters }))));
 
+		const model = this.modelRuntime.getModel("deepseek", this.config.deepseekModel);
+		if (!model) throw new Error(`model not found: deepseek/${this.config.deepseekModel}`);
+
+		// Custom compaction: chat-oriented summary (state, not replay), threshold from config.
+		// Pi's trigger formula is contextTokens > contextWindow - reserveTokens, so reserve = window - threshold.
+		const threshold = this.config.compactionThreshold;
+		const reserveTokens = Math.max(16_384, model.contextWindow - threshold);
+		const compactionExt = {
+			name: "tg-compaction",
+			hidden: true,
+			factory: (pi: ExtensionAPI) => {
+				pi.on("session_before_compact", async (event: SessionBeforeCompactEvent) => {
+					const prep = event.preparation;
+					const conversation = serializeConversation(prep.messagesToSummarize as never);
+					const userText =
+						`<conversation>\n${conversation}\n</conversation>\n\n` +
+						(prep.previousSummary
+							? `<previous-summary>\n${prep.previousSummary}\n</previous-summary>\n\n把上面的旧摘要与新内容合并成一份更新的摘要。`
+							: "请输出摘要。");
+					const result = await this.modelRuntime.completeSimple(
+						model as never,
+						{
+							systemPrompt: COMPACTION_SUMMARY_PROMPT,
+							messages: [{ role: "user", content: userText, timestamp: Date.now() }],
+						},
+						{ cacheRetention: "none", maxTokens: 4096 },
+					);
+					const summary = result.content
+						.filter((c: { type: string }) => c.type === "text")
+						.map((c: unknown) => (c as { text: string }).text)
+						.join("\n");
+					return {
+						compaction: {
+							summary,
+							firstKeptEntryId: prep.firstKeptEntryId,
+							tokensBefore: prep.tokensBefore,
+							usage: result.usage,
+						},
+					};
+				});
+			},
+		};
+
 		const loader = new DefaultResourceLoader({
 			cwd: this.config.dataDir,
 			agentDir: join(this.config.dataDir, "pi-agent"),
@@ -142,11 +201,9 @@ export class BotRuntime {
 			noSkills: true,
 			noPromptTemplates: true,
 			noContextFiles: true,
+			extensionFactories: [compactionExt],
 		});
 		await loader.reload();
-
-		const model = this.modelRuntime.getModel("deepseek", this.config.deepseekModel);
-		if (!model) throw new Error(`model not found: deepseek/${this.config.deepseekModel}`);
 
 		const { session } = await createAgentSession({
 			cwd: this.config.dataDir,
@@ -154,7 +211,7 @@ export class BotRuntime {
 			thinkingLevel: this.config.deepseekReasoningEffort as "medium",
 			modelRuntime: this.modelRuntime,
 			sessionManager,
-			settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
+			settingsManager: SettingsManager.inMemory({ compaction: { enabled: true, reserveTokens, keepRecentTokens: this.config.compactionKeepRecent } }),
 			resourceLoader: loader,
 			noTools: "builtin",
 			customTools: tools,
@@ -205,8 +262,26 @@ export class BotRuntime {
 						void this.flush();
 					}
 					break;
+				case "compaction_end":
+					this.onCompactionEnd();
+					break;
 			}
 		});
+	}
+
+	/** New context epoch after compaction: reset exposure, re-mark the recent kept tail. */
+	private onCompactionEnd(): void {
+		this.epoch += 1;
+		setBotState(this.db, this.bot.id, EPOCH_KEY, String(this.epoch));
+		this.exposed.clear();
+		// the last ~40 telegram messages survive inside the kept tail; treat as exposed
+		const chatId = Number(`-100${this.config.groupPeerId}`);
+		const recent = this.db
+			.query("SELECT message_id FROM messages WHERE chat_id = ? ORDER BY message_id DESC LIMIT 40")
+			.all(chatId) as { message_id: number }[];
+		this.markExposed(recent.map((r) => r.message_id));
+		this.recordEvent("compaction", { epoch: this.epoch });
+		console.log(`[bot ${this.bot.id}] compaction -> epoch ${this.epoch}`);
 	}
 
 	private async executeSend(params: SendParams) {
@@ -298,13 +373,12 @@ export class BotRuntime {
 
 	/** Small dynamic sticker candidate list (semantic, short ids). Empty string when catalog is empty. */
 	private stickerCandidatesBlock(): string {
-		// assign short ids to vision-described stickers that don't have one yet
+		// assign short ids (rowid-based: stable and unique, race-free)
 		const unassigned = this.db
-			.query("SELECT file_unique_id FROM media WHERE kind = 'sticker' AND json_extract(vision, '$.text') IS NOT NULL AND short_id IS NULL")
-			.all() as { file_unique_id: string }[];
+			.query("SELECT rowid, file_unique_id FROM media WHERE kind = 'sticker' AND json_extract(vision, '$.text') IS NOT NULL AND short_id IS NULL")
+			.all() as { rowid: number; file_unique_id: string }[];
 		for (const row of unassigned) {
-			const count = (this.db.query("SELECT COUNT(*) c FROM media WHERE short_id IS NOT NULL").get() as { c: number }).c;
-			this.db.query("UPDATE media SET short_id = ? WHERE file_unique_id = ?").run(`s${count + 1}`, row.file_unique_id);
+			this.db.query("UPDATE media SET short_id = ? WHERE file_unique_id = ?").run(`s${row.rowid}`, row.file_unique_id);
 		}
 		const rows = this.db
 			.query("SELECT short_id, sticker_emoji, vision FROM media WHERE kind = 'sticker' AND short_id IS NOT NULL ORDER BY rowid DESC LIMIT 8")

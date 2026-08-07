@@ -25,6 +25,8 @@ export interface AppConfig {
 	routerSecret: string | null; // generated+persisted by daemon if absent
 	routingPA: number; // probability a plain human message triggers bot A
 	routingPB: number; // same for bot B
+	compactionThreshold: number; // context tokens per bot that trigger a new epoch (provisional 128K)
+	compactionKeepRecent: number; // chars/4-estimated tokens of recent messages kept through compaction
 }
 
 export function parseEnvFile(path: string): Record<string, string> {
@@ -77,5 +79,7 @@ export function loadConfig(rootDir: string): AppConfig {
 		routerSecret: env.router_secret ?? null,
 		routingPA: Number(env.routing_p_a ?? "0.08"),
 		routingPB: Number(env.routing_p_b ?? "0.08"),
+		compactionThreshold: Number(env.compaction_threshold ?? "128000"),
+		compactionKeepRecent: Number(env.compaction_keep_recent ?? "20000"),
 	};
 }
