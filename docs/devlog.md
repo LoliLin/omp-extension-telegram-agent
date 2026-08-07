@@ -55,3 +55,11 @@
 - 意外发现：send 失败（Telegram 拒绝 reply 不存在的合成消息）→ error 透传给 LLM → 模型按人设规则省略 reply_to 重试成功。终止语义验证：成功 send 后无第三次 provider 请求
 - Cache impact: INTENTIONAL（首次建立 system/tools prefix；grammar v1 被测试锁定）
 - 下一步：Phase 4 TUI（attach/detach + 历史 + 实时）
+
+## 2026-08-07 (6) — Phase 4 完成：TUI attach/detach
+
+- 做了：src/ipc.ts（JSONL 协议 + FrameDecoder）；daemon/ipc-server.ts（snapshot/history/broadcast，merged timeline = messages + agent_events 按 ts 合并）；tui/index.ts（pi-tui：TuiAltScreen + ScrollView(follow:"end") + Text 组件树，LOCAL 事件黄色标记，滚到顶部自动加载更早并恢复滚动位置，q/Ctrl+C 退出）；main.ts attach 接线；runtime.ts 增加 eventSink/sentMessageSink（bot 自发消息 poller echo 去重后 TUI 需要独立广播路径）
+- 踩坑记录（重要）：Bun socket.write 返回**字节**数且可能部分写入（8192/次），按 UTF-16 code unit slice 字符串会截断多字节字符造成字节重复/损坏 → 必须 TextEncoder 编码成 Uint8Array 按字节偏移排队 + drain 回调冲刷
+- 测试：IPC snapshot(100)/history(50, hasMore) ✅；screen 真实终端 attach 显示实时群聊 ✅；TUI 退出 daemon 存活 ✅；重进历史含离开期间新消息 ✅
+- Cache impact: NONE（UI-only，未触 provider payload——已确认 system/tools hash 不变）
+- 下一步：Phase 5 双 bot deterministic routing + 真人触发测试
