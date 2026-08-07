@@ -18,10 +18,10 @@ bun run test:telegram   # 真实 Telegram integration（需 .env，Phase 2+）
 | 场景 | 状态 | 最后结果 |
 |---|---|---|
 | GPG 签名提交 | ✅ | 2026-08-07 验证 good signature |
-| Bun × Pi SDK 兼容性 smoke | ⏳ Phase 1 | - |
+| Bun × Pi SDK 兼容性 smoke | ✅ | 2026-08-07 smoke-pi.ts 真实调用成功 |
 | Telegram ingestion/dedupe/restart | ✅ | 2026-08-07 bun test 12/12 + 真实群 e2e + restart 全通过 |
-| send terminating | ⏳ Phase 3 | - |
-| local assistant 不进群 | ⏳ Phase 3 | - |
+| send terminating | ✅ | 2026-08-07 e2e：成功 send 后无额外 provider 请求 |
+| local assistant 不进群 | ✅ | e2e：assistant_text/thinking 只进 agent_events |
 | TUI attach/detach | ⏳ Phase 4 | - |
 | deterministic routing property tests | ⏳ Phase 5 | - |
 | run_js sandbox isolation | ⏳ Phase 6 | - |

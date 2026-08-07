@@ -46,3 +46,12 @@
   - restart：offset 恢复，raw_updates 无重放，新消息正常落库 ✅
 - Cache impact: NONE
 - 下一步：Phase 3 Basic Agent（Pi session + 序列化 grammar + send tool + telemetry）；先做 personas 工具段适配
+
+## 2026-08-07 (5) — Phase 3 完成：Basic Agent
+
+- 做了：personas 工具段适配（send({message,reply_to,sticker}) schema、sticker 目录按需、gpt-researcher→search、/data 工作区→输出通道说明、<message id>→#id 格式）；src/agent/serialize.ts（cache grammar v1：日期分隔/HH:mm:ss/#id/@username 或 u<N> alias/↪引用/quote/媒体占位，确定性输出有测试锁定）；prompt.ts（persona+PROTOCOL 固定结构、CACHE_SCHEMA_VERSION=1、hash）；runtime.ts（BotRuntime：每 bot 一个 AgentSession、send tool terminate:true、reply_not_visible 校验、exposure 持久化、burst 合并（pendingTrigger）、agent_events + llm_runs 落库）；router.ts（mention/text_mention/reply 显式触发）
+- 测试：bun test 25/25 ✅；scripts/e2e-agent.ts 真实链路 ✅（合成 human 消息 → 序列化 → DeepSeek → send → 真实群消息 #18368 → transcript 落库 → telemetry）
+- 真实 cache 数据：run1 miss=5797（冷），run2 cache_read=6400/miss=74 —— append-only prefix 设计实测命中
+- 意外发现：send 失败（Telegram 拒绝 reply 不存在的合成消息）→ error 透传给 LLM → 模型按人设规则省略 reply_to 重试成功。终止语义验证：成功 send 后无第三次 provider 请求
+- Cache impact: INTENTIONAL（首次建立 system/tools prefix；grammar v1 被测试锁定）
+- 下一步：Phase 4 TUI（attach/detach + 历史 + 实时）
