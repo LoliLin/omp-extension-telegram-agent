@@ -46,7 +46,7 @@ bun run scripts/e2e-compaction.ts   # compaction e2e（需 .env）
 | local assistant 不进群 | ✅ | e2e：assistant_text/thinking 只进 agent_events |
 | TUI attach/detach | ✅ | 2026-08-07 screen 实测：attach 实时流/退出 daemon 存活/重进历史完整 |
 | deterministic routing property tests | ✅ | 2026-08-07 33/33 + 真实群双 bot 实况 |
-| run_js sandbox isolation | ✅ | 2026-08-07 46/46 + 真实 TinyFish 调用 |
+| run_js sandbox isolation | ✅ | 2026-08-07 REQ-SEC-0001 加固后 66/66（含逃逸回归向量）+ 真实 TinyFish 调用 |
 | vision lazy/cache | ✅ | 2026-08-07 真实群 sticker/photo 语义正确，双 bot file_id 映射 |
 | compaction（threshold→summary→epoch） | ✅ | 2026-08-07 e2e-compaction 强制触发，epoch 持久化+重启恢复 |
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |

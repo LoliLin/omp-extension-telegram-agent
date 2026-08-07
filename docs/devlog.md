@@ -132,3 +132,12 @@
 - 测试：纯文档，无代码改动
 - Cache impact: NONE
 - 下一步：用户审核 REQ（重点：REQ-SEC-0001 威胁模型拍板、REQ-CONF-0001 配置载体拍板）→ 按建议顺序开工
+
+## 2026-08-07 (14) — REQ-SEC-0001：run_js 沙箱加固
+
+- 做了：vm context 改 `Object.create(null)` + `codeGeneration: { strings: false, wasm: false }`，context 内零 host realm 对象（console/logs 由 bootstrap 脚本在 context 内创建，结果在 context 内 JSON.stringify 后以纯字符串带出，Promise 在 context 内挂 then、host 轮询取字符串）；spawn 改 `process.execPath` + `error` 监听（ENOENT 走结构化 ok:false）；child 加 `--smol`；`__RESULT__` marker 移除（wrapper 协议改单行 JSON：{ok, logs, result/error}，用户输出不再可能撞 framing）；Promise 返回值正常序列化（不再静默 "{}"）；architecture.md 新增威胁模型段（防到什么/残余风险/为什么可接受）
+- 为什么：review 实证 `console.log.constructor("return process")()` 逃逸可读 .env 全部 secret（群成员 prompt injection → daemon uid 任意代码）
+- 文件：src/tools/run-js.ts、test/runjs.test.ts、docs/architecture.md、docs/testing.md、docs/handoff.md
+- 测试：bun test 66/66 ✅ + bun run check ✅；7 个逃逸向量（constructor 链 ×5、new Function、eval）全部 ok:false；fs 读取尝试无一成功；spawn ENOENT 结构化报错；异步 microtask/内存膨胀 ~3s 内被打断（实测 Bun 下约等于 vm timeout），5s SIGKILL 兜底
+- Cache impact: NONE（tool schema/description/name 未动，toolsHash 不变）
+- 下一步：REQ-AGENT-0001（flush 状态机）

@@ -13,7 +13,8 @@ Phase 9 — Stabilization（长运行 smoke、error recovery、restart/reconnect
 
 ## 正在做
 
-- 文档体系已切换为 agent-kit 衍生版（根 AGENTS.md + docs/engineering/development-guide.md 为流程权威）；11 篇 REQ 已建（docs/requirements/README.md 有清单与建议顺序），**等用户审核后按 REQ 开工**
+- 文档体系已切换为 agent-kit 衍生版（根 AGENTS.md + docs/engineering/development-guide.md 为流程权威）；11 篇 REQ 已建（docs/requirements/README.md 有清单与建议顺序）
+- REQ-SEC-0001 已完成：run_js vm context 无任何 host realm 对象（codeGeneration 禁用 + 结果仅字符串跨界），spawn 用 process.execPath + error 监听，child --smol；逃逸回归测试全绿；威胁模型见 docs/architecture.md
 - Phase 9：长运行稳定性验证（daemon 长跑 + TUI 反复 attach/detach + restart + error recovery）
 
 ## 下一步（按序）
@@ -37,7 +38,7 @@ Bun 单进程 daemon 双 AgentSession；raw Bot API 长轮询；bun:sqlite；TUI
 
 ## 最后测试状态
 
-bun test 50/50 ✅；e2e-compaction ✅（epoch 2→3→4，重启恢复）；真实遥测 50 runs hit ratio 90.0%。见 docs/testing.md。
+bun test 66/66 ✅；e2e-compaction ✅（epoch 2→3→4，重启恢复）；真实遥测 50 runs hit ratio 90.0%。见 docs/testing.md。
 
 ## 已知问题
 
