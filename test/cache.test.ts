@@ -1,0 +1,48 @@
+// Cache regression test: golden hashes lock the cache-visible protocol (docs/cache.md).
+// If any of these fail, a change altered the provider-visible prefix:
+// - system prompt (persona + protocol block)  => bump CACHE_SCHEMA_VERSION, new epoch
+// - message serialization grammar             => same
+// UI-only changes must NOT affect these hashes.
+
+import { describe, expect, test } from "bun:test";
+
+// bun test forces UTC; the daemon serializes in local time. Pin the deployment TZ
+// before anything calls Date so the golden hash matches production behavior.
+process.env.TZ = "Asia/Singapore";
+
+import { Database } from "bun:sqlite";
+import { readFileSync } from "node:fs";
+import { serializeMessages, type MessageRow } from "../src/agent/serialize.ts";
+import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION } from "../src/agent/prompt.ts";
+
+const GOLDEN = {
+	schemaVersion: 1,
+	systemA: "c2d68946a3a6",
+	systemB: "e2d094446af3",
+	serialize: "68a17d6e5c05",
+};
+
+test("CACHE_SCHEMA_VERSION unchanged", () => {
+	expect(CACHE_SCHEMA_VERSION).toBe(GOLDEN.schemaVersion);
+});
+
+test("system prompts stable (persona + protocol)", () => {
+	const a = buildSystemPrompt(readFileSync("personas/xiaoxue.md", "utf8"));
+	const b = buildSystemPrompt(readFileSync("personas/xiaoyu.md", "utf8"));
+	expect(sha256Short(a)).toBe(GOLDEN.systemA);
+	expect(sha256Short(b)).toBe(GOLDEN.systemB);
+});
+
+test("message serialization grammar stable", () => {
+	const db = new Database(":memory:");
+	db.exec(readFileSync("src/db/schema.sql", "utf8"));
+	const ins = db.prepare(
+		`INSERT INTO messages (chat_id, message_id, date, thread_id, sender_id, display_name, username, sender_tag, sender_chat, is_bot, text, caption, entities, reply_to_message_id, quote, forward_origin, edit_date, media, first_seen_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	);
+	ins.run(-1004402809405, 100, 1754612345, null, 111, "Alice", "alice", null, null, 0, "这个实现是不是有问题？", null, null, null, null, null, null, null, "A");
+	ins.run(-1004402809405, 101, 1754612360, null, 222, "Bob", null, null, null, 0, "感觉是 API 抽风", null, null, 100, null, null, null, null, "A");
+	ins.run(-1004402809405, 102, 1754612380, null, 7776264871, "小雪", "hastuyuki_bot", null, null, 1, "应该保持 append-only", null, null, null, null, null, null, null, "A");
+	const rows = db.query("SELECT * FROM messages ORDER BY date").all() as MessageRow[];
+	const out = serializeMessages(db, rows, { visibleIds: new Set([100]) });
+	expect(sha256Short(out)).toBe(GOLDEN.serialize);
+});
