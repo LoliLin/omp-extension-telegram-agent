@@ -71,3 +71,11 @@
 - 真实遥测：A: 3 runs (cache_read 12928)；B: 3 runs (cache_read 16384)
 - Cache impact: NONE
 - 下一步：Phase 6 search (TinyFish) + run_js sandbox
+
+## 2026-08-07 (8) — Phase 6 完成：search + run_js
+
+- 做了：src/tools/search.ts（TinyFish GET api.search.tinyfish.ai?query=，X-API-Key，≤5 结果、snippet≤200 字）；src/tools/run-js.ts（child bun + node:vm 最小 context：无 process/require/Bun/fetch，空 env（仅 PATH），隔离 tmp cwd，5s kill，4KB 输出上限）；runtime 注册三工具，固定顺序 [send, search, run_js]
+- 文档研究：TinyFish 四端点（search/fetch 免费），endpoint 从官方 cookbook 确认
+- 测试：46/46 ✅（算术/JSON/regex/数组/语法错误/死循环超时 + typeof process|require|Bun|fetch 全 undefined + 真实 TinyFish 调用）
+- Cache impact: INTENTIONAL EPOCH CHANGE（toolsHash 94fa00c707dd → 7b1983d95e25，tool schema 从 1 个变 3 个；生产前最后一次预期变化）
+- 下一步：Phase 7 media（photo/sticker/lazy vision/cache）
