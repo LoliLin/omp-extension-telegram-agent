@@ -7,7 +7,7 @@
 
 - [x] [REQ-SEC-0001](REQ-SEC-0001.md) run_js 沙箱威胁模型与隔离加固（P0）（commit 3c6c348）
 - [x] [REQ-AGENT-0001](REQ-AGENT-0001.md) agent 触发/flush 生命周期串行状态机（P0）（commit a549335）
-- [ ] [REQ-TG-0001](REQ-TG-0001.md) Telegram ingestion 与 poller 可靠性（P1）
+- [x] [REQ-TG-0001](REQ-TG-0001.md) Telegram ingestion 与 poller 可靠性（P1）（commit a806e8d）
 - [ ] [REQ-IPC-0001](REQ-IPC-0001.md) IPC 与 TUI 健壮性（P1）
 - [ ] [REQ-OPS-0001](REQ-OPS-0001.md) 配置校验、进程管理与仓库卫生（P1）
 - [ ] [REQ-TEST-0001](REQ-TEST-0001.md) 测试体系修复（P2）
