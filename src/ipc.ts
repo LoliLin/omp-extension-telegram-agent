@@ -1,8 +1,13 @@
 // Local IPC between daemon (server) and TUI (client). Unix socket, JSONL frames.
 // Protocol:
 //   C->S {type:"hello"}                       S->C {type:"snapshot", items: TimelineItem[]}
-//   C->S {type:"history", beforeTs, limit}    S->C {type:"history", items, hasMore}
+//   C->S {type:"history", before, limit}      S->C {type:"history", items, hasMore}
 //   (push)                                    S->C {type:"append", item: TimelineItem}
+//
+// Pagination uses a composite cursor (ts, rank, id): rank 0 = agent event (id = agent_events.id),
+// rank 1 = chat message (id = message_id). Merged timeline order is by (ts, rank, id), so
+// same-second messages/events are never dropped or duplicated across pages (REQ-IPC-0001 R3).
+// Legacy clients sending only `beforeTs` keep the old strict `ts < beforeTs` semantics.
 
 export interface MsgItem {
 	kind: "msg";
@@ -23,6 +28,8 @@ export interface MsgItem {
 export interface EvtItem {
 	kind: "evt";
 	ts: number;
+	/** agent_events.id; absent on old daemons (dedupe falls back to key+payload). */
+	evtId?: number;
 	botId: string;
 	botName: string;
 	evtKind: string; // assistant_text|thinking|tool_call|tool_result|send|usage|...
@@ -31,9 +38,16 @@ export interface EvtItem {
 
 export type TimelineItem = MsgItem | EvtItem;
 
+/** Unified merged-timeline sort key: (ts, rank, id). */
+export interface TimelineCursor {
+	ts: number;
+	id: number;
+	rank: 0 | 1;
+}
+
 export type ClientRequest =
 	| { type: "hello" }
-	| { type: "history"; beforeTs: number; limit: number };
+	| { type: "history"; beforeTs?: number; before?: TimelineCursor; limit: number };
 
 export type ServerMessage =
 	| { type: "snapshot"; items: TimelineItem[] }
@@ -44,11 +58,30 @@ export function encodeFrame(msg: unknown): string {
 	return `${JSON.stringify(msg)}\n`;
 }
 
-/** Incremental JSONL decoder for a socket data stream. */
+/** Thrown when a client's receive buffer exceeds the bound; caller must disconnect. */
+export class FrameOverflowError extends Error {
+	constructor() {
+		super("ipc frame buffer overflow");
+	}
+}
+
+const DEFAULT_MAX_BUFFER = 4 * 1024 * 1024; // REQ-IPC-0001 R6
+
+/**
+ * Incremental JSONL decoder for a socket data stream. Holds ONE streaming TextDecoder:
+ * multi-byte characters split across chunk boundaries decode correctly instead of
+ * becoming U+FFFD (REQ-IPC-0001 R1). Buffered (complete) bytes are bounded; the decoder
+ * itself only ever retains an incomplete multi-byte tail (≤3 bytes).
+ */
 export class FrameDecoder {
+	private decoder = new TextDecoder();
 	private buf = "";
+
+	constructor(private maxBufferBytes: number = DEFAULT_MAX_BUFFER) {}
+
 	push(chunk: Uint8Array | string): unknown[] {
-		this.buf += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+		this.buf += typeof chunk === "string" ? chunk : this.decoder.decode(chunk, { stream: true });
+		if (this.buf.length > this.maxBufferBytes) throw new FrameOverflowError();
 		const out: unknown[] = [];
 		let idx: number;
 		while ((idx = this.buf.indexOf("\n")) >= 0) {

@@ -4,7 +4,8 @@
 import { ProcessTerminal, TuiAltScreen, ScrollView, Text, Container, VStack } from "@earendil-works/pi-tui";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { encodeFrame, FrameDecoder, type ServerMessage, type TimelineItem, type MsgItem, type EvtItem } from "../ipc.ts";
+import { encodeFrame, FrameDecoder, type ServerMessage, type TimelineItem, type MsgItem, type EvtItem, type TimelineCursor } from "../ipc.ts";
+import { sanitize } from "../sanitize.ts";
 
 const sockPath = join(process.cwd(), "data", "daemon.sock");
 if (!existsSync(sockPath)) {
@@ -38,49 +39,49 @@ function renderItem(item: TimelineItem): string {
 }
 
 function renderMsg(m: MsgItem): string {
-	const who = m.username ? `${m.senderName} · @${m.username}` : m.senderName;
+	const who = m.username ? `${sanitize(m.senderName)} · @${sanitize(m.username)}` : sanitize(m.senderName);
 	const color = m.botId === "A" ? MAGENTA : m.botId === "B" ? CYAN : GREEN;
 	const head = `${color}${BOLD}${who}${RESET}${DIM}  #${m.messageId}  ${fmtClock(m.ts)}${m.edited ? " (edited)" : ""}${RESET}`;
 	const lines: string[] = [head];
 	if (m.replyTo != null) lines.push(`${DIM}  ↪ #${m.replyTo}${RESET}`);
 	if (m.text) {
-		for (const l of m.text.split("\n")) lines.push(`  ${l}`);
+		for (const l of sanitize(m.text).split("\n")) lines.push(`  ${l}`);
 	}
 	if (m.mediaKind) {
-		lines.push(`${DIM}  [${m.mediaKind}${m.stickerEmoji ? " " + m.stickerEmoji : ""}]${RESET}`);
+		lines.push(`${DIM}  [${sanitize(m.mediaKind)}${m.stickerEmoji ? " " + sanitize(m.stickerEmoji) : ""}]${RESET}`);
 	}
 	return lines.join("\n");
 }
 
 function renderEvt(e: EvtItem): string {
-	const head = `${YELLOW}${e.botName} · LOCAL${RESET}${DIM}  ${fmtClock(e.ts)}${RESET}`;
+	const head = `${YELLOW}${sanitize(e.botName)} · LOCAL${RESET}${DIM}  ${fmtClock(e.ts)}${RESET}`;
 	let body = "";
 	try {
 		const p = JSON.parse(e.payload) as Record<string, unknown>;
 		switch (e.evtKind) {
 			case "thinking":
-				body = `${DIM}  thinking: ${String(p.text ?? "").slice(0, 400)}${RESET}`;
+				body = `${DIM}  thinking: ${sanitize(String(p.text ?? "")).slice(0, 400)}${RESET}`;
 				break;
 			case "assistant_text":
-				body = `${DIM}  ${String(p.text ?? "").slice(0, 400)}${RESET}`;
+				body = `${DIM}  ${sanitize(String(p.text ?? "")).slice(0, 400)}${RESET}`;
 				break;
 			case "tool_call": {
 				const args = p.args as Record<string, unknown> | undefined;
 				const brief =
 					p.tool === "send"
-						? `${args?.reply_to ? `reply #${args.reply_to} ` : ""}${args?.message ? `"${String(args.message).slice(0, 60)}"` : ""}${args?.sticker ? `sticker:${args.sticker}` : ""}`.trim()
-						: JSON.stringify(args ?? {}).slice(0, 80);
-				body = `  ${BOLD}${String(p.tool)}${RESET}  ${brief}`;
+						? `${args?.reply_to ? `reply #${args.reply_to} ` : ""}${args?.message ? `"${sanitize(String(args.message)).slice(0, 60)}"` : ""}${args?.sticker ? `sticker:${args.sticker}` : ""}`.trim()
+						: sanitize(JSON.stringify(args ?? {})).slice(0, 80);
+				body = `  ${BOLD}${sanitize(String(p.tool))}${RESET}  ${brief}`;
 				break;
 			}
 			case "tool_result":
-				body = `${DIM}  ${String(p.tool)} ${p.isError ? "✗ error" : "✓"}${RESET}`;
+				body = `${DIM}  ${sanitize(String(p.tool))} ${p.isError ? "✗ error" : "✓"}${RESET}`;
 				break;
 			case "send":
-				body = `  ${BOLD}send${RESET} ${DIM}${e.payload.slice(0, 100)}${RESET}`;
+				body = `  ${BOLD}send${RESET} ${DIM}${sanitize(e.payload).slice(0, 100)}${RESET}`;
 				break;
 			default:
-				body = `${DIM}  ${e.evtKind}: ${e.payload.slice(0, 120)}${RESET}`;
+				body = `${DIM}  ${e.evtKind}: ${sanitize(e.payload).slice(0, 120)}${RESET}`;
 		}
 	} catch {
 		body = `${DIM}  ${e.evtKind}${RESET}`;
@@ -103,10 +104,25 @@ tui.setLayoutRoot(root);
 tui.start();
 
 let lastDay = "";
+let topDayVal: string | null = null; // day of the oldest rendered item (for prepend separators)
 let oldestTs = Number.MAX_SAFE_INTEGER;
+let oldestCursor: TimelineCursor | null = null;
 let hasMore = true;
 let loadingOlder = false;
 let connected = false;
+// Snapshot/broadcast race dedupe (REQ-IPC-0001 R7): same item may arrive twice when a
+// broadcast lands while the snapshot is in flight (or across snapshot refreshes).
+const seenKeys = new Set<string>();
+
+function itemKey(item: TimelineItem): string {
+	if (item.kind === "msg") return `m:${item.chatId}:${item.messageId}`;
+	return item.evtId != null ? `e:${item.evtId}` : `e?:${item.botId}:${item.ts}:${item.evtKind}:${item.payload}`;
+}
+
+function cursorOf(item: TimelineItem): TimelineCursor | null {
+	if (item.kind === "msg") return { ts: item.ts, id: item.messageId, rank: 1 };
+	return item.evtId != null ? { ts: item.ts, id: item.evtId, rank: 0 } : null;
+}
 
 function setStatus(text: string): void {
 	status.setText(`${DIM}${text}${RESET}`);
@@ -114,6 +130,9 @@ function setStatus(text: string): void {
 }
 
 function appendItem(item: TimelineItem): void {
+	const key = itemKey(item);
+	if (seenKeys.has(key)) return;
+	seenKeys.add(key);
 	const day = fmtDay(item.ts);
 	if (day !== lastDay) {
 		transcript.addChild(new Text(`${DIM}--- ${day} ---${RESET}`, 1, 0));
@@ -121,22 +140,41 @@ function appendItem(item: TimelineItem): void {
 	}
 	transcript.addChild(new Text(renderItem(item), 1, 0));
 	transcript.addChild(new Text("", 0, 0));
-	if (item.ts < oldestTs) oldestTs = item.ts;
+	if (topDayVal == null) topDayVal = day;
+	if (item.ts < oldestTs) {
+		oldestTs = item.ts;
+		oldestCursor = cursorOf(item);
+	}
 	tui.requestRender();
 }
 
+/** Build the new leading children (ascending) with day separators (REQ-IPC-0001 R7). */
 function prependItems(items: TimelineItem[]): number {
 	if (items.length === 0) return 0;
 	const children = (transcript as unknown as { children: unknown[] }).children;
+	const lead: { item?: TimelineItem; sep?: string }[] = [];
+	for (let i = 0; i < items.length; i++) {
+		lead.push({ item: items[i] });
+		const next = i + 1 < items.length ? items[i + 1] : null;
+		const nextDay = next ? fmtDay(next.ts) : topDayVal;
+		if (nextDay != null && fmtDay(items[i].ts) !== nextDay) lead.push({ sep: fmtDay(items[i].ts) });
+	}
 	let added = 0;
 	const width = terminal.columns ?? 80;
-	for (const item of items) {
-		const comp = new Text(renderItem(item), 1, 0);
-		children.unshift(new Text("", 0, 0));
+	for (let i = lead.length - 1; i >= 0; i--) {
+		const entry = lead[i]!;
+		const comp = entry.sep
+			? new Text(`${DIM}--- ${entry.sep} ---${RESET}`, 1, 0)
+			: new Text(renderItem(entry.item!), 1, 0);
 		children.unshift(comp);
 		added += comp.render(width).length + 1;
 	}
-	if (items[0].ts < oldestTs) oldestTs = items[0].ts;
+	const oldestItem = items[0]!;
+	if (oldestItem.ts < oldestTs) {
+		oldestTs = oldestItem.ts;
+		oldestCursor = cursorOf(oldestItem);
+	}
+	topDayVal = fmtDay(oldestItem.ts);
 	return added;
 }
 
@@ -144,7 +182,10 @@ function requestOlder(): void {
 	if (loadingOlder || !hasMore || !connected) return;
 	loadingOlder = true;
 	setStatus("loading older...");
-	socket?.write(encodeFrame({ type: "history", beforeTs: oldestTs, limit: 100 }));
+	// Send both the composite cursor and the legacy beforeTs so an old daemon (strict ts<
+	// semantics) still pages correctly; a new daemon uses the cursor (same-second safe).
+	const cursor = oldestCursor ?? { ts: oldestTs, id: Number.MAX_SAFE_INTEGER, rank: 1 };
+	socket?.write(encodeFrame({ type: "history", beforeTs: oldestTs, before: cursor, limit: 100 }));
 }
 
 let socket: { write: (d: string) => void; end: () => void } | null = null;
@@ -167,8 +208,10 @@ await Bun.connect({
 					for (const item of msg.items) appendItem(item);
 					setStatus(`connected · ${msg.items.length} items · q 退出 · 滚到顶部加载更早消息`);
 				} else if (msg.type === "history") {
+					const fresh = msg.items.filter((it) => !seenKeys.has(itemKey(it)));
+					for (const it of fresh) seenKeys.add(itemKey(it));
 					const oldTop = scroll.scrollTop;
-					const added = prependItems(msg.items);
+					const added = prependItems(fresh);
 					hasMore = msg.hasMore;
 					loadingOlder = false;
 					scroll.scrollTo(oldTop + added);

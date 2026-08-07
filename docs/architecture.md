@@ -71,11 +71,16 @@
 
 - 见 docs/data-model.md。WAL 模式，直接 SQL
 
-## TUI（Phase 4）
+## TUI（Phase 4，REQ-IPC-0001 加固）
 
 - `@earendil-works/pi-tui`：`TuiAltScreen` + `ScrollView(follow:"end")` + transcript Container
 - 每条群消息一个组件；bot 内部行为以 `Bot X · LOCAL` 标记
 - IPC：Unix socket JSONL，daemon 为 server；协议 = hello / history 分页拉取 / event 订阅
+- **传输层**：FrameDecoder 持单个 streaming TextDecoder（多字节字符跨 chunk 不腐蚀）；接收缓冲 4MB 上限，超限断开；socket.write <0 即踢连接，出站队列 1MB 上限，超限断开（TUI 挂起时 daemon 内存有界）
+- **分页**：merged timeline 统一排序键 (ts, rank, id)（rank 0=agent 事件，1=群消息），history 用复合游标，同秒多条消息不丢不重；旧客户端只发 beforeTs 时保持严格 `ts<` 语义（双向兼容，新客户端同时发送两字段）
+- **本机暴露面**：socket 文件 chmod 600；history limit 服务端夹取 [1,500]
+- **终端注入防护**：渲染前 strip ANSI/OSC/DCS 转义与控制字符（保留 \n/\t），群消息无法清屏/改色/写剪贴板（OSC 52）
+- **竞态去重**：snapshot 与 broadcast 重复条目按 (chatId,messageId)/(evtId) 去重；翻页补日期分隔线
 
 ## Vision（Phase 7）
 

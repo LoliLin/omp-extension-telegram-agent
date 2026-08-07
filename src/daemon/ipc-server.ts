@@ -1,50 +1,35 @@
 // IPC server inside the daemon: serves snapshots/history from SQLite and broadcasts live items.
 
 import type { Database } from "bun:sqlite";
-import { rmSync, existsSync } from "node:fs";
-import type { TimelineItem, MsgItem, EvtItem, ClientRequest, ServerMessage } from "../ipc.ts";
-import { encodeFrame, FrameDecoder } from "../ipc.ts";
+import { rmSync, existsSync, chmodSync } from "node:fs";
+import type { TimelineItem, MsgItem, EvtItem, ClientRequest, ServerMessage, TimelineCursor } from "../ipc.ts";
+import { encodeFrame, FrameDecoder, FrameOverflowError } from "../ipc.ts";
 import type { MessageRow } from "../agent/serialize.ts";
 
 const SNAPSHOT_LIMIT = 100;
 const HISTORY_LIMIT = 100;
+const HISTORY_LIMIT_MAX = 500; // REQ-IPC-0001 R4: server-side clamp
+const QUEUE_MAX_BYTES = 1024 * 1024; // R2: outbound queue bound; overflow kicks the listener
+
+interface SocketLike {
+	write: (d: string | Uint8Array, byteOffset?: number) => number;
+	end: () => void;
+}
+
+interface OutQueue {
+	chunks: Uint8Array[];
+	total: number;
+}
 
 export class IpcServer {
 	private db: Database;
 	private sockPath: string;
 	private botNames: Map<string, string>;
 	private botUserIds: Map<string, number>;
-	private listeners = new Set<{ write: (d: string | Uint8Array, byteOffset?: number) => number }>();
+	private listeners = new Set<SocketLike>();
 	private decoders = new WeakMap<object, FrameDecoder>();
-	private outQueues = new WeakMap<object, Uint8Array[]>();
+	private outQueues = new WeakMap<object, OutQueue>();
 	private encoder = new TextEncoder();
-
-	/** Bun socket.write is unbuffered, byte-oriented, and may accept only part of a frame; queue the rest for drain. */
-	private writeFrame(socket: { write: (d: string | Uint8Array, byteOffset?: number) => number }, frame: string): void {
-		const bytes = this.encoder.encode(frame);
-		const queue = this.outQueues.get(socket) ?? [];
-		if (queue.length > 0) {
-			queue.push(bytes);
-			return;
-		}
-		const n = socket.write(bytes);
-		if (n < bytes.length) queue.push(bytes.subarray(n));
-		this.outQueues.set(socket, queue);
-	}
-
-	private flushQueue(socket: { write: (d: string | Uint8Array, byteOffset?: number) => number }): void {
-		const queue = this.outQueues.get(socket);
-		if (!queue) return;
-		while (queue.length > 0) {
-			const head = queue[0];
-			const n = socket.write(head);
-			if (n < head.length) {
-				queue[0] = head.subarray(n);
-				return;
-			}
-			queue.shift();
-		}
-	}
 	private server: ReturnType<typeof Bun.listen> | null = null;
 
 	constructor(db: Database, sockPath: string, botNames: Map<string, string>, botUserIds: Map<string, number>) {
@@ -52,6 +37,68 @@ export class IpcServer {
 		this.sockPath = sockPath;
 		this.botNames = botNames;
 		this.botUserIds = botUserIds;
+	}
+
+	/** Remove a listener: drop its queue and close the socket. Idempotent. */
+	private kick(socket: SocketLike, reason: string): void {
+		if (!this.listeners.has(socket)) return;
+		console.warn(`[ipc] disconnecting listener: ${reason}`);
+		this.listeners.delete(socket);
+		this.decoders.delete(socket);
+		this.outQueues.delete(socket);
+		try {
+			socket.end();
+		} catch {
+			// already closed
+		}
+	}
+
+	/**
+	 * Bun socket.write is unbuffered, byte-oriented, and may accept only part of a frame;
+	 * queue the rest for drain. A negative return means the socket is closed — dropping the
+	 * frame silently would wedge the queue forever (subarray(-1) bug), so we kick the listener.
+	 * The queue is bounded: a stalled listener (Ctrl+Z'd TUI) gets disconnected instead of
+	 * growing daemon memory unboundedly.
+	 */
+	private writeFrame(socket: SocketLike, frame: string): void {
+		const bytes = this.encoder.encode(frame);
+		const queue = this.outQueues.get(socket) ?? { chunks: [], total: 0 };
+		if (queue.chunks.length > 0) {
+			queue.chunks.push(bytes);
+			queue.total += bytes.length;
+			if (queue.total > QUEUE_MAX_BYTES) this.kick(socket, "outbound queue overflow");
+			return;
+		}
+		const n = socket.write(bytes);
+		if (n < 0) {
+			this.kick(socket, "socket write failed");
+			return;
+		}
+		if (n < bytes.length) {
+			queue.chunks.push(bytes.subarray(n));
+			queue.total = bytes.length - n;
+		}
+		this.outQueues.set(socket, queue);
+	}
+
+	private flushQueue(socket: SocketLike): void {
+		const queue = this.outQueues.get(socket);
+		if (!queue) return;
+		while (queue.chunks.length > 0) {
+			const head = queue.chunks[0];
+			const n = socket.write(head);
+			if (n < 0) {
+				this.kick(socket, "socket write failed during drain");
+				return;
+			}
+			if (n < head.length) {
+				queue.chunks[0] = head.subarray(n);
+				queue.total -= n;
+				return;
+			}
+			queue.total -= head.length;
+			queue.chunks.shift();
+		}
 	}
 
 	start(): void {
@@ -63,7 +110,7 @@ export class IpcServer {
 					console.log("[ipc] client connected");
 					this.listeners.add(socket);
 					this.decoders.set(socket, new FrameDecoder());
-					this.outQueues.set(socket, []);
+					this.outQueues.set(socket, { chunks: [], total: 0 });
 				},
 				data: (socket, chunk) => {
 					try {
@@ -73,6 +120,10 @@ export class IpcServer {
 							this.handleRequest(socket, frame as ClientRequest);
 						}
 					} catch (err) {
+						if (err instanceof FrameOverflowError) {
+							this.kick(socket, "receive buffer overflow");
+							return;
+						}
 						console.error(`[ipc] request handling error: ${err}`);
 					}
 				},
@@ -81,12 +132,16 @@ export class IpcServer {
 				},
 				close: (socket) => {
 					this.listeners.delete(socket);
+					this.outQueues.delete(socket);
+					this.decoders.delete(socket);
 				},
 				error: (_socket, err) => {
 					console.error(`[ipc] socket error: ${err}`);
 				},
 			},
 		});
+		// Local socket is unauthenticated: restrict to the daemon's owner (REQ-IPC-0001 R4).
+		chmodSync(this.sockPath, 0o600);
 		console.log(`[ipc] listening on ${this.sockPath}`);
 	}
 
@@ -102,30 +157,56 @@ export class IpcServer {
 		for (const socket of this.listeners) this.writeFrame(socket, frame);
 	}
 
-	private handleRequest(socket: { write: (d: string | Uint8Array, byteOffset?: number) => number }, req: ClientRequest): void {
+	private handleRequest(socket: SocketLike, req: ClientRequest): void {
 		if (req.type === "hello") {
-			const frame = encodeFrame({ type: "snapshot", items: this.loadTimeline(Number.MAX_SAFE_INTEGER, SNAPSHOT_LIMIT) } satisfies ServerMessage);
+			const frame = encodeFrame({ type: "snapshot", items: this.loadTimeline(null, SNAPSHOT_LIMIT) } satisfies ServerMessage);
 			this.writeFrame(socket, frame);
 		} else if (req.type === "history") {
-			const items = this.loadTimeline(req.beforeTs, req.limit ?? HISTORY_LIMIT);
-			this.writeFrame(socket, encodeFrame({ type: "history", items, hasMore: items.length >= (req.limit ?? HISTORY_LIMIT) } satisfies ServerMessage));
+			// R4: clamp the limit server-side; a crafted 1e9 must not read the whole table.
+			const limit = Math.min(Math.max(1, Math.floor(req.limit) || HISTORY_LIMIT), HISTORY_LIMIT_MAX);
+			// Composite cursor when provided; legacy beforeTs keeps strict ts< semantics (id=0/rank=0
+			// makes both per-table queries strict), so old clients page exactly as before (R3 compat).
+			const cursor: TimelineCursor | null =
+				req.before ??
+				(req.beforeTs != null ? { ts: req.beforeTs, id: 0, rank: 0 } : null);
+			const items = this.loadTimeline(cursor, limit);
+			this.writeFrame(
+				socket,
+				encodeFrame({ type: "history", items, hasMore: items.length >= limit } satisfies ServerMessage),
+			);
 		}
 	}
 
-	/** Merged timeline (messages + agent events) older than beforeTs, ascending. */
-	private loadTimeline(beforeTs: number, limit: number): TimelineItem[] {
+	/**
+	 * Merged timeline (messages + agent events) strictly before `cursor` (or the newest items
+	 * when cursor is null), ascending. Order key is (ts, rank, id): rank 0 = events, 1 = messages.
+	 * Each table is queried with the cursor bound and its newest `limit` rows taken; the union's
+	 * newest `limit` must lie within them, so the merge is lossless (R3).
+	 */
+	private loadTimeline(cursor: TimelineCursor | null, limit: number): TimelineItem[] {
+		const ts = cursor?.ts ?? Number.MAX_SAFE_INTEGER;
+		const id = cursor?.id ?? Number.MAX_SAFE_INTEGER;
+		const rank = cursor?.rank ?? 1;
 		const msgs = this.db
-			.query("SELECT * FROM messages WHERE date * 1000 < ? ORDER BY date DESC, message_id DESC LIMIT ?")
-			.all(Math.ceil(beforeTs), limit) as MessageRow[];
+			.query(
+				`SELECT * FROM messages
+				 WHERE (date * 1000 < ?1) OR (?2 = 1 AND date * 1000 = ?1 AND message_id < ?3)
+				 ORDER BY date DESC, message_id DESC LIMIT ?4`,
+			)
+			.all(ts, rank, id, limit) as MessageRow[];
 		const evts = this.db
-			.query("SELECT * FROM agent_events WHERE ts < ? ORDER BY ts DESC LIMIT ?")
-			.all(beforeTs, limit) as { bot_id: string; ts: number; kind: string; payload: string }[];
+			.query(
+				`SELECT * FROM agent_events
+				 WHERE (ts < ?1) OR (?2 = 0 AND ts = ?1 AND id < ?3) OR (?2 = 1 AND ts = ?1)
+				 ORDER BY ts DESC, id DESC LIMIT ?4`,
+			)
+			.all(ts, rank, id, limit) as { id: number; bot_id: string; ts: number; kind: string; payload: string }[];
 
 		const items: TimelineItem[] = [
 			...msgs.map((m) => this.msgToItem(m)),
 			...evts.map((e) => this.evtToItem(e)),
 		];
-		items.sort((a, b) => a.ts - b.ts);
+		items.sort((a, b) => keyOf(a) - keyOf(b) || rankOf(a) - rankOf(b) || idOf(a) - idOf(b));
 		return items.slice(-limit);
 	}
 
@@ -160,7 +241,25 @@ export class IpcServer {
 		};
 	}
 
-	evtToItem(e: { bot_id: string; ts: number; kind: string; payload: string }): EvtItem {
-		return { kind: "evt", ts: e.ts, botId: e.bot_id, botName: this.botNames.get(e.bot_id) ?? e.bot_id, evtKind: e.kind, payload: e.payload };
+	evtToItem(e: { id: number; bot_id: string; ts: number; kind: string; payload: string }): EvtItem {
+		return {
+			kind: "evt",
+			ts: e.ts,
+			evtId: e.id,
+			botId: e.bot_id,
+			botName: this.botNames.get(e.bot_id) ?? e.bot_id,
+			evtKind: e.kind,
+			payload: e.payload,
+		};
 	}
+}
+
+function keyOf(i: TimelineItem): number {
+	return i.ts;
+}
+function rankOf(i: TimelineItem): number {
+	return i.kind === "evt" ? 0 : 1;
+}
+function idOf(i: TimelineItem): number {
+	return i.kind === "evt" ? (i.evtId ?? 0) : i.messageId;
 }
