@@ -69,4 +69,5 @@ bot、model、provider、timestamp、context epoch、context tokens、cache read
 
 - 2026-08-07（50 runs，bots A/B，DeepSeek deepseek-v4-flash）：cache read 734,208 / miss 81,659，**hit ratio 90.0%**；典型 turn read≈14.7K miss≈1.6K，估算 $0.00038/turn
 - 2026-08-07 e2e-compaction：`compaction_threshold=1500` 强制两轮触发，compaction → epoch 2→3→4 持久化、exposure 重置、摘要调用成功；重启后 epoch=4 恢复
-- cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=1、systemA/B hash、serialize hash 锁定；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
+- cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=1、systemA/B hash、serialize hash、**tools hash（含顺序）、compaction summary prompt hash** 全部锁定（REQ-TEST-0001 R2 补全）；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
+- 分析脚本（REQ-TEST-0001 R5）：llm_runs 的 epoch/compaction 列与 >30% context 回落都被视为真实 compaction 并同步模拟 context；60 runs 回放识别 3 次真实 compaction（e2e 遗留 epoch 1→4），幻影触发 0

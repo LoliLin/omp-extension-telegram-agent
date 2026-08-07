@@ -31,6 +31,23 @@ export function buildSystemPrompt(personaText: string): string {
 	return `${personaText.trim()}\n${PROTOCOL}`;
 }
 
+/**
+ * Chat-oriented compaction summary prompt (state, not replay). Part of the cache-visible
+ * protocol: the summary grammar lives at the boundary of a new epoch, so its prompt is
+ * hashed by the golden test (REQ-TEST-0001 R2).
+ */
+export const COMPACTION_SUMMARY_PROMPT = `你在为一个长期住在 Telegram 群里的 AI 群友压缩记忆。把被压缩的群聊历史总结成"状态"而不是逐条复述，供它之后延续人设和上下文。
+
+保留：
+- 重要人物关系、称呼和互动模式
+- 已知稳定事实和长期话题
+- 正在讨论的问题、结论和争议点
+- 承诺和未解决事项
+- 必要的消息引用（#消息id）
+- 这个人设真正会关心的信息
+
+输出中文，分段，直接给摘要正文，控制在 800 字以内。`;
+
 export function sha256Short(text: string): string {
 	return createHash("sha256").update(text).digest("hex").slice(0, 12);
 }

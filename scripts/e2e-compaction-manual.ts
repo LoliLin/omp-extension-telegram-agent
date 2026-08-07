@@ -20,16 +20,21 @@ const rt = new BotRuntime(db, config.bots[0], config, modelRuntime);
 await rt.init();
 const session = (rt as unknown as { session: { compact: () => Promise<{ summary: string }> } }).session;
 
-console.log("epoch before:", getBotState(db, "A", "context_epoch"));
+const epochBefore = Number(getBotState(db, "A", "context_epoch") ?? "1");
+console.log("epoch before:", epochBefore);
 const result = await session.compact();
 console.log("summary chars:", result.summary.length);
-console.log("epoch after:", getBotState(db, "A", "context_epoch"));
-console.log("exposed after:", getBotState(db, "A", "exposed_ids"));
-console.log(
-	"last compaction event:",
-	JSON.stringify(db.query("SELECT payload FROM agent_events WHERE kind = 'compaction' ORDER BY ts DESC LIMIT 1").all()),
-);
-const errors = db.query("SELECT payload FROM agent_events WHERE kind = 'error' AND ts > ?").all(Date.now() - 120_000);
-console.log("recent error events:", JSON.stringify(errors));
+const epochAfter = Number(getBotState(db, "A", "context_epoch") ?? "1");
+console.log("epoch after:", epochAfter);
+if (epochAfter <= epochBefore) {
+	console.error(`FAIL: epoch did not advance (${epochBefore} -> ${epochAfter})`);
+	process.exit(1);
+}
+const errs = db.query("SELECT payload FROM agent_events WHERE kind = 'error' AND ts > ?").all(Date.now() - 120_000) as { payload: string }[];
+if (errs.length > 0) {
+	console.error("FAIL: unexpected error events:", JSON.stringify(errs));
+	process.exit(1);
+}
+console.log("PASS: compaction_end success path verified (epoch", epochBefore, "->", epochAfter, ")");
 await rt.stop();
 process.exit(0);

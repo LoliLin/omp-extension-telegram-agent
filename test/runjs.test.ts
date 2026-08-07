@@ -95,6 +95,19 @@ describe("run_js normal computation", () => {
 		expect(r.ok).toBe(true);
 		expect(r.output.length).toBeLessThanOrEqual(4096 + 20); // cap + truncation suffix
 	});
+
+	test("REQ-TEST-0001 R6: oversized code is rejected before spawning", async () => {
+		const r = await runJs("1 + 1\n" + "// pad\n".repeat(5000));
+		expect(r.ok).toBe(false);
+		expect(r.output).toContain("code too large");
+		expect(r.durationMs).toBeLessThan(1000); // rejected synchronously, no child spawn
+	});
+
+	test("REQ-TEST-0001 R6: runtime exception path is a structured failure", async () => {
+		const r = await runJs("throw new Error('kaboom-runtime')");
+		expect(r.ok).toBe(false);
+		expect(r.output).toContain("kaboom-runtime");
+	});
 });
 
 describe("run_js host isolation", () => {
@@ -171,7 +184,18 @@ describe("run_js escape regression", () => {
 	});
 });
 
-describe("tinyfish search (real api)", () => {
+// REQ-TEST-0001 R1: the real TinyFish API call must NOT run as part of `bun test` — unit
+// tests are offline. It moves behind an env gate: without a usable .env the suite is skipped
+// with a hint (offline / no-key environments stay green).
+let hasKey = false;
+try {
+	hasKey = (loadConfig(process.cwd()).tinyfishApiKey ?? "") !== "";
+} catch {
+	hasKey = false;
+}
+if (!hasKey) console.warn("[runjs.test] no tiny_fish_api_key (.env): real-api tinyfish tests skipped (REQ-TEST-0001 R1)");
+
+describe.skipIf(!hasKey)("tinyfish search (real api)", () => {
 	test("returns trimmed results", async () => {
 		const config = loadConfig(process.cwd());
 		const hits = await tinyFishSearch(config.tinyfishApiKey, "telegram bot api sendSticker");

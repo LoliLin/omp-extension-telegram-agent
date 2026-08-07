@@ -13,13 +13,16 @@ process.env.TZ = "Asia/Singapore";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { serializeMessages, type MessageRow } from "../src/agent/serialize.ts";
-import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION } from "../src/agent/prompt.ts";
+import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT } from "../src/agent/prompt.ts";
+import { toolsHash } from "../src/agent/tools.ts";
 
 const GOLDEN = {
 	schemaVersion: 1,
 	systemA: "c2d68946a3a6",
 	systemB: "e2d094446af3",
 	serialize: "68a17d6e5c05",
+	tools: "7b1983d95e25",
+	compactionPrompt: "045a5241fdd7",
 };
 
 test("CACHE_SCHEMA_VERSION unchanged", () => {
@@ -45,4 +48,12 @@ test("message serialization grammar stable", () => {
 	const rows = db.query("SELECT * FROM messages ORDER BY date").all() as MessageRow[];
 	const out = serializeMessages(db, rows, { visibleIds: new Set([100]) });
 	expect(sha256Short(out)).toBe(GOLDEN.serialize);
+});
+
+test("tool schema + order stable (REQ-TEST-0001 R2)", () => {
+	expect(toolsHash()).toBe(GOLDEN.tools);
+});
+
+test("compaction summary prompt grammar stable (REQ-TEST-0001 R2)", () => {
+	expect(sha256Short(COMPACTION_SUMMARY_PROMPT)).toBe(GOLDEN.compactionPrompt);
 });

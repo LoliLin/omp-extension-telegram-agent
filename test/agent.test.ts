@@ -93,6 +93,57 @@ describe("serializeMessages", () => {
 		const b = serializeMessages(db, [row(107)], { visibleIds: new Set() });
 		expect(a).toBe(b);
 	});
+
+	test("REQ-TEST-0001 R6: vision description replaces the placeholder when cached", () => {
+		insertMsg({
+			message_id: 108,
+			text: null,
+			media: JSON.stringify({ kind: "sticker", sticker_emoji: "😺", file_unique_id: "uq-vision-1" }),
+		});
+		insertMsg({
+			message_id: 109,
+			text: null,
+			media: JSON.stringify({ kind: "photo", file_unique_id: "uq-vision-2" }),
+		});
+		db.query("INSERT INTO media (file_unique_id, kind, vision) VALUES (?, 'sticker', ?)").run(
+			"uq-vision-1",
+			JSON.stringify({ model: "m", kind: "sticker", text: "得意的赞同，smug", at: 1 }),
+		);
+		db.query("INSERT INTO media (file_unique_id, kind, vision) VALUES (?, 'photo', ?)").run(
+			"uq-vision-2",
+			JSON.stringify({ model: "m", kind: "photo", text: "终端截图，含 todo 清单", at: 1 }),
+		);
+		const out = serializeMessages(db, [row(108), row(109)], { visibleIds: new Set() });
+		expect(out).toContain("[sticker 😺: 得意的赞同，smug]");
+		expect(out).toContain("[图片: 终端截图，含 todo 清单]");
+	});
+
+	test("REQ-TEST-0001 R6: edited marker and text+media combination", () => {
+		insertMsg({
+			message_id: 110,
+			edit_date: 1754612400,
+			text: "改过的正文",
+			media: JSON.stringify({ kind: "photo", file_unique_id: "uq-x" }),
+		});
+		const out = serializeMessages(db, [row(110)], { visibleIds: new Set() });
+		expect(out).toContain("改过的正文");
+		expect(out).toContain(" [图片]"); // placeholder appended after text
+		expect(out.trimEnd().endsWith("(edited)")).toBe(true);
+	});
+
+	test("REQ-TEST-0001 R6: cross-day messages get a date separator between them", () => {
+		insertMsg({ message_id: 111, date: 1754612345, text: "day one" });
+		insertMsg({ message_id: 112, date: 1754700000, text: "day two" });
+		const out = serializeMessages(db, [row(111), row(112)], { visibleIds: new Set() });
+		const d1 = new Date(1754612345 * 1000);
+		const d2 = new Date(1754700000 * 1000);
+		const p = (n: number) => String(n).padStart(2, "0");
+		const day1 = `${d1.getFullYear()}-${p(d1.getMonth() + 1)}-${p(d1.getDate())}`;
+		const day2 = `${d2.getFullYear()}-${p(d2.getMonth() + 1)}-${p(d2.getDate())}`;
+		expect(day1).not.toBe(day2);
+		expect(out).toContain(`--- ${day1} ---\n`);
+		expect(out).toContain(`--- ${day2} ---\n`);
+	});
 });
 
 describe("explicitTrigger", () => {

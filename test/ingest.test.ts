@@ -126,6 +126,31 @@ describe("ingestUpdate", () => {
 		expect(row.first_seen_by).toBe("edit-unknown");
 	});
 
+	test("REQ-TEST-0001 R6: forward_origin is captured", () => {
+		const origin = { type: "user", sender_user: { id: 999, first_name: "远方的朋友" } };
+		ingestUpdate(db, "A", makeUpdate(60, makeMessage({ text: "转发的", forward_origin: origin })), GROUP);
+		const row = db.query("SELECT forward_origin FROM messages WHERE message_id = 100").get() as { forward_origin: string | null };
+		expect(JSON.parse(row.forward_origin!)).toEqual(origin);
+	});
+
+	test("REQ-TEST-0001 R6: sender_chat (channel-as-sender) is captured with display title", () => {
+		const senderChat = { id: -1001234567890, type: "channel", title: "某频道" };
+		ingestUpdate(
+			db,
+			"A",
+			makeUpdate(61, makeMessage({ from: undefined, sender_chat: senderChat, text: "来自频道" })),
+			GROUP,
+		);
+		const row = db.query("SELECT sender_id, display_name, sender_chat FROM messages WHERE message_id = 100").get() as {
+			sender_id: number | null;
+			display_name: string | null;
+			sender_chat: string | null;
+		};
+		expect(row.sender_id).toBe(-1001234567890);
+		expect(row.display_name).toBe("某频道");
+		expect(JSON.parse(row.sender_chat!)).toEqual(senderChat);
+	});
+
 	test("reply relation and quote are captured", () => {
 		const m = makeMessage({
 			message_id: 101,

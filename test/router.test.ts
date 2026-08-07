@@ -112,4 +112,17 @@ describe("routeMessage", () => {
 			expect(routeMessage(db, row({ message_id: id }), bots, { secret: SECRET, pA: 0, pB: 0 })).toBe("nobody");
 		}
 	});
+
+	test("REQ-TEST-0001 AC3: bot messages never trigger, even with mention and p=1", () => {
+		const botMsg = row({
+			message_id: 500,
+			is_bot: 1,
+			text: "@hastuyuki_bot 你好吗",
+			entities: JSON.stringify([{ type: "mention", offset: 0, length: 14 }]),
+		});
+		expect(routeMessage(db, botMsg, bots, { secret: SECRET, pA: 1, pB: 0 })).toBe("nobody");
+		// reply-to-bot path also dead for bot senders
+		const botReply = row({ message_id: 501, is_bot: 1, reply_to_message_id: 100 });
+		expect(routeMessage(db, botReply, bots, { secret: SECRET, pA: 1, pB: 0 })).toBe("nobody");
+	});
 });

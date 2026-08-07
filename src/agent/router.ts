@@ -63,8 +63,11 @@ export interface RoutingConfig {
 	pB: number; // probability for bot B
 }
 
-/** Full routing decision for one human group message. */
+/** Full routing decision for one group message. */
 export function routeMessage(db: Database, row: MessageRow, bots: [BotIdentity, BotIdentity], config: RoutingConfig): TriggerTarget {
+	// Bot messages are observed history, never triggers — single authority point (REQ-TEST-0001
+	// R3): a caller forgetting the is_bot pre-check cannot introduce bot↔bot trigger loops.
+	if (row.is_bot) return "nobody";
 	for (const bot of bots) {
 		if (explicitTrigger(db, row, bot)) return bot.id;
 	}

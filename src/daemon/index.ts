@@ -80,7 +80,7 @@ function route(result: { chatId?: number; messageId?: number }): void {
 	const row = db
 		.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
 		.get(result.chatId, result.messageId) as MessageRow | null;
-	if (!row || row.is_bot) return; // bot messages are observed history, never triggers
+	if (!row) return; // missing row; is_bot is enforced inside routeMessage (REQ-TEST-0001 R3)
 	const target = routeMessage(db, row, [identities[0], identities[1]], {
 		secret: config.routerSecret ?? "",
 		pA: config.routingPA,

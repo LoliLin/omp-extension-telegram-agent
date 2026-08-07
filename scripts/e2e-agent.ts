@@ -29,26 +29,24 @@ const rt = new BotRuntime(db, config.bots[0], config, modelRuntime);
 await rt.init();
 
 console.log("[e2e] triggering bot A...");
+const runsBefore = (db.query("SELECT COUNT(*) c FROM llm_runs WHERE bot_id = 'A'").get() as { c: number }).c;
+const sendsBefore = (db.query("SELECT COUNT(*) c FROM agent_events WHERE bot_id = 'A' AND kind = 'send'").get() as { c: number }).c;
 rt.trigger();
 
-// wait until the run settles (poll llm_runs / agent_events)
-const deadline = Date.now() + 120_000;
 let settled = false;
+let ranOnce = false;
+
+// wait until the run settles (poll llm_runs / agent_events; counts are deltas against the
+// pre-trigger baseline so historical runs never satisfy the assertion)
+const deadline = Date.now() + 120_000;
 while (Date.now() < deadline) {
-	const send = db
-		.query("SELECT payload FROM agent_events WHERE bot_id = 'A' AND kind = 'send' ORDER BY id DESC LIMIT 1")
-		.get() as { payload: string } | null;
-	if (send) {
-		console.log("[e2e] SEND happened:", send.payload);
-		settled = true;
-		break;
-	}
 	const usage = db.query("SELECT COUNT(*) c FROM llm_runs WHERE bot_id = 'A'").get() as { c: number };
-	if (usage.c > 0) {
+	if (usage.c > runsBefore) {
+		ranOnce = true;
 		// give the run a moment to potentially call send after first llm response
 		await new Promise((r) => setTimeout(r, 5000));
 		const send2 = db.query("SELECT COUNT(*) c FROM agent_events WHERE bot_id = 'A' AND kind = 'send'").get() as { c: number };
-		if (send2.c > 0) {
+		if (send2.c > sendsBefore) {
 			settled = true;
 			break;
 		}
@@ -67,5 +65,11 @@ console.log("[e2e] latest bot message in transcript:", JSON.stringify(sent));
 
 await rt.stop();
 db.close();
-console.log(settled ? "[e2e] PASS (send verified)" : "[e2e] DONE (no send; check events above)");
+// REQ-TEST-0001 R4: exit code reflects the result — a run that never happened (or an
+// exception path) must not silently pass.
+if (!settled && !ranOnce) {
+	console.error("[e2e] FAIL: no agent run completed within 120s (DeepSeek error or wiring broken)");
+	process.exit(1);
+}
+console.log(settled ? "[e2e] PASS (send verified)" : "[e2e] DONE (run completed, model chose silence; check events above)");
 process.exit(0);

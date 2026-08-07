@@ -23,7 +23,8 @@ import { getBotState, setBotState } from "../db/db.ts";
 import { BotApi } from "../telegram/api.ts";
 import { insertSentMessage } from "../telegram/ingest.ts";
 import { serializeMessages, type MessageRow } from "./serialize.ts";
-import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION } from "./prompt.ts";
+import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT } from "./prompt.ts";
+import { TOOL_DEFS, toolsHash, type SendParams } from "./tools.ts";
 import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
 import { ensureVision, fileIdForBot } from "../media/vision.ts";
@@ -31,25 +32,6 @@ import { ensureVision, fileIdForBot } from "../media/vision.ts";
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
 const EXPOSED_KEY = "exposed_ids";
 const EPOCH_KEY = "context_epoch";
-
-// Chat-oriented compaction summary prompt (state, not replay). Part of cache protocol.
-const COMPACTION_SUMMARY_PROMPT = `你在为一个长期住在 Telegram 群里的 AI 群友压缩记忆。把被压缩的群聊历史总结成"状态"而不是逐条复述，供它之后延续人设和上下文。
-
-保留：
-- 重要人物关系、称呼和互动模式
-- 已知稳定事实和长期话题
-- 正在讨论的问题、结论和争议点
-- 承诺和未解决事项
-- 必要的消息引用（#消息id）
-- 这个人设真正会关心的信息
-
-输出中文，分段，直接给摘要正文，控制在 800 字以内。`;
-
-interface SendParams {
-	reply_to?: number;
-	sticker?: string;
-	message?: string;
-}
 
 export class BotRuntime {
 	private db: Database;
@@ -110,13 +92,8 @@ export class BotRuntime {
 		const sendTool = {
 			name: "send",
 			label: "Send",
-			description:
-				"Send a message and/or sticker to the Telegram group. This ends your turn: after send succeeds, no further output is needed. Omit message for a pure sticker, omit sticker when no suitable candidate exists.",
-			parameters: Type.Object({
-				reply_to: Type.Optional(Type.Number({ description: "Telegram message id (# number) to reply to" })),
-				sticker: Type.Optional(Type.String({ description: "Sticker id from the available sticker list" })),
-				message: Type.Optional(Type.String({ description: "Text message to send" })),
-			}),
+			description: TOOL_DEFS[0].description,
+			parameters: TOOL_DEFS[0].parameters,
 			execute: async (_toolCallId: string, params: SendParams) => {
 				return await this.executeSend(params);
 			},
@@ -124,11 +101,8 @@ export class BotRuntime {
 		const searchTool = {
 			name: "search",
 			label: "Search",
-			description:
-				"Search the web (TinyFish). Returns up to 5 results with title, url and a short snippet. Use when you need external facts or current information.",
-			parameters: Type.Object({
-				query: Type.String({ description: "Search query" }),
-			}),
+			description: TOOL_DEFS[1].description,
+			parameters: TOOL_DEFS[1].parameters,
 			execute: async (_toolCallId: string, params: { query: string }) => {
 				try {
 					const hits = await tinyFishSearch(this.config.tinyfishApiKey, params.query);
@@ -151,11 +125,8 @@ export class BotRuntime {
 		const runJsTool = {
 			name: "run_js",
 			label: "Run JS",
-			description:
-				"Run small pure-computation JavaScript (calculation, JSON, regex, transforms). Sandboxed: no filesystem, network, process or environment access. console.log output and the final expression value are returned. 3s limit.",
-			parameters: Type.Object({
-				code: Type.String({ description: "JavaScript source; the value of the last expression is returned" }),
-			}),
+			description: TOOL_DEFS[2].description,
+			parameters: TOOL_DEFS[2].parameters,
 			execute: async (_toolCallId: string, params: { code: string }) => {
 				const result = await runJs(params.code);
 				this.recordEvent("tool_run_js", { ok: result.ok, durationMs: result.durationMs });
@@ -165,9 +136,9 @@ export class BotRuntime {
 				};
 			},
 		};
-		// Tool order is cache-visible protocol: never reorder (docs/cache.md).
+		// Tool order is cache-visible protocol: never reorder (docs/cache.md, REQ-TEST-0001 R2).
 		const tools = [sendTool, searchTool, runJsTool];
-		this.toolsHash = sha256Short(JSON.stringify(tools.map((t) => ({ name: t.name, params: t.parameters }))));
+		this.toolsHash = toolsHash();
 
 		const model = this.modelRuntime.getModel("deepseek", this.config.deepseekModel);
 		if (!model) throw new Error(`model not found: deepseek/${this.config.deepseekModel}`);
