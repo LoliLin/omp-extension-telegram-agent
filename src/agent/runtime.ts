@@ -499,17 +499,20 @@ export class BotRuntime {
 				? (this.db
 						.query(
 							`SELECT short_id, sticker_emoji, vision FROM media
-							 WHERE kind = 'sticker' AND short_id IS NOT NULL
+							 WHERE kind = 'sticker' AND short_id IS NOT NULL AND json_extract(vision, '$.text') IS NOT NULL
 							   AND (sticker_set IS NULL OR sticker_set NOT IN (SELECT value FROM json_each(?)))
 							 ORDER BY rowid DESC LIMIT 8`,
 						)
 						.all(JSON.stringify(this.bot.stickerSets)) as { short_id: string; sticker_emoji: string | null; vision: string }[])
 				: (this.db
-						.query("SELECT short_id, sticker_emoji, vision FROM media WHERE kind = 'sticker' AND short_id IS NOT NULL ORDER BY rowid DESC LIMIT 8")
+						.query("SELECT short_id, sticker_emoji, vision FROM media WHERE kind = 'sticker' AND short_id IS NOT NULL AND json_extract(vision, '$.text') IS NOT NULL ORDER BY rowid DESC LIMIT 8")
 						.all() as { short_id: string; sticker_emoji: string | null; vision: string }[]);
 		if (rows.length === 0) return "";
 		const lines = rows.map((r) => {
-			const desc = (JSON.parse(r.vision) as { text: string }).text.replace(/\s+/g, " ").slice(0, 60);
+			// catalog short_ids are assigned before vision completes (background pre-recognition);
+			// the query filters for vision text, and this parse is defensive on top of that
+			const parsed = JSON.parse(r.vision) as { text: string };
+			const desc = (parsed.text ?? "").replace(/\s+/g, " ").slice(0, 60);
 			return `${r.short_id} = ${r.sticker_emoji ?? ""} ${desc}`.trim();
 		});
 		return `Available stickers:\n${lines.join("\n")}`;

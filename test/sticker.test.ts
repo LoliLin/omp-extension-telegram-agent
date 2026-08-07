@@ -217,6 +217,18 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 		expect(out.lastIndexOf("Available stickers:")).toBe(catIdx); // exactly one block, at the tail
 	});
 
+	test("regression: catalog short_ids assigned before vision completes must not crash the candidates block", () => {
+		// catalog pre-recognition is background: short_id exists, vision is NULL
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-cat0', 'sticker', 'cats', '😺', 's9')").run();
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-ext0', 'sticker', '😺', ?, 's10')").run(
+			JSON.stringify({ model: "m", kind: "sticker", text: "上下文语义", at: 1 }),
+		);
+		const rt = new BotRuntime(db, makeBot({ stickerSets: ["cats"] }), makeConfig(), null as never);
+		const block = (rt as any).stickerCandidatesBlock() as string;
+		expect(block).toContain("s10");
+		expect(block).not.toContain("s9"); // no vision -> not a candidate, and no crash
+	});
+
 	test("R4: catalog stickers are excluded from the dynamic candidates block", async () => {
 		// catalog sticker (from set) + set-external sticker, both with vision
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, vision, short_id) VALUES ('uq-cat', 'sticker', 'cats', '😺', ?, 's1')").run(

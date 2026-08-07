@@ -214,6 +214,7 @@ function setStatus(text: string): void {
 }
 
 function renderPanel(): void {
+	const width = terminal.columns ?? 80;
 	const lines: string[] = [];
 	for (const [botId, s] of Object.entries(baselineStats)) {
 		const live = [...pendingUsage.values()].filter((u) => u.botId === botId && u.id > baselineLastId);
@@ -227,7 +228,8 @@ function renderPanel(): void {
 			cost: s.cost + live.reduce((a, u) => a + u.cost, 0),
 			last: live.at(-1) ?? s.last,
 		};
-		lines.push(statsLine(botId, merged));
+		// one line per bot; truncate so narrow terminals don't wrap the panel
+		lines.push(statsLine(botId, merged).slice(0, width));
 	}
 	panel.setText(lines.length > 0 ? lines.join("\n") : `${DIM}no telemetry yet${RESET}`);
 	tui.requestRender();

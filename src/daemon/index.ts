@@ -126,6 +126,13 @@ async function shutdown(signal: string) {
 	if (stopping) return;
 	stopping = true;
 	console.log(`[daemon] ${signal} received, shutting down`);
+	// hard bound: a wedged provider request / SDK dispose must never leave the daemon
+	// unkillable — SIGTERM always wins within STOP_HARD_TIMEOUT
+	const hardTimer = setTimeout(() => {
+		console.error("[daemon] shutdown timed out, forcing exit");
+		process.exit(1);
+	}, 35_000);
+	hardTimer.unref?.();
 	for (const p of pollers) p.stop();
 	for (const rt of runtimes.values()) await rt.stop();
 	ipc.stop();
@@ -133,6 +140,7 @@ async function shutdown(signal: string) {
 	// give pollers a moment to exit their loops
 	await new Promise((r) => setTimeout(r, 500));
 	db.close();
+	clearTimeout(hardTimer);
 	process.exit(0);
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
