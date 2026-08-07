@@ -8,14 +8,19 @@ import { Poller } from "../telegram/poller.ts";
 import { BotRuntime } from "../agent/runtime.ts";
 import { routeMessage, type BotIdentity } from "../agent/router.ts";
 import { IpcServer } from "./ipc-server.ts";
+import { acquirePidLock, releasePidLock } from "./pid.ts";
 import type { MessageRow } from "../agent/serialize.ts";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { randomBytes } from "node:crypto";
-import { writeFileSync, rmSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const rootDir = process.cwd();
 const config = loadConfig(rootDir);
+// Exclusive pid lock at the EARLIEST moment, before any slow init (getMe / model runtime /
+// session creation): a second `start` while we're still initializing must not race us
+// (REQ-OPS-0001 R4). Released on shutdown; stale pid files are taken over.
+const pidFd = acquirePidLock(config.dataDir);
 const db = openDb(config.dbPath);
 
 // router secret: stable across restarts, generated once
@@ -101,9 +106,6 @@ const pollers = config.bots.map(
 		}),
 );
 
-const pidPath = join(config.dataDir, "daemon.pid");
-writeFileSync(pidPath, String(process.pid));
-
 let stopping = false;
 async function shutdown(signal: string) {
 	if (stopping) return;
@@ -112,7 +114,7 @@ async function shutdown(signal: string) {
 	for (const p of pollers) p.stop();
 	for (const rt of runtimes.values()) await rt.stop();
 	ipc.stop();
-	rmSync(pidPath, { force: true });
+	releasePidLock(pidFd, config.dataDir);
 	// give pollers a moment to exit their loops
 	await new Promise((r) => setTimeout(r, 500));
 	db.close();

@@ -97,6 +97,8 @@
 
 ## 配置
 
-- `.env`（`key: value` 冒号格式，本项目 loader 自己解析）+ `.env.example`
+- `.env`（`key: value` 冒号格式，本项目 loader 自己解析）+ `.env.example`（同格式，peer id 注释为裸正数）
 - env 变量：bot tokens ×2、group peer id、deepseek key/model/reasoning effort、tinyfish key、auxiliary_visual_model、router_secret、gpg_key_passphrase（仅开发用）
+- **启动期校验（REQ-OPS-0001）**：数值项全部 `Number.isFinite` + 范围检查（routing 概率 ∈[0,1] 且 pA+pB≤1；threshold/keep_recent>0）；peer id 归一化（`-1004402809405` / `-4402809405` / `4402809405` → 裸正数，`-100` 前缀仅当剩余位数 ≥9 才剥，防误伤以 100 开头的真 id）；校验失败收集**全部**错误一次性抛出（ConfigError，逐条点名 env key），不再静默 NaN
+- **进程管理（REQ-OPS-0001）**：daemon 最早时机（慢初始化前）以 `openSync(wx)` 排他创建 `data/daemon.pid`，双 start 竞态第二个立即退出；`stop`/`status` 校验 pid 的 cmdline 属于本项目 daemon（`isOurDaemon`），pid 被 OS 复用不误杀；死进程残留 pid 文件自动接管/清理；`start` 等待 socket ready 才报成功
 - 模型相关数值（contextWindow/价格/threshold/reserve）放 `config/models.json`（Phase 8）
