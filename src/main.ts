@@ -101,24 +101,10 @@ switch (cmd) {
 		break;
 	}
 	case "attach": {
-		// optional bot filter (REQ-UI-0002): validate against the configured bot list here
-		const botId = process.argv[3];
-		if (botId) {
-			const { loadConfig } = await import("./config.ts");
-			try {
-				const ids = loadConfig(rootDir).bots.map((b) => b.id);
-				if (!ids.includes(botId)) {
-					console.error(`unknown bot id "${botId}"; configured bots: ${ids.join(", ") || "(none)"}`);
-					process.exit(1);
-				}
-			} catch (err) {
-				console.error(`attach ${botId}: ${(err as Error).message}`);
-				process.exit(1);
-			}
-		}
-		process.env.TG_ATTACH_BOT = botId ?? "";
-		await import("./tui/index.ts");
-		break;
+		// The observer frontend is a pi extension now (REQ-UI-0004): run `pi` in the project
+		// dir, then /tg attach [bot-id]. This CLI entry is retired with the self-drawn TUI.
+		console.log("观察者已迁移为 pi 插件：在项目目录运行 `pi`，然后输入 /tg attach [bot-id]（或 /tg panel / /tg status）。daemon 起停仍用 start/status/stop。");
+		process.exit(1);
 	}
 	default:
 		console.log("usage: bun run src/main.ts <start [--foreground] | status | stop | attach>");
