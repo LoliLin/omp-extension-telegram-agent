@@ -34,3 +34,15 @@
 - 测试：smoke-pi 真实调用 DeepSeek 成功（reply "4"，thinking 捕获，usage 含 cacheRead/cacheWrite 字段）；schema 建表验证通过
 - Cache impact: NONE（尚未有 agent run）
 - 下一步：Phase 2 Telegram ingestion
+
+## 2026-08-07 (4) — Phase 2 完成：Telegram persistence
+
+- 做了：src/telegram/api.ts（raw fetch Bot API：getMe/getUpdates/sendMessage/sendSticker/getFile/download）；normalize.ts（canonical message，isTargetChat 兼容 raw/-/-100 三种 chat id 形式）；ingest.ts（raw_updates 去重 → canonical 去重 → edit revision）；poller.ts（offset 持久化、retry_after、409 检测、指数退避）；daemon/index.ts + main.ts CLI（start [--foreground]/status/stop，pidfile + log）
+- 为什么：先把"可靠记住群聊"做好
+- 测试：
+  - bun test 12/12 通过（normal/reply/quote/mention/bot/edit/photo/sticker/duplicate/two-bot/ignored）
+  - 真实群「小雪の后宫」(-1004402809405)：双 token getMe ✅（@hastuyuki_bot / @kosamerobot）
+  - e2e：bot B 发消息 → 双 poller 收到 → canonical 仅 1 条（first_seen_by=A）✅
+  - restart：offset 恢复，raw_updates 无重放，新消息正常落库 ✅
+- Cache impact: NONE
+- 下一步：Phase 3 Basic Agent（Pi session + 序列化 grammar + send tool + telemetry）；先做 personas 工具段适配
