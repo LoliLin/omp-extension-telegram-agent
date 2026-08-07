@@ -5,7 +5,7 @@
 
 ## 修复（2026-08-07 code review）
 
-- [ ] [REQ-SEC-0001](REQ-SEC-0001.md) run_js 沙箱威胁模型与隔离加固（P0）
+- [x] [REQ-SEC-0001](REQ-SEC-0001.md) run_js 沙箱威胁模型与隔离加固（P0）（commit 3c6c348）
 - [ ] [REQ-AGENT-0001](REQ-AGENT-0001.md) agent 触发/flush 生命周期串行状态机（P0）
 - [ ] [REQ-TG-0001](REQ-TG-0001.md) Telegram ingestion 与 poller 可靠性（P1）
 - [ ] [REQ-IPC-0001](REQ-IPC-0001.md) IPC 与 TUI 健壮性（P1）
