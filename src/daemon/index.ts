@@ -14,6 +14,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { CACHE_SCHEMA_VERSION } from "../agent/prompt.ts";
 
 const rootDir = process.cwd();
 const config = loadConfig(rootDir);
@@ -51,6 +52,19 @@ for (const bot of config.bots) {
 	const rt = new BotRuntime(db, bot, config, modelRuntime);
 	await rt.init();
 	runtimes.set(bot.id, rt);
+}
+
+// Cache schema change (e.g. REQ-STICKER-0001 catalog in the prefix): open a new context
+// epoch for every bot so telemetry marks the expected one-time cache reset (docs/cache.md).
+const storedSchema = getDaemonState(db, "cache_schema_version");
+if (storedSchema !== String(CACHE_SCHEMA_VERSION)) {
+	console.log(`[daemon] cache schema v${storedSchema ?? "none"} -> v${CACHE_SCHEMA_VERSION}: opening new context epoch`);
+	for (const bot of config.bots) {
+		const epoch = Number(getBotState(db, bot.id, "context_epoch") ?? "1") + 1;
+		setBotState(db, bot.id, "context_epoch", String(epoch));
+		runtimes.get(bot.id)?.noteSchemaBump(epoch);
+	}
+	setDaemonState(db, "cache_schema_version", String(CACHE_SCHEMA_VERSION));
 }
 const identities: BotIdentity[] = config.bots.map((bot) => ({
 	id: bot.id,

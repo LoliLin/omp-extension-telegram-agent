@@ -16,14 +16,16 @@
 			"name": "小雪",
 			"token_env": "teleram_hastuyuki_bot",
 			"persona_path": "personas/xiaoxue.md",
-			"routing_p": 0.08
+			"routing_p": 0.08,
+			"sticker_sets": ["myadestes_1_amashiro_natsuki_plus_nacho_neko"]
 		},
 		{
 			"id": "B",
 			"name": "小雨",
 			"token_env": "telegram_kosamerobot",
 			"persona_path": "personas/xiaoyu.md",
-			"routing_p": 0.08
+			"routing_p": 0.08,
+			"sticker_sets": ["Mikufufu"]
 		}
 	]
 }

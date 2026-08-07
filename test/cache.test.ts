@@ -15,14 +15,16 @@ import { readFileSync } from "node:fs";
 import { serializeMessages, type MessageRow } from "../src/agent/serialize.ts";
 import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT } from "../src/agent/prompt.ts";
 import { toolsHash } from "../src/agent/tools.ts";
+import { stickerCatalogBlock } from "../src/media/sticker-catalog.ts";
 
 const GOLDEN = {
-	schemaVersion: 1,
+	schemaVersion: 2,
 	systemA: "c2d68946a3a6",
 	systemB: "e2d094446af3",
 	serialize: "68a17d6e5c05",
 	tools: "7b1983d95e25",
 	compactionPrompt: "045a5241fdd7",
+	systemAWithCatalog: "c807b394991f",
 };
 
 test("CACHE_SCHEMA_VERSION unchanged", () => {
@@ -56,4 +58,21 @@ test("tool schema + order stable (REQ-TEST-0001 R2)", () => {
 
 test("compaction summary prompt grammar stable (REQ-TEST-0001 R2)", () => {
 	expect(sha256Short(COMPACTION_SUMMARY_PROMPT)).toBe(GOLDEN.compactionPrompt);
+});
+
+test("sticker catalog block is part of the stable prefix grammar (REQ-STICKER-0001 AC1)", () => {
+	const db = new Database(":memory:");
+	db.exec(readFileSync("src/db/schema.sql", "utf8"));
+	const ins = db.prepare(
+		`INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, vision, short_id) VALUES (?, 'sticker', ?, ?, ?, ?)`,
+	);
+	ins.run("uq-cat-1", "Mikufufu", "😺", JSON.stringify({ model: "m", kind: "sticker", text: "得意的赞同，smug/amused", at: 1 }), "s1");
+	ins.run("uq-cat-2", "Mikufufu", "🐱", null, "s2"); // no vision yet -> [未识别]
+	const block = stickerCatalogBlock(db, ["Mikufufu"]);
+	expect(block).toContain("s1 = 😺 得意的赞同，smug/amused");
+	expect(block).toContain("s2 = 🐱 [未识别]");
+	const persona = readFileSync("personas/xiaoxue.md", "utf8");
+	expect(sha256Short(buildSystemPrompt(persona, block))).toBe(GOLDEN.systemAWithCatalog);
+	// determinism: same DB state -> byte-identical block
+	expect(stickerCatalogBlock(db, ["Mikufufu"])).toBe(block);
 });

@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 1;
+export const CACHE_SCHEMA_VERSION = 2; // v2: fixed sticker catalog block in system prompt (REQ-STICKER-0001)
 
 // Fixed shared protocol block, appended after the persona. Never reorder.
 const PROTOCOL = `
@@ -27,8 +27,10 @@ const PROTOCOL = `
 - 群里还有另一个 AI bot（你的姐妹），她的消息你能看到，但不要替她说话，也不要回复她的消息
 `;
 
-export function buildSystemPrompt(personaText: string): string {
-	return `${personaText.trim()}\n${PROTOCOL}`;
+export function buildSystemPrompt(personaText: string, stickerCatalog = ""): string {
+	// stickerCatalog (if any) is a STABLE per-bot block appended after the protocol — part of
+	// the stable prefix. Its content changes only with config (REQ-STICKER-0001 R2).
+	return `${personaText.trim()}\n${PROTOCOL}${stickerCatalog}`;
 }
 
 /**

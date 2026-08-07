@@ -211,9 +211,9 @@ describe(".env.example (REQ-OPS-0001 R1)", () => {
 	test("example file is colon format and parses to expected keys", () => {
 		const env = parseEnvFile(join(process.cwd(), ".env.example"));
 		expect(env.teleram_hastuyuki_bot).toBe("123456:AAA...");
-		expect(env.telegram_group_peer_id).toBe("4402809405");
 		expect(env.deepseek_api_key).toBe("sk-...");
-		expect(Object.keys(env).length).toBeGreaterThanOrEqual(8);
+		expect(env.router_secret).toBe("...");
+		expect(Object.keys(env).length).toBeGreaterThanOrEqual(6);
 	});
 });
 

@@ -28,6 +28,7 @@ import { TOOL_DEFS, toolsHash, type SendParams } from "./tools.ts";
 import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
 import { ensureVision, fileIdForBot } from "../media/vision.ts";
+import { ensureStickerCatalog, stickerCatalogBlock } from "../media/sticker-catalog.ts";
 
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
 const EXPOSED_KEY = "exposed_ids";
@@ -79,7 +80,15 @@ export class BotRuntime {
 
 	async init(): Promise<void> {
 		const persona = readFileSync(this.bot.personaPath, "utf8");
-		const systemPrompt = buildSystemPrompt(persona);
+		// Fixed sticker catalog first: it serializes into the STABLE prefix, so it must be
+		// resolved (sets fetched, short_ids assigned, vision pre-recognized) before the
+		// system prompt is built (REQ-STICKER-0001 R1/R2). Empty for bots without sets.
+		let stickerCatalog = "";
+		if (this.bot.stickerSets.length > 0) {
+			await ensureStickerCatalog(this.db, this.api, this.bot.id, this.bot.stickerSets, this.config.auxiliaryVisualModel);
+			stickerCatalog = stickerCatalogBlock(this.db, this.bot.stickerSets);
+		}
+		const systemPrompt = buildSystemPrompt(persona, stickerCatalog);
 		this.systemHash = sha256Short(systemPrompt);
 
 		const sessionsDir = join(this.config.dataDir, "sessions", this.bot.id);
@@ -458,7 +467,9 @@ export class BotRuntime {
 		}
 	}
 
-	/** Small dynamic sticker candidate list (semantic, short ids). Empty string when catalog is empty. */
+	/** Small dynamic sticker candidate list (semantic, short ids). Empty string when catalog is empty.
+	 * Stickers from the fixed catalog are excluded: they are already in the stable prefix
+	 * (REQ-STICKER-0001 R4/R6 — the dynamic block only carries set-EXTERNAL stickers seen in context). */
 	private stickerCandidatesBlock(): string {
 		// assign short ids (rowid-based: stable and unique, race-free)
 		const unassigned = this.db
@@ -467,9 +478,19 @@ export class BotRuntime {
 		for (const row of unassigned) {
 			this.db.query("UPDATE media SET short_id = ? WHERE file_unique_id = ?").run(`s${row.rowid}`, row.file_unique_id);
 		}
-		const rows = this.db
-			.query("SELECT short_id, sticker_emoji, vision FROM media WHERE kind = 'sticker' AND short_id IS NOT NULL ORDER BY rowid DESC LIMIT 8")
-			.all() as { short_id: string; sticker_emoji: string | null; vision: string }[];
+		const rows =
+			this.bot.stickerSets.length > 0
+				? (this.db
+						.query(
+							`SELECT short_id, sticker_emoji, vision FROM media
+							 WHERE kind = 'sticker' AND short_id IS NOT NULL
+							   AND (sticker_set IS NULL OR sticker_set NOT IN (SELECT value FROM json_each(?)))
+							 ORDER BY rowid DESC LIMIT 8`,
+						)
+						.all(JSON.stringify(this.bot.stickerSets)) as { short_id: string; sticker_emoji: string | null; vision: string }[])
+				: (this.db
+						.query("SELECT short_id, sticker_emoji, vision FROM media WHERE kind = 'sticker' AND short_id IS NOT NULL ORDER BY rowid DESC LIMIT 8")
+						.all() as { short_id: string; sticker_emoji: string | null; vision: string }[]);
 		if (rows.length === 0) return "";
 		const lines = rows.map((r) => {
 			const desc = (JSON.parse(r.vision) as { text: string }).text.replace(/\s+/g, " ").slice(0, 60);
@@ -515,6 +536,11 @@ export class BotRuntime {
 				this.systemHash,
 				this.toolsHash,
 			);
+	}
+
+	/** Record a cache-schema bump (CACHE_SCHEMA_VERSION change) as a new context epoch. */
+	noteSchemaBump(epoch: number): void {
+		this.epoch = epoch;
 	}
 
 	async stop(): Promise<void> {

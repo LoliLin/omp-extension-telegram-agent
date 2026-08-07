@@ -48,6 +48,7 @@ function makeRuntime(): BotRuntime {
 		compactionThreshold: 128000,
 		compactionKeepRecent: 20000,
 		tools: { send: true, search: true, runJs: true },
+		stickerSets: [],
 	};
 	return new BotRuntime(db, bot, config, null as never);
 }

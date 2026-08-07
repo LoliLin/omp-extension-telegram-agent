@@ -10,16 +10,16 @@
 
 ## CACHE_SCHEMA_VERSION
 
-当前：**1**
+当前：**2**（v2：固定 sticker 目录块进入 system prompt，REQ-STICKER-0001）
 
-cache-visible protocol：system prompt shape、persona serialization、tool schema、tool order、消息序列化 grammar、compaction summary grammar。
+cache-visible protocol：system prompt shape、persona serialization、tool schema、tool order、消息序列化 grammar、compaction summary grammar、**固定 sticker 目录块**。
 
-修改任一 → bump version → 新 context epoch（明确的一次性 cache reset，而非每轮莫名 miss）。
+修改任一 → bump version → 新 context epoch（daemon 启动时检测 daemon_state.cache_schema_version 不匹配即全员 epoch+1，一次性的 cache reset，而非每轮莫名 miss）。
 
 ## Provider payload 结构（DeepSeek via openai-completions）
 
 ```
-system: persona prompt（单字符串）
+system: persona prompt + 固定 sticker 目录块（有 set 时，单字符串）
 messages: user/assistant/tool 序列
   assistant.content = 纯字符串
   assistant.reasoning_content = thinking 回传（DeepSeek 协议要求，由 Pi 处理）
@@ -27,6 +27,14 @@ tools: [{type:"function", function:{name, description, parameters}}] 固定顺�
 ```
 
 DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`prompt_cache_hit_tokens`）。
+
+## Sticker 目录分区（REQ-STICKER-0001）
+
+**固定目录（stable prefix）**：每 bot 配置 `sticker_sets`（Telegram set name）；启动时 getStickerSet → media 持久化（file_unique_id 身份 + 每 bot file_id 映射）→ rowid 分配 short_id（`s<N>`，与动态候选同命名空间）→ vision 预识别（复用懒 vision 缓存，重启零重复下载）。序列化为 system prompt 内稳定块：`# Sticker 目录`（配置 set 顺序 + rowid，无 vision 标 `[未识别]`）。目录内容变化 = cache-visible 协议变化 → bump CACHE_SCHEMA_VERSION + 新 epoch。规模上限 120（超限截断 + warn）。
+
+**动态候选（动态 suffix 尾部）**：`Available stickers:` 块保留，只列**上下文出现过的 set 外** sticker（set 内 sticker 已在 prefix 里，排除防冗余）；位置约束：必须在全部消息序列之后（R6，测试锁定），不并入 prefix。
+
+**send**：两种来源的 short_id 共用 media 表解析 + 每 bot file_id；无效 id 在发送前结构化报错（REQ-AGENT-0001 R7 协同）。
 
 ## 消息序列化 grammar（v1，Phase 3 实现后以此为准）
 
@@ -69,5 +77,6 @@ bot、model、provider、timestamp、context epoch、context tokens、cache read
 
 - 2026-08-07（50 runs，bots A/B，DeepSeek deepseek-v4-flash）：cache read 734,208 / miss 81,659，**hit ratio 90.0%**；典型 turn read≈14.7K miss≈1.6K，估算 $0.00038/turn
 - 2026-08-07 e2e-compaction：`compaction_threshold=1500` 强制两轮触发，compaction → epoch 2→3→4 持久化、exposure 重置、摘要调用成功；重启后 epoch=4 恢复
+- 2026-08-07 REQ-STICKER-0001：CACHE_SCHEMA_VERSION 1→2，固定 sticker 目录进入 system prompt（systemA/B 无目录 hash 不变、带目录新 golden 锁定）；daemon 启动检测 schema 版本变化全员开新 epoch；sticker 相关 cache 对比方法：llm_runs 里 system_hash 变化即目录变更，`analyze-context-window.ts` 按 epoch 同步模拟
 - cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=1、systemA/B hash、serialize hash、**tools hash（含顺序）、compaction summary prompt hash** 全部锁定（REQ-TEST-0001 R2 补全）；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
 - 分析脚本（REQ-TEST-0001 R5）：llm_runs 的 epoch/compaction 列与 >30% context 回落都被视为真实 compaction 并同步模拟 context；60 runs 回放识别 3 次真实 compaction（e2e 遗留 epoch 1→4），幻影触发 0

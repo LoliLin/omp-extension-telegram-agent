@@ -30,6 +30,8 @@ export interface BotConfig {
 	compactionThreshold: number;
 	compactionKeepRecent: number;
 	tools: BotToolsConfig;
+	/** Telegram sticker set names; loaded into the stable prefix at startup (REQ-STICKER-0001). */
+	stickerSets: string[];
 }
 
 export interface AppConfig {
@@ -86,6 +88,7 @@ export interface RawBotConfig {
 	compaction_threshold?: unknown;
 	compaction_keep_recent?: unknown;
 	tools?: unknown;
+	sticker_sets?: unknown;
 }
 
 export interface RawConfig {
@@ -180,6 +183,11 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 						errors.push(`[config] ${at}.tools.${key}: expected boolean, got ${JSON.stringify(v)}`);
 					}
 				}
+			}
+		}
+		if (b.sticker_sets !== undefined) {
+			if (!Array.isArray(b.sticker_sets) || b.sticker_sets.some((s) => typeof s !== "string" || !s)) {
+				errors.push(`[config] ${at}.sticker_sets: expected array of Telegram sticker set names, got ${JSON.stringify(b.sticker_sets)}`);
 			}
 		}
 	}
@@ -278,6 +286,7 @@ export function loadConfig(rootDir: string): AppConfig {
 				search: toolsRaw.search !== false,
 				runJs: toolsRaw.run_js !== false,
 			},
+			stickerSets: Array.isArray(b.sticker_sets) ? (b.sticker_sets as string[]) : [],
 		};
 	});
 
