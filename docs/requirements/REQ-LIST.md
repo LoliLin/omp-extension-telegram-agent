@@ -8,14 +8,14 @@
 - [x] [REQ-SEC-0001](REQ-SEC-0001.md) run_js 沙箱威胁模型与隔离加固（P0）（commit 3c6c348）
 - [x] [REQ-AGENT-0001](REQ-AGENT-0001.md) agent 触发/flush 生命周期串行状态机（P0）（commit a549335）
 - [x] [REQ-TG-0001](REQ-TG-0001.md) Telegram ingestion 与 poller 可靠性（P1）（commit a806e8d）
-- [ ] [REQ-IPC-0001](REQ-IPC-0001.md) IPC 与 TUI 健壮性（P1）
-- [ ] [REQ-OPS-0001](REQ-OPS-0001.md) 配置校验、进程管理与仓库卫生（P1）
-- [ ] [REQ-TEST-0001](REQ-TEST-0001.md) 测试体系修复（P2）
+- [x] [REQ-IPC-0001](REQ-IPC-0001.md) IPC 与 TUI 健壮性（P1）（commit d0d5d56）
+- [x] [REQ-OPS-0001](REQ-OPS-0001.md) 配置校验、进程管理与仓库卫生（P1）（commit ca55ec0）
+- [x] [REQ-TEST-0001](REQ-TEST-0001.md) 测试体系修复（P2）（commit c8fcd67）
 
 ## 功能
 
-- [ ] [REQ-CONF-0001](REQ-CONF-0001.md) 配置体系：任意数量 bot、persona 外置（P1）
-- [ ] [REQ-STICKER-0001](REQ-STICKER-0001.md) 固定 sticker set 支持（P2）
+- [x] [REQ-CONF-0001](REQ-CONF-0001.md) 配置体系：任意数量 bot、persona 外置（P1）（commit 3027e95）
+- [x] [REQ-STICKER-0001](REQ-STICKER-0001.md) 固定 sticker set 支持（P2）（commit 84da315）
 - [ ] [REQ-UI-0001](REQ-UI-0001.md) 基于 pi-tui 插件化重做 Telegram 历史界面（P2）
 - [ ] [REQ-UI-0002](REQ-UI-0002.md) attach 到任意已配置的 bot（P2）
 - [ ] [REQ-UI-0003](REQ-UI-0003.md) TUI 底部可观测性面板（P2）
