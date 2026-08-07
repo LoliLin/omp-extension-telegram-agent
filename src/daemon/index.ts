@@ -6,7 +6,7 @@ import { openDb, setBotState, getBotState, getDaemonState, setDaemonState } from
 import { BotApi } from "../telegram/api.ts";
 import { Poller } from "../telegram/poller.ts";
 import { BotRuntime } from "../agent/runtime.ts";
-import { explicitTrigger, type BotIdentity } from "../agent/router.ts";
+import { routeMessage, type BotIdentity } from "../agent/router.ts";
 import { IpcServer } from "./ipc-server.ts";
 import type { MessageRow } from "../agent/serialize.ts";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -69,19 +69,21 @@ for (const [botId, rt] of runtimes) {
 }
 ipc.start();
 
-// route an ingested group message to a bot if it explicitly addresses one
+// route an ingested group message to a bot per routing rules
 function route(result: { chatId?: number; messageId?: number }): void {
 	if (result.chatId == null || result.messageId == null) return;
 	const row = db
 		.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
 		.get(result.chatId, result.messageId) as MessageRow | null;
 	if (!row || row.is_bot) return; // bot messages are observed history, never triggers
-	for (const identity of identities) {
-		if (explicitTrigger(db, row, identity)) {
-			console.log(`[route] msg #${row.message_id} -> bot ${identity.id} (${identity.name})`);
-			runtimes.get(identity.id)?.trigger();
-			return;
-		}
+	const target = routeMessage(db, row, [identities[0], identities[1]], {
+		secret: config.routerSecret ?? "",
+		pA: config.routingPA,
+		pB: config.routingPB,
+	});
+	if (target !== "nobody") {
+		console.log(`[route] msg #${row.message_id} -> bot ${target}`);
+		runtimes.get(target)?.trigger();
 	}
 }
 

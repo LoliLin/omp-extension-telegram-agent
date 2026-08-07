@@ -23,6 +23,8 @@ export interface AppConfig {
 	tinyfishApiKey: string;
 	auxiliaryVisualModel: string;
 	routerSecret: string | null; // generated+persisted by daemon if absent
+	routingPA: number; // probability a plain human message triggers bot A
+	routingPB: number; // same for bot B
 }
 
 export function parseEnvFile(path: string): Record<string, string> {
@@ -73,5 +75,7 @@ export function loadConfig(rootDir: string): AppConfig {
 		tinyfishApiKey: required(env, "tiny_fish_api_key"),
 		auxiliaryVisualModel: env.auxiliary_visual_model ?? "",
 		routerSecret: env.router_secret ?? null,
+		routingPA: Number(env.routing_p_a ?? "0.08"),
+		routingPB: Number(env.routing_p_b ?? "0.08"),
 	};
 }

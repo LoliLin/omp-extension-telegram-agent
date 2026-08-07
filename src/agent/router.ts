@@ -1,7 +1,9 @@
 // Trigger routing: decide which bot (if any) gets a response opportunity.
-// Phase 3: explicit mention / reply only. Phase 5 adds name keywords + deterministic probability.
+// Priority: explicit @mention > reply to bot > name keyword > deterministic probability.
+// Probability routing uses one shared HMAC value per message (restart/replay/duplicate-safe).
 
 import type { Database } from "bun:sqlite";
+import { createHmac } from "node:crypto";
 import type { MessageRow } from "./serialize.ts";
 
 export type TriggerTarget = "A" | "B" | "nobody";
@@ -39,4 +41,38 @@ export function explicitTrigger(db: Database, row: MessageRow, bot: BotIdentity)
 		if (parent?.sender_id === bot.userId) return true;
 	}
 	return false;
+}
+
+/** Bot's configured name appears in the message text (e.g. "小雪你怎么看"). */
+export function nameKeywordTrigger(row: MessageRow, bot: BotIdentity): boolean {
+	const text = row.text ?? row.caption;
+	if (!text) return false;
+	return text.includes(bot.name);
+}
+
+/** Shared deterministic value in [0, 1) for a message. */
+export function routingValue(secret: string, chatId: number, messageId: number): number {
+	const digest = createHmac("sha256", secret).update(`${chatId}:${messageId}`).digest();
+	// first 6 bytes -> [0, 1)
+	return digest.readUIntBE(0, 6) / 2 ** 48;
+}
+
+export interface RoutingConfig {
+	secret: string;
+	pA: number; // probability for bot A
+	pB: number; // probability for bot B
+}
+
+/** Full routing decision for one human group message. */
+export function routeMessage(db: Database, row: MessageRow, bots: [BotIdentity, BotIdentity], config: RoutingConfig): TriggerTarget {
+	for (const bot of bots) {
+		if (explicitTrigger(db, row, bot)) return bot.id;
+	}
+	for (const bot of bots) {
+		if (nameKeywordTrigger(row, bot)) return bot.id;
+	}
+	const u = routingValue(config.secret, row.chat_id, row.message_id);
+	if (u < config.pA) return "A";
+	if (u < config.pA + config.pB) return "B";
+	return "nobody";
 }
