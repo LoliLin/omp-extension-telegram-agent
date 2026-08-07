@@ -63,3 +63,11 @@
 - 测试：IPC snapshot(100)/history(50, hasMore) ✅；screen 真实终端 attach 显示实时群聊 ✅；TUI 退出 daemon 存活 ✅；重进历史含离开期间新消息 ✅
 - Cache impact: NONE（UI-only，未触 provider payload——已确认 system/tools hash 不变）
 - 下一步：Phase 5 双 bot deterministic routing + 真人触发测试
+
+## 2026-08-07 (7) — Phase 5 完成：双 bot + deterministic routing
+
+- 做了：router.ts 完整路由链（@mention/text_mention > reply > 名字关键词 > HMAC 概率 u=HMAC(secret,chatId:messageId) 前 6 字节 /2^48）；config 增加 routing_p_a/routing_p_b（默认各 0.08，对真实群保守）；daemon route() 换用 routeMessage
+- 测试：33/33 unit ✅（确定性/[0,1)/唯一性/分布 ±15%/优先级/p=0）；真实群观察 3 分钟：4 次概率触发，两个 bot 都在群里以人设自然发言（小雪暖场、小雨毒舌），reply_to 正确，bot 消息不互相触发 ✅
+- 真实遥测：A: 3 runs (cache_read 12928)；B: 3 runs (cache_read 16384)
+- Cache impact: NONE
+- 下一步：Phase 6 search (TinyFish) + run_js sandbox
