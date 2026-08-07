@@ -42,7 +42,10 @@ function required(env: Record<string, string>, key: string): string {
 }
 
 export function loadConfig(rootDir: string): AppConfig {
-	const env = { ...parseEnvFile(join(rootDir, ".env")), ...process.env };
+	const env: Record<string, string> = { ...parseEnvFile(join(rootDir, ".env")) };
+	for (const [k, v] of Object.entries(process.env)) {
+		if (v !== undefined) env[k] = v;
+	}
 	const dataDir = join(rootDir, "data");
 	return {
 		dataDir,

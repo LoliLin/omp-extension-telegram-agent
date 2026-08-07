@@ -90,3 +90,10 @@ function editMessage(db: Database, m: CanonicalMessage): IngestResult {
 	);
 	return { kind: "edited", chatId: m.chat_id, messageId: m.message_id };
 }
+
+/** Insert a message we just sent via Bot API (send tool). Dedupes against the later poller echo. */
+export function insertSentMessage(db: Database, botId: string, rawMsg: unknown): CanonicalMessage {
+	const canonical = normalizeMessage(rawMsg);
+	insertMessage(db, botId, canonical);
+	return canonical;
+}

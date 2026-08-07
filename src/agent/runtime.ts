@@ -1,0 +1,273 @@
+// BotRuntime: one persona bot = one Pi AgentSession + send tool + exposure tracking.
+// See docs/architecture.md and docs/research.md.
+
+import type { Database } from "bun:sqlite";
+import { readFileSync, mkdirSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import {
+	createAgentSession,
+	DefaultResourceLoader,
+	SessionManager,
+	SettingsManager,
+	type AgentSession,
+	type ModelRuntime,
+} from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import type { BotConfig, AppConfig } from "../config.ts";
+import { getBotState, setBotState } from "../db/db.ts";
+import { BotApi } from "../telegram/api.ts";
+import { insertSentMessage } from "../telegram/ingest.ts";
+import { serializeMessages, type MessageRow } from "./serialize.ts";
+import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION } from "./prompt.ts";
+
+const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
+const EXPOSED_KEY = "exposed_ids";
+const EPOCH_KEY = "context_epoch";
+
+interface SendParams {
+	reply_to?: number;
+	sticker?: string;
+	message?: string;
+}
+
+export class BotRuntime {
+	private db: Database;
+	private bot: BotConfig;
+	private config: AppConfig;
+	private modelRuntime: ModelRuntime;
+	private api: BotApi;
+	private session: AgentSession | null = null;
+	private running = false;
+	private pendingTrigger = false;
+	private exposed = new Set<number>();
+	private epoch = 1;
+	private runStartTs = 0;
+	private systemHash = "";
+	private toolsHash = "";
+
+	constructor(db: Database, bot: BotConfig, config: AppConfig, modelRuntime: ModelRuntime) {
+		this.db = db;
+		this.bot = bot;
+		this.config = config;
+		this.modelRuntime = modelRuntime;
+		this.api = new BotApi(bot.token);
+		this.exposed = new Set(JSON.parse(getBotState(db, bot.id, EXPOSED_KEY) ?? "[]") as number[]);
+		this.epoch = Number(getBotState(db, bot.id, EPOCH_KEY) ?? "1");
+	}
+
+	get botUserId(): number {
+		return Number(getBotState(this.db, this.bot.id, "bot_user_id") ?? "0");
+	}
+
+	get botUsername(): string {
+		return getBotState(this.db, this.bot.id, "bot_username") ?? "";
+	}
+
+	async init(): Promise<void> {
+		const persona = readFileSync(this.bot.personaPath, "utf8");
+		const systemPrompt = buildSystemPrompt(persona);
+		this.systemHash = sha256Short(systemPrompt);
+
+		const sessionsDir = join(this.config.dataDir, "sessions", this.bot.id);
+		mkdirSync(sessionsDir, { recursive: true });
+		const hasSession = readdirSync(sessionsDir).some((f) => f.endsWith(".jsonl"));
+		const sessionManager = hasSession
+			? SessionManager.continueRecent(this.config.dataDir, sessionsDir)
+			: SessionManager.create(this.config.dataDir, sessionsDir);
+
+		const sendTool = {
+			name: "send",
+			label: "Send",
+			description:
+				"Send a message and/or sticker to the Telegram group. This ends your turn: after send succeeds, no further output is needed. Omit message for a pure sticker, omit sticker when no suitable candidate exists.",
+			parameters: Type.Object({
+				reply_to: Type.Optional(Type.Number({ description: "Telegram message id (# number) to reply to" })),
+				sticker: Type.Optional(Type.String({ description: "Sticker id from the available sticker list" })),
+				message: Type.Optional(Type.String({ description: "Text message to send" })),
+			}),
+			execute: async (_toolCallId: string, params: SendParams) => {
+				return await this.executeSend(params);
+			},
+		};
+		this.toolsHash = sha256Short(JSON.stringify({ name: "send", params: sendTool.parameters }));
+
+		const loader = new DefaultResourceLoader({
+			cwd: this.config.dataDir,
+			agentDir: join(this.config.dataDir, "pi-agent"),
+			systemPrompt,
+			noExtensions: true,
+			noSkills: true,
+			noPromptTemplates: true,
+			noContextFiles: true,
+		});
+		await loader.reload();
+
+		const model = this.modelRuntime.getModel("deepseek", this.config.deepseekModel);
+		if (!model) throw new Error(`model not found: deepseek/${this.config.deepseekModel}`);
+
+		const { session } = await createAgentSession({
+			cwd: this.config.dataDir,
+			model,
+			thinkingLevel: this.config.deepseekReasoningEffort as "medium",
+			modelRuntime: this.modelRuntime,
+			sessionManager,
+			settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
+			resourceLoader: loader,
+			noTools: "builtin",
+			customTools: [sendTool],
+		});
+		this.session = session;
+		this.subscribeEvents();
+		console.log(
+			`[bot ${this.bot.id}] session ready (${hasSession ? "resumed" : "new"}), epoch=${this.epoch}, system=${this.systemHash}, tools=${this.toolsHash}, cache_schema=v${CACHE_SCHEMA_VERSION}`,
+		);
+	}
+
+	private subscribeEvents(): void {
+		if (!this.session) return;
+		this.session.subscribe((event) => {
+			const now = Date.now();
+			switch (event.type) {
+				case "agent_start":
+					this.running = true;
+					this.runStartTs = now;
+					break;
+				case "message_end": {
+					const msg = event.message;
+					if (msg.role === "assistant") {
+						const text = msg.content
+							.filter((c) => c.type === "text")
+							.map((c) => (c as { text: string }).text)
+							.join("\n");
+						const thinking = msg.content
+							.filter((c) => c.type === "thinking")
+							.map((c) => (c as { thinking: string }).thinking)
+							.join("\n");
+						if (text.trim()) this.recordEvent("assistant_text", { text });
+						if (thinking.trim()) this.recordEvent("thinking", { text: thinking });
+						if (msg.usage) this.recordUsage(msg.usage, now);
+					}
+					break;
+				}
+				case "tool_execution_start":
+					this.recordEvent("tool_call", { tool: event.toolName, args: event.args });
+					break;
+				case "tool_execution_end":
+					this.recordEvent("tool_result", { tool: event.toolName, isError: event.isError });
+					break;
+				case "agent_settled":
+					this.running = false;
+					if (this.pendingTrigger) {
+						this.pendingTrigger = false;
+						void this.flush();
+					}
+					break;
+			}
+		});
+	}
+
+	private async executeSend(params: SendParams) {
+		if (!params.message && !params.sticker) {
+			throw new Error("send requires at least one of message or sticker");
+		}
+		if (params.reply_to != null && !this.exposed.has(params.reply_to)) {
+			throw new Error("messaging.reply_not_visible");
+		}
+		const chatId = Number(`-100${this.config.groupPeerId}`);
+		const sentIds: number[] = [];
+		if (params.message) {
+			const m = await this.api.sendMessage(chatId, params.message, params.reply_to);
+			const canonical = insertSentMessage(this.db, this.bot.id, m);
+			sentIds.push(canonical.message_id);
+			this.markExposed([canonical.message_id]);
+		}
+		if (params.sticker) {
+			// sticker ids map to telegram file_id in Phase 7; for now treat as file_id directly
+			const m = await this.api.sendSticker(chatId, params.sticker, params.reply_to);
+			const canonical = insertSentMessage(this.db, this.bot.id, m);
+			sentIds.push(canonical.message_id);
+			this.markExposed([canonical.message_id]);
+		}
+		this.recordEvent("send", { reply_to: params.reply_to ?? null, sticker: params.sticker ?? null, sent: sentIds });
+		return {
+			content: [{ type: "text" as const, text: `ok sent ${sentIds.map((i) => `#${i}`).join(" ")}` }],
+			details: { sent: sentIds },
+			terminate: true,
+		};
+	}
+
+	/** Called by the router when this bot gets a response opportunity. */
+	trigger(): void {
+		if (this.running) {
+			this.pendingTrigger = true;
+			return;
+		}
+		void this.flush();
+	}
+
+	/** Serialize unexposed messages into a new context suffix and wake the agent. */
+	private async flush(): Promise<void> {
+		if (!this.session || this.running) return;
+		const chatId = Number(`-100${this.config.groupPeerId}`);
+		const rows = this.db
+			.query("SELECT * FROM messages WHERE chat_id = ? ORDER BY date, message_id")
+			.all(chatId) as MessageRow[];
+		const fresh = rows.filter((r) => !this.exposed.has(r.message_id));
+		if (fresh.length === 0) return;
+
+		let batch = fresh;
+		if (fresh.length > MAX_CATCHUP_MESSAGES) {
+			const skipped = fresh.slice(0, fresh.length - MAX_CATCHUP_MESSAGES);
+			this.markExposed(skipped.map((r) => r.message_id));
+			batch = fresh.slice(-MAX_CATCHUP_MESSAGES);
+		}
+
+		const visibleIds = new Set(this.exposed);
+		const text = serializeMessages(this.db, batch, { visibleIds });
+		if (!text.trim()) return;
+		this.markExposed(batch.map((r) => r.message_id));
+		await this.session.sendUserMessage(text);
+	}
+
+	private markExposed(ids: number[]): void {
+		for (const id of ids) this.exposed.add(id);
+		// persist; array grows within an epoch and resets on compaction (Phase 8)
+		setBotState(this.db, this.bot.id, EXPOSED_KEY, JSON.stringify([...this.exposed]));
+	}
+
+	private recordEvent(kind: string, payload: unknown): void {
+		this.db
+			.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (?, ?, ?, ?)")
+			.run(this.bot.id, Date.now(), kind, JSON.stringify(payload));
+	}
+
+	private recordUsage(
+		usage: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning?: number; cost: { total: number } },
+		now: number,
+	): void {
+		this.db
+			.query(
+				`INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost, system_hash, tools_hash)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				this.bot.id,
+				now,
+				this.config.deepseekModel,
+				this.epoch,
+				usage.input + usage.cacheRead + usage.cacheWrite,
+				usage.cacheRead,
+				usage.input,
+				usage.output,
+				usage.reasoning ?? 0,
+				this.runStartTs ? now - this.runStartTs : null,
+				usage.cost.total,
+				this.systemHash,
+				this.toolsHash,
+			);
+	}
+
+	async stop(): Promise<void> {
+		if (this.session) await this.session.dispose();
+	}
+}

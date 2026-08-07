@@ -2,9 +2,13 @@
 // Started by `src/main.ts start` (detached) or directly with `bun run src/daemon/index.ts`.
 
 import { loadConfig } from "../config.ts";
-import { openDb, setBotState, getDaemonState, setDaemonState } from "../db/db.ts";
+import { openDb, setBotState, getBotState, getDaemonState, setDaemonState } from "../db/db.ts";
 import { BotApi } from "../telegram/api.ts";
 import { Poller } from "../telegram/poller.ts";
+import { BotRuntime } from "../agent/runtime.ts";
+import { explicitTrigger, type BotIdentity } from "../agent/router.ts";
+import type { MessageRow } from "../agent/serialize.ts";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { randomBytes } from "node:crypto";
 import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -32,10 +36,43 @@ for (const bot of config.bots) {
 	console.log(`[daemon] bot ${bot.id} (${bot.name}) = @${me.username} (${me.id})`);
 }
 
+// agent runtimes (one Pi AgentSession per bot)
+process.env.DEEPSEEK_API_KEY = config.deepseekApiKey;
+const modelRuntime = await ModelRuntime.create();
+const runtimes = new Map<string, BotRuntime>();
+for (const bot of config.bots) {
+	const rt = new BotRuntime(db, bot, config, modelRuntime);
+	await rt.init();
+	runtimes.set(bot.id, rt);
+}
+const identities: BotIdentity[] = config.bots.map((bot) => ({
+	id: bot.id,
+	userId: Number(getBotState(db, bot.id, "bot_user_id") ?? "0"),
+	username: getBotState(db, bot.id, "bot_username") ?? "",
+	name: bot.name,
+}));
+
+// route an ingested group message to a bot if it explicitly addresses one
+function route(result: { chatId?: number; messageId?: number }): void {
+	if (result.chatId == null || result.messageId == null) return;
+	const row = db
+		.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
+		.get(result.chatId, result.messageId) as MessageRow | null;
+	if (!row || row.is_bot) return; // bot messages are observed history, never triggers
+	for (const identity of identities) {
+		if (explicitTrigger(db, row, identity)) {
+			console.log(`[route] msg #${row.message_id} -> bot ${identity.id} (${identity.name})`);
+			runtimes.get(identity.id)?.trigger();
+			return;
+		}
+	}
+}
+
 const pollers = config.bots.map(
 	(bot) =>
 		new Poller(db, bot.id, bot.token, config.groupPeerId, (result, _update, botId) => {
 			console.log(`[msg] bot=${botId} ${result.kind} chat=${result.chatId} msg=${result.messageId}`);
+			route(result);
 		}),
 );
 
@@ -48,6 +85,7 @@ async function shutdown(signal: string) {
 	stopping = true;
 	console.log(`[daemon] ${signal} received, shutting down`);
 	for (const p of pollers) p.stop();
+	for (const rt of runtimes.values()) await rt.stop();
 	rmSync(pidPath, { force: true });
 	// give pollers a moment to exit their loops
 	await new Promise((r) => setTimeout(r, 500));
