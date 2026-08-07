@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS media (
 	vision TEXT, -- JSON: {model, kind, text, at} — shared by both bots
 	sticker_set TEXT,
 	sticker_emoji TEXT,
-	semantic TEXT -- sticker semantic description
+	semantic TEXT, -- sticker semantic description
+	short_id TEXT UNIQUE -- s<N> catalog id shown to the model for sticker sending
 );
 
 -- per-bot telegram file_id -> our media identity (file_id is bot-specific)

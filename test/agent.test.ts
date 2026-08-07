@@ -136,3 +136,21 @@ describe("sent message dedupe (send -> poller echo)", () => {
 		expect(db.query("SELECT COUNT(*) c FROM messages").get()).toEqual({ c: 1 });
 	});
 });
+
+describe("media identity", () => {
+	test("media row + per-bot file_id recorded; duplicate message from second bot still records its file_id", () => {
+		const stickerMsg = {
+			message_id: 400, from: { id: 111, is_bot: false, first_name: "Alice" },
+			chat: { id: CHAT, type: "supergroup" }, date: 1754600000,
+			sticker: { file_id: "fid-A", file_unique_id: "uq1", width: 512, height: 512, set_name: "cats", emoji: "😺" },
+		};
+		ingestUpdate(db, "A", { update_id: 500, message: stickerMsg }, GROUP);
+		const viaB = { ...stickerMsg, sticker: { ...stickerMsg.sticker, file_id: "fid-B" } };
+		const r = ingestUpdate(db, "B", { update_id: 501, message: viaB }, GROUP);
+		expect(r.kind).toBe("duplicate"); // canonical message deduped
+		const media = db.query("SELECT kind, sticker_set FROM media WHERE file_unique_id = 'uq1'").get() as Record<string, unknown>;
+		expect(media.kind).toBe("sticker");
+		const ids = db.query("SELECT bot_id, file_id FROM media_file_ids WHERE file_unique_id = 'uq1' ORDER BY bot_id").all();
+		expect(ids).toEqual([{ bot_id: "A", file_id: "fid-A" }, { bot_id: "B", file_id: "fid-B" }]);
+	});
+});

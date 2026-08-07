@@ -27,11 +27,26 @@ export function ingestUpdate(db: Database, botId: string, update: any, groupPeer
 	if (!isTargetChat(msg.chat.id, groupPeerId)) return { kind: "ignored" };
 
 	const canonical = normalizeMessage(msg, payload.edited ? (msg.edit_date ?? Math.floor(Date.now() / 1000)) : null);
+	recordMedia(db, botId, canonical); // media identity/file_id tracked even for duplicate messages
 
 	if (payload.edited) {
 		return editMessage(db, canonical);
 	}
 	return insertMessage(db, botId, canonical);
+}
+
+/** Persist media identity (shared file_unique_id) and this bot's file_id mapping. */
+function recordMedia(db: Database, botId: string, m: CanonicalMessage): void {
+	if (!m.media) return;
+	const media = m.media;
+	db.query(
+		`INSERT INTO media (file_unique_id, kind, mime, width, height, sticker_set, sticker_emoji)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(file_unique_id) DO NOTHING`,
+	).run(media.file_unique_id, media.kind, media.mime ?? null, media.width ?? null, media.height ?? null, media.sticker_set ?? null, media.sticker_emoji ?? null);
+	db.query(
+		"INSERT OR IGNORE INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES (?, ?, ?)",
+	).run(botId, media.file_id, media.file_unique_id);
 }
 
 function insertMessage(db: Database, botId: string, m: CanonicalMessage): IngestResult {

@@ -12,7 +12,17 @@ export function openDb(dbPath: string): Database {
 	db.exec("PRAGMA journal_mode = WAL;");
 	db.exec("PRAGMA foreign_keys = ON;");
 	db.exec(readFileSync(SCHEMA_PATH, "utf8"));
+	migrate(db);
 	return db;
+}
+
+/** Idempotent column migrations for existing dev databases. */
+function migrate(db: Database): void {
+	const mediaCols = (db.query("PRAGMA table_info(media)").all() as { name: string }[]).map((c) => c.name);
+	if (!mediaCols.includes("short_id")) {
+		db.exec("ALTER TABLE media ADD COLUMN short_id TEXT");
+		db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_media_short_id ON media(short_id)");
+	}
 }
 
 export function getDaemonState(db: Database, key: string): string | null {

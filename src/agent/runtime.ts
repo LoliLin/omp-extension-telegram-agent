@@ -21,6 +21,7 @@ import { serializeMessages, type MessageRow } from "./serialize.ts";
 import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION } from "./prompt.ts";
 import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
+import { ensureVision, fileIdForBot } from "../media/vision.ts";
 
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
 const EXPOSED_KEY = "exposed_ids";
@@ -225,8 +226,13 @@ export class BotRuntime {
 			this.sentMessageSink?.(m);
 		}
 		if (params.sticker) {
-			// sticker ids map to telegram file_id in Phase 7; for now treat as file_id directly
-			const m = await this.api.sendSticker(chatId, params.sticker, params.reply_to);
+			const row = this.db.query("SELECT file_unique_id FROM media WHERE short_id = ?").get(params.sticker) as
+				| { file_unique_id: string }
+				| null;
+			if (!row) throw new Error(`unknown sticker id: ${params.sticker} (use one from the Available stickers list)`);
+			const fileId = fileIdForBot(this.db, this.bot.id, row.file_unique_id);
+			if (!fileId) throw new Error(`sticker ${params.sticker} is not sendable by this bot (no file_id)`);
+			const m = await this.api.sendSticker(chatId, fileId, params.reply_to);
 			const canonical = insertSentMessage(this.db, this.bot.id, m);
 			sentIds.push(canonical.message_id);
 			this.markExposed([canonical.message_id]);
@@ -267,10 +273,48 @@ export class BotRuntime {
 		}
 
 		const visibleIds = new Set(this.exposed);
+		// lazy vision: only now that this bot is woken and the media enters its context
+		for (const row of batch) {
+			if (!row.media) continue;
+			const media = JSON.parse(row.media) as { kind: string; file_unique_id?: string };
+			if (!media.file_unique_id || (media.kind !== "photo" && media.kind !== "sticker")) continue;
+			const existing = this.db.query("SELECT vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as
+				| { vision: string | null }
+				| null;
+			if (existing?.vision) continue; // persistent cache hit, shared by both bots
+			try {
+				this.recordEvent("vision", { file_unique_id: media.file_unique_id, kind: media.kind });
+				await ensureVision(this.db, this.api, this.bot.id, this.config.auxiliaryVisualModel, media.file_unique_id);
+			} catch (err) {
+				this.recordEvent("error", { stage: "vision", error: String(err) });
+			}
+		}
 		const text = serializeMessages(this.db, batch, { visibleIds });
 		if (!text.trim()) return;
 		this.markExposed(batch.map((r) => r.message_id));
-		await this.session.sendUserMessage(text);
+		const suffix = [text, this.stickerCandidatesBlock()].filter(Boolean).join("\n\n");
+		await this.session.sendUserMessage(suffix);
+	}
+
+	/** Small dynamic sticker candidate list (semantic, short ids). Empty string when catalog is empty. */
+	private stickerCandidatesBlock(): string {
+		// assign short ids to vision-described stickers that don't have one yet
+		const unassigned = this.db
+			.query("SELECT file_unique_id FROM media WHERE kind = 'sticker' AND json_extract(vision, '$.text') IS NOT NULL AND short_id IS NULL")
+			.all() as { file_unique_id: string }[];
+		for (const row of unassigned) {
+			const count = (this.db.query("SELECT COUNT(*) c FROM media WHERE short_id IS NOT NULL").get() as { c: number }).c;
+			this.db.query("UPDATE media SET short_id = ? WHERE file_unique_id = ?").run(`s${count + 1}`, row.file_unique_id);
+		}
+		const rows = this.db
+			.query("SELECT short_id, sticker_emoji, vision FROM media WHERE kind = 'sticker' AND short_id IS NOT NULL ORDER BY rowid DESC LIMIT 8")
+			.all() as { short_id: string; sticker_emoji: string | null; vision: string }[];
+		if (rows.length === 0) return "";
+		const lines = rows.map((r) => {
+			const desc = (JSON.parse(r.vision) as { text: string }).text.replace(/\s+/g, " ").slice(0, 60);
+			return `${r.short_id} = ${r.sticker_emoji ?? ""} ${desc}`.trim();
+		});
+		return `Available stickers:\n${lines.join("\n")}`;
 	}
 
 	private markExposed(ids: number[]): void {

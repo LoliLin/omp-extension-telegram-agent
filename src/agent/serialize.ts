@@ -46,14 +46,22 @@ function senderLabel(db: Database, m: MessageRow): string {
 	return parts.length > 0 ? `${name} (${parts.join(" · ")})` : name;
 }
 
-function mediaPlaceholder(mediaJson: string): string {
-	const media = JSON.parse(mediaJson) as { kind: string; sticker_emoji?: string; sticker_set?: string };
+function mediaPlaceholder(db: Database, mediaJson: string): string {
+	const media = JSON.parse(mediaJson) as { kind: string; sticker_emoji?: string; sticker_set?: string; file_unique_id?: string };
+	let vision: string | null = null;
+	if (media.file_unique_id) {
+		const row = db.query("SELECT vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as
+			| { vision: string | null }
+			| null;
+		if (row?.vision) vision = (JSON.parse(row.vision) as { text: string }).text;
+	}
 	if (media.kind === "sticker") {
 		const emoji = media.sticker_emoji ?? "";
+		if (vision) return `[sticker${emoji ? " " + emoji : ""}: ${vision}]`;
 		const set = media.sticker_set ? ` set:${media.sticker_set}` : "";
 		return `[sticker${emoji ? " " + emoji : ""}${set}]`;
 	}
-	if (media.kind === "photo") return "[图片]";
+	if (media.kind === "photo") return vision ? `[图片: ${vision}]` : "[图片]";
 	return `[${media.kind}]`;
 }
 
@@ -111,9 +119,9 @@ export function serializeMessages(db: Database, rows: MessageRow[], opts: Serial
 			if (q.text) line += ` quote="${q.text.replace(/\s+/g, " ").slice(0, 60)}"`;
 		}
 		line += ":";
-		const body = m.text ?? m.caption ?? (m.media ? mediaPlaceholder(m.media) : "");
+		const body = m.text ?? m.caption ?? (m.media ? mediaPlaceholder(db, m.media) : "");
 		if (body) line += ` ${body}`;
-		if (m.media && (m.text || m.caption)) line += ` ${mediaPlaceholder(m.media)}`;
+		if (m.media && (m.text || m.caption)) line += ` ${mediaPlaceholder(db, m.media)}`;
 		if (m.edit_date) line += " (edited)";
 		lines.push(line);
 		opts.visibleIds.add(m.message_id);
