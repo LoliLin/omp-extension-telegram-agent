@@ -33,7 +33,7 @@ README.md（你在这里）
 │
 ├─ 做什么？
 │   ├─ docs/requirement.md      主需求文档（Phase 1–9 基线）
-│   ├─ docs/requirements/       新需求（REQ-*，含清单与实施顺序 README）
+│   ├─ docs/requirements/       新需求（总清单 REQ-LIST.md，完成打勾）
 │   └─ docs/plans/active/       进行中工作的执行计划（PLAN-*）
 │
 ├─ 系统怎么构成？

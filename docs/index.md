@@ -8,7 +8,7 @@
 - `cache.md` — provider cache 工程：prefix invariant / CACHE_SCHEMA_VERSION / telemetry
 - `data-model.md` — SQLite schema 与去重规则
 - `requirement.md` — 主需求文档（Phase 1–9 基线）
-- `requirements/` — 新需求（模板 `REQ-TEMPLATE.md`）
+- `requirements/` — 新需求（**总清单 `REQ-LIST.md`**，模板 `REQ-TEMPLATE.md`）
 - `plans/active/` — 进行中工作的执行状态；完成后移到 `plans/completed/`（模板 `plans/PLAN-TEMPLATE.md`）
 - `adr/` — 长期架构决策（模板 `ADR-TEMPLATE.md`）
 - `engineering/development-guide.md` — **LLM 开发指南，日常开发流程以此为准**

@@ -9,7 +9,7 @@
 - 文档索引：`docs/index.md`
 - 开发流程（LLM 开发指南，日常开发以此为准）：`docs/engineering/development-guide.md`
 - 当前状态 / 新 agent 入口：`docs/handoff.md`（动手前必读，保持短）
-- 主需求文档：`docs/requirement.md`；新需求：`docs/requirements/`（模板 `REQ-TEMPLATE.md`）
+- 主需求文档：`docs/requirement.md`；新需求：`docs/requirements/`（**总清单 `REQ-LIST.md`，完成打勾**；模板 `REQ-TEMPLATE.md`）
 - 进行中的计划：`docs/plans/active/`（模板 `docs/plans/PLAN-TEMPLATE.md`）
 - 架构决策：`docs/adr/`（模板 `ADR-TEMPLATE.md`）
 - Cache 工程（provider prefix invariant）：`docs/cache.md`
