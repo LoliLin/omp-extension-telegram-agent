@@ -157,3 +157,17 @@
 - 测试：bun test 75/75 ✅（基线 66 + 新增 9）+ bun run check ✅；cache golden 不动（tool name/params/schema 未动，diff 可查）。e2e-compaction-manual 真实链路：失败路径（Nothing to compact）epoch 不动 + error 落库 ✅；成功路径 epoch 4→5、kept tail 41 条精确重标（N≠40，证明启发式已移除）✅。注意 e2e-compaction.ts（threshold 版）在 1M window 下已无法廉价触发自动 compaction（reserveTokens 地板 16384 → 触发点 ~984K tokens）
 - Cache impact: NONE——system prompt / 序列化 grammar / tool schema / tool 顺序零变化；provider 可见字节不变（exposure 语义修正是 bug fix，AC1 锁 cache invariant 3）
 - 下一步：REQ-TG-0001（ingestion/poller 可靠性）；长运行 smoke 观察 flush 状态机在真实群的表现
+
+## 2026-08-07 (16) — REQ-TG-0001：Telegram ingestion 与 poller 可靠性
+
+- 做了：
+  - R1 revision key 修正：被取代版本用它自己的时间作 key（原始版用消息 `date`，编辑版用其 `edit_date`），SELECT 补查 `date`；修掉二次编辑撞 `(chat_id, message_id, edit_date)` 主键被 INSERT OR IGNORE 静默丢中间版本的实证 bug；`"edit-unknown"` 提取为常量 `EDIT_UNKNOWN_BOT_ID`
+  - R2 ingest 失败不再推进 offset：`setBotState` 移入 per-update try 且仅在 ingest 成功后执行；失败即中断本批（防止后续 update 的 offset 跳过失败项），下轮 getUpdates 重拉，raw_updates 去重保证幂等；连续失败计数，>=5 次 log warn
+  - R3 setBotState 失败与 ingest 失败同路径走 backoff，poller run() 不再因此 reject 带崩 daemon；主循环在 `await getUpdates` 返回后与每个 update 处理前重检 `stopped`（shutdown 期间返回的批次整体丢弃，不写库不触发路由）
+  - R4 BotApi.call 加 `AbortSignal.timeout`（默认 10s；getUpdates 为长轮询窗口 +10s grace；downloadFile 30s）；非 JSON 错误响应（如 502 HTML）不再抛 SyntaxError，改抛带 HTTP status 的 TelegramApiError；poller 对 401/404 鉴权错误 fail-fast（fatal 日志 + throw），不再无限 backoff
+  - R5：`insertSentMessage` 补 `recordMedia`（消除对 poller echo 补 file_id 映射的隐式依赖）；editMessage 不更新 media 列——代码注释明确不支持 editMessageMedia（编辑带来的 media identity/file_id 映射仍由 ingestUpdate 里的 recordMedia 记录）
+- 为什么：code review 实证二次编辑丢 revision；ingest 抛异常 offset 照常推进导致消息永久丢失；setBotState 异常可让双 bot daemon 整体退出；fetch 无超时 TCP 半死时 poller 假死
+- 文件：src/telegram/{ingest,poller,api}.ts、test/ingest.test.ts（AC1 二次编辑回归 + edit-unknown 边界）、test/poller.test.ts（新，AC2–AC4 + 401 fail-fast，scripted fake API + db 故障注入，不触网络）、docs/{data-model,testing}.md
+- 测试：bun test 81/81 ✅（基线 75 + 新增 6）+ bun run check ✅。AC1：v1(date)/v2(e1) 两条 revision 全链 + messages=v3；AC2：注入故障 offset 不动、重放落库无重复；AC3：setBotState 持续失败 poller 存活走 backoff；AC4：stop 发生在长轮询 in-flight 期间，返回批次不处理不写库
+- Cache impact: NONE——ingestion/poller 层改动，provider 可见内容（system prompt / grammar / tool schema）零变化
+- 下一步：REQ-IPC-0001（IPC/TUI 健壮性）；遗留：raw_updates 与 messages 写入非事务（ingest 在两者之间失败时重放会被 raw 去重短路，需 raw 侧故障模型才触发，本 REQ 未改）；未跑真实群 e2e（改动由 fault-injection 单测覆盖）

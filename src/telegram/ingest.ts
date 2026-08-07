@@ -10,6 +10,9 @@ export interface IngestResult {
 	messageId?: number;
 }
 
+// first_seen_by for edits that arrive before the original message (started mid-history)
+export const EDIT_UNKNOWN_BOT_ID = "edit-unknown";
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export function ingestUpdate(db: Database, botId: string, update: any, groupPeerId: number): IngestResult {
 	const updateId = update.update_id as number;
@@ -85,16 +88,21 @@ function insertMessage(db: Database, botId: string, m: CanonicalMessage): Ingest
 
 function editMessage(db: Database, m: CanonicalMessage): IngestResult {
 	const existing = db
-		.query("SELECT text, caption, entities, edit_date FROM messages WHERE chat_id = ? AND message_id = ?")
-		.get(m.chat_id, m.message_id) as { text: string | null; caption: string | null; entities: string | null; edit_date: number | null } | null;
+		.query("SELECT text, caption, entities, date, edit_date FROM messages WHERE chat_id = ? AND message_id = ?")
+		.get(m.chat_id, m.message_id) as { text: string | null; caption: string | null; entities: string | null; date: number; edit_date: number | null } | null;
 	if (!existing) {
 		// edit arrived for a message we never saw (started mid-history): store as new
-		return insertMessage(db, "edit-unknown", m);
+		return insertMessage(db, EDIT_UNKNOWN_BOT_ID, m);
 	}
-	// revision history: keep the previous version
+	// revision history: keep the superseded version, keyed by *its own* time — the original
+	// version uses the message date, an edited version its edit_date. Keying by the incoming
+	// edit's time would collide with the previous revision on the second edit and silently
+	// drop it (INSERT OR IGNORE).
+	// NOTE: the media column is not updated on edit (editMessageMedia is not handled);
+	// media identity/file_id mappings from edits are still tracked via recordMedia in ingestUpdate.
 	db.query(
 		"INSERT OR IGNORE INTO message_revisions (chat_id, message_id, edit_date, text, caption, entities) VALUES (?, ?, ?, ?, ?, ?)",
-	).run(m.chat_id, m.message_id, existing.edit_date ?? m.edit_date ?? 0, existing.text, existing.caption, existing.entities);
+	).run(m.chat_id, m.message_id, existing.edit_date ?? existing.date, existing.text, existing.caption, existing.entities);
 	db.query("UPDATE messages SET text = ?, caption = ?, entities = ?, edit_date = ? WHERE chat_id = ? AND message_id = ?").run(
 		m.text,
 		m.caption,
@@ -109,6 +117,7 @@ function editMessage(db: Database, m: CanonicalMessage): IngestResult {
 /** Insert a message we just sent via Bot API (send tool). Dedupes against the later poller echo. */
 export function insertSentMessage(db: Database, botId: string, rawMsg: unknown): CanonicalMessage {
 	const canonical = normalizeMessage(rawMsg);
+	recordMedia(db, botId, canonical); // don't rely on the poller echo to fill file_id mappings
 	insertMessage(db, botId, canonical);
 	return canonical;
 }

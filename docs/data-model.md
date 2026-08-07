@@ -20,6 +20,7 @@
 ### message_revisions — 编辑历史
 
 - `(chat_id, message_id, edit_time)` 唯一；存该版本完整 text/entities
+- revision 行的 key 是**被取代版本自己的时间**：原始版本用消息 `date`，编辑过的版本用它当时的 `edit_date`（REQ-TG-0001；此前用旧 edit_date 会在第二次编辑撞主键静默丢中间版本）
 
 ### media — 媒体身份与本地缓存（Phase 7）
 

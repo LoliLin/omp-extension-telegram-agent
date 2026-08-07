@@ -49,6 +49,7 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | deterministic routing property tests | ✅ | 2026-08-07 33/33 + 真实群双 bot 实况 |
 | run_js sandbox isolation | ✅ | 2026-08-07 REQ-SEC-0001 加固后 66/66（含逃逸回归向量）+ 真实 TinyFish 调用 |
 | flush/compaction 状态机（REQ-AGENT-0001） | ✅ | 2026-08-07 test/flush.test.ts + test/search.test.ts：慢 vision 并发触发不重复序列化、send 失败不标 exposed 可重试、compaction 失败/中止/空摘要不错切 epoch、exposure 与 kept tail（N≠40）对齐、search 10s 超时与响应护栏、send 先校验后发 |
+| ingestion/poller 可靠性（REQ-TG-0001） | ✅ | 2026-08-07 test/ingest.test.ts + test/poller.test.ts：二次编辑 revision 全链（v1 按原始 date、v2 按首次 edit_date 作 key）、ingest 失败不推进 offset 且重放无重复、setBotState 失败走 backoff poller 存活、stop 发生在长轮询期间则丢弃返回批次、401 fail-fast |
 | vision lazy/cache | ✅ | 2026-08-07 真实群 sticker/photo 语义正确，双 bot file_id 映射 |
 | compaction（threshold→summary→epoch） | ✅ | 2026-08-07 e2e-compaction 强制触发，epoch 持久化+重启恢复；REQ-AGENT-0001 后补 e2e-compaction-manual：成功路径 epoch 4→5、kept tail 41 条精确重标（N≠40），失败路径（Nothing to compact）epoch 不动 + error 落库 |
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |

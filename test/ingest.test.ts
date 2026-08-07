@@ -95,6 +95,37 @@ describe("ingestUpdate", () => {
 		expect(rev.text).toBe("hello");
 	});
 
+	test("two consecutive edits keep the full revision chain (REQ-TG-0001 AC1)", () => {
+		ingestUpdate(db, "A", makeUpdate(42, makeMessage()), GROUP); // v1, date=1754600000
+		ingestUpdate(db, "A", { update_id: 43, edited_message: makeMessage({ text: "hello v2", edit_date: 1754600100 }) }, GROUP);
+		const r = ingestUpdate(db, "A", { update_id: 44, edited_message: makeMessage({ text: "hello v3", edit_date: 1754600200 }) }, GROUP);
+		expect(r.kind).toBe("edited");
+		// v1 keyed by the original send time, v2 keyed by the first edit time — no collision
+		const revs = db
+			.query("SELECT edit_date, text FROM message_revisions WHERE message_id = 100 ORDER BY edit_date")
+			.all() as { edit_date: number; text: string }[];
+		expect(revs).toEqual([
+			{ edit_date: 1754600000, text: "hello" },
+			{ edit_date: 1754600100, text: "hello v2" },
+		]);
+		const row = db.query("SELECT text, edit_date FROM messages WHERE message_id = 100").get() as Record<string, unknown>;
+		expect(row.text).toBe("hello v3");
+		expect(row.edit_date).toBe(1754600200);
+	});
+
+	test("edit arriving before the original still dedupes revisions (REQ-TG-0001)", () => {
+		// edit-unknown path: stored as a fresh row, later edits revision it normally
+		ingestUpdate(db, "A", { update_id: 45, edited_message: makeMessage({ text: "mid v1", edit_date: 1754600300 }) }, GROUP);
+		ingestUpdate(db, "A", { update_id: 46, edited_message: makeMessage({ text: "mid v2", edit_date: 1754600400 }) }, GROUP);
+		const revs = db
+			.query("SELECT edit_date, text FROM message_revisions WHERE message_id = 100")
+			.all() as { edit_date: number; text: string }[];
+		expect(revs).toEqual([{ edit_date: 1754600300, text: "mid v1" }]);
+		const row = db.query("SELECT text, first_seen_by FROM messages WHERE message_id = 100").get() as Record<string, unknown>;
+		expect(row.text).toBe("mid v2");
+		expect(row.first_seen_by).toBe("edit-unknown");
+	});
+
 	test("reply relation and quote are captured", () => {
 		const m = makeMessage({
 			message_id: 101,

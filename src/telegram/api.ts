@@ -2,6 +2,10 @@
 // Docs: https://core.telegram.org/bots/api
 
 const API_BASE = "https://api.telegram.org";
+const CALL_TIMEOUT_MS = 10_000;
+const DOWNLOAD_TIMEOUT_MS = 30_000;
+// headroom on top of the long-poll window so the server-side timeout fires first
+const LONG_POLL_GRACE_MS = 10_000;
 
 export class TelegramApiError extends Error {
 	code: number;
@@ -15,25 +19,34 @@ export class TelegramApiError extends Error {
 	}
 }
 
+interface ApiResponse<T> {
+	ok: boolean;
+	result?: T;
+	error_code?: number;
+	description?: string;
+	parameters?: { retry_after?: number };
+}
+
 export class BotApi {
 	token: string;
 	constructor(token: string) {
 		this.token = token;
 	}
 
-	async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+	async call<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs: number = CALL_TIMEOUT_MS): Promise<T> {
 		const res = await fetch(`${API_BASE}/bot${this.token}/${method}`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(params),
+			signal: AbortSignal.timeout(timeoutMs),
 		});
-		const body = (await res.json()) as {
-			ok: boolean;
-			result?: T;
-			error_code?: number;
-			description?: string;
-			parameters?: { retry_after?: number };
-		};
+		let body: ApiResponse<T>;
+		try {
+			body = (await res.json()) as ApiResponse<T>;
+		} catch {
+			// intermediaries can answer with HTML/text (e.g. 502 pages); keep the HTTP status
+			throw new TelegramApiError(res.status, `non-JSON response (HTTP ${res.status})`);
+		}
 		if (!body.ok) {
 			throw new TelegramApiError(
 				body.error_code ?? res.status,
@@ -49,11 +62,15 @@ export class BotApi {
 	}
 
 	getUpdates(offset: number, timeoutSec: number): Promise<unknown[]> {
-		return this.call("getUpdates", {
-			offset,
-			timeout: timeoutSec,
-			allowed_updates: ["message", "edited_message"],
-		});
+		return this.call(
+			"getUpdates",
+			{
+				offset,
+				timeout: timeoutSec,
+				allowed_updates: ["message", "edited_message"],
+			},
+			timeoutSec * 1000 + LONG_POLL_GRACE_MS,
+		);
 	}
 
 	sendMessage(
@@ -85,7 +102,9 @@ export class BotApi {
 	}
 
 	async downloadFile(filePath: string): Promise<Uint8Array> {
-		const res = await fetch(`${API_BASE}/file/bot${this.token}/${filePath}`);
+		const res = await fetch(`${API_BASE}/file/bot${this.token}/${filePath}`, {
+			signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+		});
 		if (!res.ok) throw new TelegramApiError(res.status, `file download failed: ${filePath}`);
 		return new Uint8Array(await res.arrayBuffer());
 	}
