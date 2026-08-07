@@ -79,3 +79,11 @@
 - 测试：46/46 ✅（算术/JSON/regex/数组/语法错误/死循环超时 + typeof process|require|Bun|fetch 全 undefined + 真实 TinyFish 调用）
 - Cache impact: INTENTIONAL EPOCH CHANGE（toolsHash 94fa00c707dd → 7b1983d95e25，tool schema 从 1 个变 3 个；生产前最后一次预期变化）
 - 下一步：Phase 7 media（photo/sticker/lazy vision/cache）
+
+## 2026-08-07 (9) — Phase 7 完成：Media
+
+- 做了：ingest 记录 media 身份 + 每 bot file_id 映射（重复消息也记录第二个 bot 的 file_id，有测试）；media.short_id 目录（s<N>，migration 兼容旧 dev db）；vision.ts（codex exec -m gpt-5.6-luna -c reasoning low，photo/sticker 两种 prompt，持久缓存双 bot 共享，tgs/webm 标记 unsupported 不污染目录，in-flight 去重）；flush 前 lazy vision（只在 bot 被唤醒且媒体进入其上下文时）；stickerCandidatesBlock 动态后缀（≤8 条语义候选）；send sticker 解析 s<N> → 本 bot file_id
+- Codex 研究发现：auxiliary_visual_model "gpt-5.6-luna-low" = 模型 gpt-5.6-luna + reasoning low（ChatGPT 账号不支持 "-low" 后缀模型名，models_cache.json 确认可用 slug）；codex exec -i 图片 -o 输出文件 --ephemeral --skip-git-repo-check -s read-only
+- 测试：47/47 unit ✅；真实群：sticker vision 语义正确（"撒娇卖萌地表示委屈…大眼含泪"）、photo OCR 正确（识别出终端截图里的 todo 清单）、双 bot file_id 映射 ✅
+- Cache impact: NONE for provider payload（sticker candidates 是动态 suffix，追加式）；序列化 placeholder 对同一媒体确定
+- 下一步：Phase 8 context refinement（compaction policy/telemetry 分析脚本/cache 回归测试）
