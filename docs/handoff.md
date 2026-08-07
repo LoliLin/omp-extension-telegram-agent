@@ -4,45 +4,43 @@
 
 ## 当前 phase
 
-Phase 9 — Stabilization（长运行 smoke、error recovery、restart/reconnect、文档清理）
+Phase 9 收尾 — REQ-LIST 已全部完成（8 篇在本轮补齐，见 docs/devlog.md (17)）。剩余：真实群长运行观察。
 
 ## 已完成
 
-- Phase 1–8 全部完成并提交（见 docs/devlog.md）：骨架、Telegram persistence、Basic Agent、TUI、双 bot routing、search/run_js、media pipeline、context refinement
-- Phase 8：自定义 compaction（状态导向摘要、threshold=128K 触发、epoch 持久化+exposure 重置）、cache golden 回归测试、threshold 分析脚本、e2e-compaction 验证
+- Phase 1–9 全部完成：骨架、Telegram persistence、Basic Agent、TUI、双 bot routing、search/run_js、media、compaction、REQ 修复与功能全清单（REQ-LIST.md 全勾选）
+- 本轮（REQ-IPC/OPS/TEST/CONF/STICKER/UI-0001/2/3）：IPC 加固（streaming decoder/背压/复合游标/600/注入防护）、配置校验与 pid 锁、测试体系（离线 + golden 全锁 + e2e 可信）、bots.config.json 多 bot 配置、固定 sticker 目录（cache schema v2）、attach 过滤 + 可观测面板 + kitty 图像
 
 ## 正在做
 
-- 文档体系已切换为 agent-kit 衍生版（根 AGENTS.md + docs/engineering/development-guide.md 为流程权威）；11 篇 REQ 已建（docs/requirements/README.md 有清单与建议顺序）
-- REQ-SEC-0001 已完成：run_js vm context 无任何 host realm 对象（codeGeneration 禁用 + 结果仅字符串跨界），spawn 用 process.execPath + error 监听，child --smol；逃逸回归测试全绿；威胁模型见 docs/architecture.md
-- REQ-AGENT-0001 已完成：trigger/flush 串行状态机（flushing 本地标志 + pendingTrigger 合并，markExposed 后移到 send 成功后，全链路 catch 无 unhandled rejection）；compaction_end 区分成败（空摘要走 cancel 失败路径）；exposure 重置与 kept tail 严格对齐（解析 context entries 锚定行，替代最近 40 条启发式）；search 10s 超时 + 响应护栏；send 先校验后发。回归测试 test/flush.test.ts + test/search.test.ts；真实链路 e2e-compaction-manual 验证成功/失败两路径
-- REQ-TG-0001 已完成：revision key 改用被取代版本自己的时间（修二次编辑丢历史实证 bug）；ingest/setBotState 失败不推进 offset、走 backoff（下轮重拉靠 raw_updates 去重幂等）；长轮询 await 后重检 stopped；Bot API 全面超时 + 非 JSON 响应保留 HTTP status + 401/404 fail-fast。回归 test/ingest.test.ts + test/poller.test.ts（81/81）
-- Phase 9：长运行稳定性验证（daemon 长跑 + TUI 反复 attach/detach + restart + error recovery）
+- 真实群长运行观察（sticker 目录 + 后台 vision 预热完成后重启验证目录语义补全、面板实时更新、双 bot 行为无回归）；daemon 此刻应处于停止状态，`bun run src/main.ts start` 启动
 
 ## 下一步（按序）
 
-1. 长运行 smoke：daemon 跑数小时/过夜，观察 daemon.log、遥测、内存
-2. error recovery 边界：DeepSeek 报错/超时、Telegram 网络断开、poller 409、codex vision 失败路径
-3. restart + TUI reconnect 再验证（Phase 2/4 已做过单点，这次配合长跑）
-4. 文档清理：architecture/cache/data-model 与代码最终一致性
+1. 等后台 vision 预识别跑完（日志 `[sticker-catalog]`，两个 set 共 212 个 sticker），重启 daemon 验证目录块语义补全（system hash 变化）
+2. 长运行 smoke：daemon 跑数小时，观察 daemon.log / 遥测 / 内存 / 面板实时更新
+3. 遥测对比（REQ-STICKER-0001 AC3）：`bun run scripts/analyze-context-window.ts`，观察 sticker 相关 prefix 命中
 
 ## 当前架构决定
 
-Bun 单进程 daemon 双 AgentSession；raw Bot API 长轮询；bun:sqlite；TUI 独立进程 + Unix socket IPC；send terminate:true；自定义 compaction（session_before_compact extension，threshold 128K via reserveTokens，keepRecent 20K）；send/search/run_js 三工具固定顺序；lazy vision via codex exec；deterministic routing（mention>reply>名字>HMAC 概率）
+Bun 单进程 daemon 任意数量 AgentSession（bots.config.json 驱动）；raw Bot API 长轮询；bun:sqlite；TUI 独立进程 + Unix socket IPC（chmod 600）；自定义 compaction（threshold 128K、keepRecent 20K）；send/search/run_js 固定顺序 + 每 bot tools 开关；固定 sticker 目录（CACHE_SCHEMA_VERSION=2，system prompt 稳定块）+ 动态候选（消息之后）；lazy vision（catalog 后台预识别）；deterministic routing（mention>reply>名字>累积概率）
 
 ## 重要文件
 
-- src/agent/runtime.ts（BotRuntime：session、tools、compaction ext、exposure、epoch）
-- src/agent/serialize.ts / prompt.ts（cache grammar v1，test/cache.test.ts golden 锁定）
-- src/config.ts（compaction_threshold / compaction_keep_recent）
-- scripts/analyze-context-window.ts / e2e-compaction.ts
-- Pi 源码 ../pi @ f562a1a（docs/research.md 结论对应此 commit）
+- src/config.ts（bots.config.json + .env 双源，全部错误收集校验）；bots.config.example.json
+- src/agent/runtime.ts（BotRuntime：session、tools、compaction ext、exposure、epoch、usageSink）
+- src/media/sticker-catalog.ts（固定目录：fetch/persist/short_id/后台 vision/序列化）
+- src/agent/{serialize,prompt,tools,router}.ts（cache grammar v1 + v2 目录块，golden 锁定）
+- src/daemon/{index,ipc-server,pid}.ts（schema 版本 epoch bump、per-listener filter、stats lastId、排他 pid 锁）
+- src/tui/index.ts（attach filter、Image 渲染、底部面板）
+- scripts/analyze-context-window.ts（真实 compaction 同步）
 
 ## 最后测试状态
 
-bun test 81/81 ✅；e2e-compaction ✅（epoch 2→3→4，重启恢复）+ e2e-compaction-manual ✅（REQ-AGENT-0001：成功 epoch 4→5 kept=41、失败不错切 epoch）；真实遥测 50 runs hit ratio 90.0%。见 docs/testing.md。
+bun test 134/134 ✅ + bun run check ✅；真实冒烟（start/status/stop/attach A/非法 id/面板数值）✅。见 docs/testing.md。
 
 ## 已知问题
 
-- personas/ 工具段已适配（Phase 3 完成），无遗留
+- 后台 vision 预识别未完成前，目录 sticker 在上下文中显示 [未识别]，重启后补全（设计如此）
+- panel 数值跨 daemon 重启为全历史口径（累计含旧 epoch），见 docs/cache.md
 - bun test 强制 UTC：涉时间序列化的测试必须 pin TZ（cache.test.ts 已处理）

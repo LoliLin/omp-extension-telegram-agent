@@ -171,3 +171,18 @@
 - 测试：bun test 81/81 ✅（基线 75 + 新增 6）+ bun run check ✅。AC1：v1(date)/v2(e1) 两条 revision 全链 + messages=v3；AC2：注入故障 offset 不动、重放落库无重复；AC3：setBotState 持续失败 poller 存活走 backoff；AC4：stop 发生在长轮询 in-flight 期间，返回批次不处理不写库
 - Cache impact: NONE——ingestion/poller 层改动，provider 可见内容（system prompt / grammar / tool schema）零变化
 - 下一步：REQ-IPC-0001（IPC/TUI 健壮性）；遗留：raw_updates 与 messages 写入非事务（ingest 在两者之间失败时重放会被 raw 去重短路，需 raw 侧故障模型才触发，本 REQ 未改）；未跑真实群 e2e（改动由 fault-injection 单测覆盖）
+
+## 2026-08-07 (17) — 完成 REQ-LIST 剩余 8 篇（IPC/OPS/TEST/CONF/STICKER/UI×3）
+
+- 做了（每篇一个内聚 commit，trailer 见 git log）：
+  - **REQ-IPC-0001** (d0d5d56)：FrameDecoder 单 streaming TextDecoder + 4MB 接收上限；socket.write<0/队列 1MB 上限即踢；history 复合游标 (ts,rank,id)（rank 0=evt id、1=msg id，同秒不丢不重，legacy beforeTs 保持严格 ts< 双向兼容）；socket chmod 600 + limit 夹取 [1,500]；TUI strip ANSI/OSC/DCS + (chatId,messageId)/(evtId) 去重 + 翻页日期分隔
+  - **REQ-OPS-0001** (ca55ec0)：loadConfig 收集全部错误一次性抛出（数值范围/概率和/peer id 归一化）；.env.example 冒号格式；data/ 进 .gitignore；daemon 最早时机 wx 排他 pid 锁 + stop/status cmdline 校验（pid 复用不误杀）+ 残留清理；git-gpg.sh 改 --passphrase-fd；start 等 ready
+  - **REQ-TEST-0001** (c8fcd67)：TinyFish 真实调用 env gate；tools.ts 提取 + golden 锁 tools hash 与 compaction summary prompt；is_bot 下沉 routeMessage；e2e 脚本断言 exit code + 轮询替代 sleep；analyze 脚本 epoch/flag/回落同步（60 runs 回放：3 真实 compaction、幻影 0）；盲区补测
+  - **REQ-CONF-0001** (3027e95)：bots.config.json（任意数量 bot、persona 外置绝对路径/~、token_env 引用、routing_p 累积阈值、tools 开关）；id 校验 [A-Za-z0-9_-]+（大写兼容历史 A/B）；迁移 golden 逐字节不变
+  - **REQ-STICKER-0001** (84da315 + 563f014 + 91c0c9a)：每 bot sticker_sets；启动 getStickerSet 持久化 + rowid short_id + vision 预识别（**后台化**：codex 每 sticker ~10s，阻塞会让 poller 离线数十分钟）；目录块进 system prompt（CACHE_SCHEMA_VERSION 1→2，daemon 检测版本变化全员开新 epoch）；动态候选排除目录 sticker 且锁定在消息之后；上限 120
+  - **REQ-UI-0001/2/3** (014ec4c + 91c0c9a)：R1 研究（docs/research.md）——pi 插件形态不适合独立观察者，保持独立进程 + pi-tui `Image` 组件（kitty 原生、自动降级）；attach [bot-id] 服务端过滤（hello filter，broadcast/usage/history/snapshot 全过滤，群消息全量）；底部面板（每 bot epoch/last run/cum tokens/成本/hit ratio，snapshot 全历史基线 + lastId 防双计 + usage 增量推送）；媒体经 IPC 传 mediaPath/mediaDesc，TUI 同 uid 读文件
+- 真实群冒烟发现并修复：catalog short_id 先于 vision 分配 → 动态候选查询 JSON.parse(null) 崩（修复 + 回归测试）；shutdown 在 provider/codex 挂起时可永久卡死（35s 硬超时兜底）；gpt-5-mini 对 ChatGPT 账号 codex 不可用（example 改 gpt-5.6-luna-low）；start 首启等待策略（60s 窗口 + 提示 status/log）
+- 文件：src/{ipc,config,sanitize,main}.ts、src/daemon/{index,ipc-server,pid}.ts、src/agent/{runtime,router,prompt,tools}.ts、src/media/sticker-catalog.ts、src/tui/index.ts、scripts/*、test/{ipc,config,sticker,analyze}.test.ts 等、docs/{architecture,cache,data-model,testing,research}.md、docs/runbooks/daemon.md、bots.config.example.json
+- 测试：bun test 134/134 ✅ + bun run check ✅；真实冒烟：daemon 秒起、socket 600、attach A 单 bot 视角 + 全局面板双 bot 遥测（hit 89.4%）、非法 id 报错、stop 2s 优雅退出
+- Cache impact: **INTENTIONAL**（REQ-STICKER-0001：v1→v2，固定目录进稳定 prefix，系统 prompt 带目录 bot hash 变化；无目录 bot 逐字节不变；golden 锁定；真实群 system hash 已变、epoch 已开新）
+- 下一步：真实群长运行观察（sticker 目录 + 后台 vision 预热完成后重启验证目录语义补全、面板实时更新、双 bot 行为无回归）
