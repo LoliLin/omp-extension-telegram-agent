@@ -25,3 +25,12 @@
 - 文件：docs/research.md, docs/project.md, docs/architecture.md, docs/cache.md, docs/data-model.md, docs/testing.md, docs/devlog.md, docs/handoff.md
 - Cache impact: NONE（仅文档）
 - 下一步：项目骨架 + Bun×Pi SDK smoke test
+
+## 2026-08-07 (3) — Phase 1 完成：骨架 + Bun×Pi SDK smoke
+
+- 做了：package.json（file: 依赖 ../pi/packages/*，全部 0.84.1 与研究 commit 一致）；tsconfig；src/config.ts（.env 冒号格式 loader）；src/db/schema.sql + db.ts（bun:sqlite，11 表）；personas/ 两人设提取（verbatim，工具适配留到 Phase 3 首次 agent run 前）；scripts/smoke-pi.ts
+- 为什么：验证最大技术风险——Bun 跑 Pi SDK
+- 关键发现：DefaultResourceLoader 需要 cwd+agentDir+systemPrompt（不是 systemPromptOverride 函数）；pi-ai 原生支持 DEEPSEEK_API_KEY env；deepseek-v4-flash 在内置 catalog（contextWindow 1M, cacheRead $0.0028/M）
+- 测试：smoke-pi 真实调用 DeepSeek 成功（reply "4"，thinking 捕获，usage 含 cacheRead/cacheWrite 字段）；schema 建表验证通过
+- Cache impact: NONE（尚未有 agent run）
+- 下一步：Phase 2 Telegram ingestion
