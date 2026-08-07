@@ -33,6 +33,7 @@ bun test                # unit + replay（不涉及网络）
 bun run check           # tsc --noEmit
 bun run scripts/e2e-agent.ts        # 真实链路 e2e（需 .env）
 bun run scripts/e2e-compaction.ts   # compaction e2e（需 .env）
+bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_end 成功/失败路径（需 .env；1M window 下 threshold e2e 已无法廉价触发自动 compaction）
 ```
 
 ## 当前状态
@@ -47,8 +48,9 @@ bun run scripts/e2e-compaction.ts   # compaction e2e（需 .env）
 | TUI attach/detach | ✅ | 2026-08-07 screen 实测：attach 实时流/退出 daemon 存活/重进历史完整 |
 | deterministic routing property tests | ✅ | 2026-08-07 33/33 + 真实群双 bot 实况 |
 | run_js sandbox isolation | ✅ | 2026-08-07 REQ-SEC-0001 加固后 66/66（含逃逸回归向量）+ 真实 TinyFish 调用 |
+| flush/compaction 状态机（REQ-AGENT-0001） | ✅ | 2026-08-07 test/flush.test.ts + test/search.test.ts：慢 vision 并发触发不重复序列化、send 失败不标 exposed 可重试、compaction 失败/中止/空摘要不错切 epoch、exposure 与 kept tail（N≠40）对齐、search 10s 超时与响应护栏、send 先校验后发 |
 | vision lazy/cache | ✅ | 2026-08-07 真实群 sticker/photo 语义正确，双 bot file_id 映射 |
-| compaction（threshold→summary→epoch） | ✅ | 2026-08-07 e2e-compaction 强制触发，epoch 持久化+重启恢复 |
+| compaction（threshold→summary→epoch） | ✅ | 2026-08-07 e2e-compaction 强制触发，epoch 持久化+重启恢复；REQ-AGENT-0001 后补 e2e-compaction-manual：成功路径 epoch 4→5、kept tail 41 条精确重标（N≠40），失败路径（Nothing to compact）epoch 不动 + error 落库 |
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |
 | threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ⏳ Phase 9 | - |

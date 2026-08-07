@@ -141,3 +141,19 @@
 - 测试：bun test 66/66 ✅ + bun run check ✅；7 个逃逸向量（constructor 链 ×5、new Function、eval）全部 ok:false；fs 读取尝试无一成功；spawn ENOENT 结构化报错；异步 microtask/内存膨胀 ~3s 内被打断（实测 Bun 下约等于 vm timeout），5s SIGKILL 兜底
 - Cache impact: NONE（tool schema/description/name 未动，toolsHash 不变）
 - 下一步：REQ-AGENT-0001（flush 状态机）
+
+## 2026-08-07 (15) — REQ-AGENT-0001：trigger/flush 生命周期收敛为串行状态机
+
+- 做了：
+  - R1 flush 串行化：`flushing` 本地标志在 trigger 内同步置位（不等 SDK agent_start），在途 trigger 只合并为 `pendingTrigger`，flush 循环 drain；agent_settled 不再另起 flush（单一所有者）。burst 合并语义不变
+  - R2 markExposed 移到 `sendUserMessage` 成功之后（含 catchup skip 的标记也后移）；send 失败消息保持未曝光，由后续 trigger 重试
+  - R3 flush 全链路 catch → 只落 agent_events `error{stage:flush}`，无 unhandled rejection 逃逸；`stop()` 置 stopping + 有界（30s）等待在途 flush 再 dispose（shutdown 不写半状态）
+  - R4 `compaction_end` 读 event payload：仅 `result` 存在且未 aborted 才 epoch+1/清 exposure；失败/中止只落 `error{stage:compaction}`。空摘要防护用 `{cancel:true}` 而非 throw——**SDK extension runner 吞掉 handler 异常并静默回退默认摘要**（源码实证），cancel 是唯一到达失败路径的机制
+  - R5 exposure 重置与 kept tail 严格对齐：从 `sessionManager.buildContextEntries()`（compaction 后 provider 实际可见 entry 集合）的 user message 文本解析锚定行 `^[HH:MM:SS] #<id> ` 反推幸存集合，替代「最近 40 条」启发式（kept tail 按 token 保留，实测 N=41）。SDK 不提供 entry→telegram id 映射，解析自身 grammar 是唯一严格对齐来源；已知限制：群消息文本伪造换行+锚定行可误标个别 id（assistant/tool/custom entry 不解析，模型无法注入）
+  - R6 search.ts：`AbortSignal.timeout(10s)` + 响应体 256KB 护栏（content-length + 实际读取双检查）；runtime search tool 捕获失败返回结构化错误文本 + `error{stage:tool_search}`，不再让 running 卡死
+  - R7 executeSend：sticker short_id/file_id 解析等全部校验前移到任何网络发送之前，消除 text 双发
+- 为什么：生产 daemon.log 实证 flush 重入（"Agent is already processing a prompt" ×2）与 markExposed 先于 send 的持久失忆
+- 文件：src/agent/runtime.ts、src/tools/search.ts、test/flush.test.ts（新，AC1–AC4+R7）、test/search.test.ts（新，AC5+护栏）、scripts/e2e-compaction-manual.ts（新）、docs/{architecture,cache,testing}.md、docs/plans/active/PLAN-20260807-flush-state-machine.md
+- 测试：bun test 75/75 ✅（基线 66 + 新增 9）+ bun run check ✅；cache golden 不动（tool name/params/schema 未动，diff 可查）。e2e-compaction-manual 真实链路：失败路径（Nothing to compact）epoch 不动 + error 落库 ✅；成功路径 epoch 4→5、kept tail 41 条精确重标（N≠40，证明启发式已移除）✅。注意 e2e-compaction.ts（threshold 版）在 1M window 下已无法廉价触发自动 compaction（reserveTokens 地板 16384 → 触发点 ~984K tokens）
+- Cache impact: NONE——system prompt / 序列化 grammar / tool schema / tool 顺序零变化；provider 可见字节不变（exposure 语义修正是 bug fix，AC1 锁 cache invariant 3）
+- 下一步：REQ-TG-0001（ingestion/poller 可靠性）；长运行 smoke 观察 flush 状态机在真实群的表现

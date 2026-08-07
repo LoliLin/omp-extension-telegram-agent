@@ -5,6 +5,8 @@
 const SEARCH_URL = "https://api.search.tinyfish.ai";
 const MAX_RESULTS = 5;
 const MAX_SNIPPET = 200;
+const SEARCH_TIMEOUT_MS = 10_000; // a hung upstream must not wedge the agent turn (REQ-AGENT-0001 R6)
+const MAX_BODY_BYTES = 256 * 1024; // guard against pathological responses
 
 export interface SearchHit {
 	title: string;
@@ -12,12 +14,23 @@ export interface SearchHit {
 	snippet: string;
 }
 
-export async function tinyFishSearch(apiKey: string, query: string): Promise<SearchHit[]> {
-	const res = await fetch(`${SEARCH_URL}?query=${encodeURIComponent(query)}&num_results=${MAX_RESULTS}`, {
+export interface SearchOptions {
+	timeoutMs?: number;
+	url?: string; // test override
+}
+
+export async function tinyFishSearch(apiKey: string, query: string, opts: SearchOptions = {}): Promise<SearchHit[]> {
+	const url = opts.url ?? SEARCH_URL;
+	const res = await fetch(`${url}?query=${encodeURIComponent(query)}&num_results=${MAX_RESULTS}`, {
 		headers: { "X-API-Key": apiKey },
+		signal: AbortSignal.timeout(opts.timeoutMs ?? SEARCH_TIMEOUT_MS),
 	});
 	if (!res.ok) throw new Error(`search failed: http ${res.status}`);
-	const body = (await res.json()) as {
+	const declared = Number(res.headers.get("content-length") ?? 0);
+	if (declared > MAX_BODY_BYTES) throw new Error(`search failed: response too large (${declared} bytes)`);
+	const text = await res.text();
+	if (text.length > MAX_BODY_BYTES) throw new Error("search failed: response too large");
+	const body = JSON.parse(text) as {
 		results?: { title?: string; url?: string; snippet?: string }[];
 	};
 	return (body.results ?? []).slice(0, MAX_RESULTS).map((r) => ({

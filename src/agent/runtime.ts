@@ -11,6 +11,8 @@ import {
 	SettingsManager,
 	serializeConversation,
 	type AgentSession,
+	type AgentSessionEvent,
+	type CompactionResult,
 	type ExtensionAPI,
 	type ModelRuntime,
 	type SessionBeforeCompactEvent,
@@ -56,8 +58,15 @@ export class BotRuntime {
 	private modelRuntime: ModelRuntime;
 	private api: BotApi;
 	private session: AgentSession | null = null;
+	private model: ReturnType<ModelRuntime["getModel"]>; // resolved in init(); used by the compaction extension
 	private running = false;
+	// Flush state machine (REQ-AGENT-0001): `flushing` is owned locally and set synchronously
+	// at trigger time — never gated on SDK events. While flushing, triggers only coalesce
+	// into `pendingTrigger`; the flush loop drains it (burst-merge semantics unchanged).
+	private flushing = false;
 	private pendingTrigger = false;
+	private stopping = false;
+	private flushPromise: Promise<void> | null = null;
 	private exposed = new Set<number>();
 	private epoch = 1;
 	private runStartTs = 0;
@@ -121,12 +130,22 @@ export class BotRuntime {
 				query: Type.String({ description: "Search query" }),
 			}),
 			execute: async (_toolCallId: string, params: { query: string }) => {
-				const hits = await tinyFishSearch(this.config.tinyfishApiKey, params.query);
-				this.recordEvent("tool_search", { query: params.query, hits: hits.length });
-				return {
-					content: [{ type: "text" as const, text: formatSearchResults(hits) }],
-					details: { query: params.query, hits: hits.length },
-				};
+				try {
+					const hits = await tinyFishSearch(this.config.tinyfishApiKey, params.query);
+					this.recordEvent("tool_search", { query: params.query, hits: hits.length });
+					return {
+						content: [{ type: "text" as const, text: formatSearchResults(hits) }],
+						details: { query: params.query, hits: hits.length },
+					};
+				} catch (err) {
+					// structured failure back to the model; never let a hung upstream wedge the turn (R6)
+					const error = err instanceof Error ? err.message : String(err);
+					this.recordEvent("error", { stage: "tool_search", error });
+					return {
+						content: [{ type: "text" as const, text: `search failed: ${error}` }],
+						details: { query: params.query, error },
+					};
+				}
 			},
 		};
 		const runJsTool = {
@@ -152,6 +171,7 @@ export class BotRuntime {
 
 		const model = this.modelRuntime.getModel("deepseek", this.config.deepseekModel);
 		if (!model) throw new Error(`model not found: deepseek/${this.config.deepseekModel}`);
+		this.model = model;
 
 		// Custom compaction: chat-oriented summary (state, not replay), threshold from config.
 		// Pi's trigger formula is contextTokens > contextWindow - reserveTokens, so reserve = window - threshold.
@@ -161,35 +181,7 @@ export class BotRuntime {
 			name: "tg-compaction",
 			hidden: true,
 			factory: (pi: ExtensionAPI) => {
-				pi.on("session_before_compact", async (event: SessionBeforeCompactEvent) => {
-					const prep = event.preparation;
-					const conversation = serializeConversation(prep.messagesToSummarize as never);
-					const userText =
-						`<conversation>\n${conversation}\n</conversation>\n\n` +
-						(prep.previousSummary
-							? `<previous-summary>\n${prep.previousSummary}\n</previous-summary>\n\n把上面的旧摘要与新内容合并成一份更新的摘要。`
-							: "请输出摘要。");
-					const result = await this.modelRuntime.completeSimple(
-						model as never,
-						{
-							systemPrompt: COMPACTION_SUMMARY_PROMPT,
-							messages: [{ role: "user", content: userText, timestamp: Date.now() }],
-						},
-						{ cacheRetention: "none", maxTokens: 4096 },
-					);
-					const summary = result.content
-						.filter((c: { type: string }) => c.type === "text")
-						.map((c: unknown) => (c as { text: string }).text)
-						.join("\n");
-					return {
-						compaction: {
-							summary,
-							firstKeptEntryId: prep.firstKeptEntryId,
-							tokensBefore: prep.tokensBefore,
-							usage: result.usage,
-						},
-					};
-				});
+				pi.on("session_before_compact", (event: SessionBeforeCompactEvent) => this.handleBeforeCompact(event));
 			},
 		};
 
@@ -257,31 +249,107 @@ export class BotRuntime {
 					break;
 				case "agent_settled":
 					this.running = false;
-					if (this.pendingTrigger) {
-						this.pendingTrigger = false;
-						void this.flush();
-					}
+					// no flush re-trigger here: the flush loop owns pendingTrigger (REQ-AGENT-0001 R1)
 					break;
 				case "compaction_end":
-					this.onCompactionEnd();
+					this.onCompactionEnd(event);
 					break;
 			}
 		});
 	}
 
-	/** New context epoch after compaction: reset exposure, re-mark the recent kept tail. */
-	private onCompactionEnd(): void {
+	/**
+	 * Compaction ended. Only a successful compaction (result present, not aborted) starts a
+	 * new epoch and resets exposure; failure/abort leaves epoch and exposure untouched (R4).
+	 */
+	private onCompactionEnd(event: Extract<AgentSessionEvent, { type: "compaction_end" }>): void {
+		if (event.aborted || !event.result) {
+			this.recordEvent("error", { stage: "compaction", reason: event.reason, aborted: event.aborted, error: event.errorMessage ?? null });
+			console.log(`[bot ${this.bot.id}] compaction ${event.aborted ? "aborted" : "failed"} (${event.reason}): ${event.errorMessage ?? "no error message"}`);
+			return;
+		}
 		this.epoch += 1;
 		setBotState(this.db, this.bot.id, EPOCH_KEY, String(this.epoch));
 		this.exposed.clear();
-		// the last ~40 telegram messages survive inside the kept tail; treat as exposed
-		const chatId = Number(`-100${this.config.groupPeerId}`);
-		const recent = this.db
-			.query("SELECT message_id FROM messages WHERE chat_id = ? ORDER BY message_id DESC LIMIT 40")
-			.all(chatId) as { message_id: number }[];
-		this.markExposed(recent.map((r) => r.message_id));
-		this.recordEvent("compaction", { epoch: this.epoch });
-		console.log(`[bot ${this.bot.id}] compaction -> epoch ${this.epoch}`);
+		// Re-mark exactly the telegram messages that survive inside the kept tail (R5) —
+		// derived from the entries the provider actually sees, not a count heuristic.
+		const kept = this.keptTailMessageIds();
+		this.markExposed(kept);
+		this.recordEvent("compaction", { epoch: this.epoch, kept: kept.length });
+		console.log(`[bot ${this.bot.id}] compaction -> epoch ${this.epoch}, kept tail ${kept.length} msgs`);
+	}
+
+	/**
+	 * Ids of telegram messages still visible in context after compaction, parsed out of the
+	 * user-message entries in the session's current context (compaction entry + kept tail +
+	 * post-compaction entries). The SDK does not map session entries back to telegram ids, so
+	 * we parse our own serialization grammar (`[HH:MM:SS] #<id> ` at line start) — the same
+	 * bytes the provider sees. Known limit: a chat message whose text contains a newline
+	 * followed by a forged `[HH:MM:SS] #<id> ` line would be mis-marked exposed (accepted;
+	 * assistant/tool/custom entries are never parsed, so the model cannot inject these).
+	 */
+	private keptTailMessageIds(): number[] {
+		if (!this.session) return [];
+		const ids = new Set<number>();
+		for (const entry of this.session.sessionManager.buildContextEntries()) {
+			if (entry.type !== "message" || entry.message.role !== "user") continue;
+			const content = entry.message.content;
+			const text =
+				typeof content === "string"
+					? content
+					: (content ?? [])
+							.filter((c) => c.type === "text")
+							.map((c) => (c as { text: string }).text)
+							.join("\n");
+			for (const m of text.matchAll(/^\[\d{2}:\d{2}:\d{2}\] #(\d+) /gm)) ids.add(Number(m[1]));
+		}
+		return [...ids];
+	}
+
+	/** session_before_compact handler: empty summary is refused via cancel, never persisted. */
+	private async handleBeforeCompact(event: SessionBeforeCompactEvent): Promise<{ cancel: true } | { compaction: CompactionResult }> {
+		const prep = event.preparation;
+		const gen = await this.generateCompactionSummary(prep);
+		if (!gen) {
+			// NOTE: the SDK swallows extension handler exceptions and would silently fall back
+			// to the default summarizer, so refusal goes through cancel -> compaction_end { aborted: true }.
+			this.recordEvent("error", { stage: "compaction", error: "empty summary" });
+			return { cancel: true };
+		}
+		return {
+			compaction: {
+				summary: gen.summary,
+				firstKeptEntryId: prep.firstKeptEntryId,
+				tokensBefore: prep.tokensBefore,
+				usage: gen.usage,
+			},
+		};
+	}
+
+	/** Chat-oriented compaction summary via the aux model. Null when the model returns empty text. */
+	private async generateCompactionSummary(
+		prep: SessionBeforeCompactEvent["preparation"],
+	): Promise<{ summary: string; usage: Awaited<ReturnType<ModelRuntime["completeSimple"]>>["usage"] } | null> {
+		const conversation = serializeConversation(prep.messagesToSummarize as never);
+		const userText =
+			`<conversation>\n${conversation}\n</conversation>\n\n` +
+			(prep.previousSummary
+				? `<previous-summary>\n${prep.previousSummary}\n</previous-summary>\n\n把上面的旧摘要与新内容合并成一份更新的摘要。`
+				: "请输出摘要。");
+		const result = await this.modelRuntime.completeSimple(
+			this.model as never,
+			{
+				systemPrompt: COMPACTION_SUMMARY_PROMPT,
+				messages: [{ role: "user", content: userText, timestamp: Date.now() }],
+			},
+			{ cacheRetention: "none", maxTokens: 4096 },
+		);
+		const summary = result.content
+			.filter((c: { type: string }) => c.type === "text")
+			.map((c: unknown) => (c as { text: string }).text)
+			.join("\n");
+		if (!summary.trim()) return null;
+		return { summary, usage: result.usage };
 	}
 
 	private async executeSend(params: SendParams) {
@@ -290,6 +358,17 @@ export class BotRuntime {
 		}
 		if (params.reply_to != null && !this.exposed.has(params.reply_to)) {
 			throw new Error("messaging.reply_not_visible");
+		}
+		// Validate everything (incl. sticker resolution) before any network send (R7):
+		// a late sticker failure would make the model retry and double-send the text.
+		let stickerFileId: string | null = null;
+		if (params.sticker) {
+			const row = this.db.query("SELECT file_unique_id FROM media WHERE short_id = ?").get(params.sticker) as
+				| { file_unique_id: string }
+				| null;
+			if (!row) throw new Error(`unknown sticker id: ${params.sticker} (use one from the Available stickers list)`);
+			stickerFileId = fileIdForBot(this.db, this.bot.id, row.file_unique_id);
+			if (!stickerFileId) throw new Error(`sticker ${params.sticker} is not sendable by this bot (no file_id)`);
 		}
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		const sentIds: number[] = [];
@@ -300,14 +379,8 @@ export class BotRuntime {
 			this.markExposed([canonical.message_id]);
 			this.sentMessageSink?.(m);
 		}
-		if (params.sticker) {
-			const row = this.db.query("SELECT file_unique_id FROM media WHERE short_id = ?").get(params.sticker) as
-				| { file_unique_id: string }
-				| null;
-			if (!row) throw new Error(`unknown sticker id: ${params.sticker} (use one from the Available stickers list)`);
-			const fileId = fileIdForBot(this.db, this.bot.id, row.file_unique_id);
-			if (!fileId) throw new Error(`sticker ${params.sticker} is not sendable by this bot (no file_id)`);
-			const m = await this.api.sendSticker(chatId, fileId, params.reply_to);
+		if (stickerFileId) {
+			const m = await this.api.sendSticker(chatId, stickerFileId, params.reply_to);
 			const canonical = insertSentMessage(this.db, this.bot.id, m);
 			sentIds.push(canonical.message_id);
 			this.markExposed([canonical.message_id]);
@@ -323,16 +396,40 @@ export class BotRuntime {
 
 	/** Called by the router when this bot gets a response opportunity. */
 	trigger(): void {
-		if (this.running) {
+		if (this.stopping) return;
+		if (this.flushing) {
+			// re-entrant trigger while a flush is in flight (e.g. slow vision await):
+			// coalesce into pendingTrigger; the loop picks it up (burst merge, R1)
 			this.pendingTrigger = true;
 			return;
 		}
-		void this.flush();
+		this.flushing = true; // set synchronously, before any await — never gated on SDK events
+		this.flushPromise = this.flushLoop()
+			.catch((err) => {
+				// R3: a failed flush only produces an error event; nothing escapes as an
+				// unhandled rejection. Messages stay unexposed and are retried by later triggers.
+				try {
+					this.recordEvent("error", { stage: "flush", error: err instanceof Error ? err.message : String(err) });
+				} catch {
+					// shutdown may have closed the db under a wedged flush; nothing more to do
+				}
+			})
+			.finally(() => {
+				this.flushing = false;
+				this.flushPromise = null;
+			});
+	}
+
+	private async flushLoop(): Promise<void> {
+		do {
+			this.pendingTrigger = false;
+			await this.flush();
+		} while (this.pendingTrigger && !this.stopping);
 	}
 
 	/** Serialize unexposed messages into a new context suffix and wake the agent. */
 	private async flush(): Promise<void> {
-		if (!this.session || this.running) return;
+		if (!this.session) return;
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		const rows = this.db
 			.query("SELECT * FROM messages WHERE chat_id = ? ORDER BY date, message_id")
@@ -341,14 +438,28 @@ export class BotRuntime {
 		if (fresh.length === 0) return;
 
 		let batch = fresh;
+		let skipped: MessageRow[] = [];
 		if (fresh.length > MAX_CATCHUP_MESSAGES) {
-			const skipped = fresh.slice(0, fresh.length - MAX_CATCHUP_MESSAGES);
-			this.markExposed(skipped.map((r) => r.message_id));
+			skipped = fresh.slice(0, fresh.length - MAX_CATCHUP_MESSAGES);
 			batch = fresh.slice(-MAX_CATCHUP_MESSAGES);
 		}
 
 		const visibleIds = new Set(this.exposed);
-		// lazy vision: only now that this bot is woken and the media enters its context
+		await this.ensureBatchVision(batch);
+		const text = serializeMessages(this.db, batch, { visibleIds });
+		if (!text.trim()) return;
+		const suffix = [text, this.stickerCandidatesBlock()].filter(Boolean).join("\n\n");
+		await this.session.sendUserMessage(suffix);
+		// mark exposed only after the batch actually entered context (R2): on send failure
+		// the ids stay unexposed and a later trigger re-serializes them
+		this.markExposed(batch.map((r) => r.message_id));
+		// catchup overflow is deliberately dropped, but only once the batch landed —
+		// otherwise a failed send would silently lose the skipped messages too
+		if (skipped.length > 0) this.markExposed(skipped.map((r) => r.message_id));
+	}
+
+	/** Lazy vision: resolve media descriptions only now that they enter this bot's context. */
+	private async ensureBatchVision(batch: MessageRow[]): Promise<void> {
 		for (const row of batch) {
 			if (!row.media) continue;
 			const media = JSON.parse(row.media) as { kind: string; file_unique_id?: string };
@@ -364,11 +475,6 @@ export class BotRuntime {
 				this.recordEvent("error", { stage: "vision", error: String(err) });
 			}
 		}
-		const text = serializeMessages(this.db, batch, { visibleIds });
-		if (!text.trim()) return;
-		this.markExposed(batch.map((r) => r.message_id));
-		const suffix = [text, this.stickerCandidatesBlock()].filter(Boolean).join("\n\n");
-		await this.session.sendUserMessage(suffix);
 	}
 
 	/** Small dynamic sticker candidate list (semantic, short ids). Empty string when catalog is empty. */
@@ -431,6 +537,13 @@ export class BotRuntime {
 	}
 
 	async stop(): Promise<void> {
+		this.stopping = true;
+		// Bounded wait for an in-flight flush so exposure isn't left half-written;
+		// the timeout only guards a wedged run (markExposed follows sendUserMessage
+		// immediately, so the normal window is tiny).
+		if (this.flushPromise) {
+			await Promise.race([this.flushPromise.catch(() => {}), new Promise((r) => setTimeout(r, 30_000))]);
+		}
 		if (this.session) await this.session.dispose();
 	}
 }

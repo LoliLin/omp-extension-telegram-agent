@@ -15,6 +15,7 @@ Phase 9 — Stabilization（长运行 smoke、error recovery、restart/reconnect
 
 - 文档体系已切换为 agent-kit 衍生版（根 AGENTS.md + docs/engineering/development-guide.md 为流程权威）；11 篇 REQ 已建（docs/requirements/README.md 有清单与建议顺序）
 - REQ-SEC-0001 已完成：run_js vm context 无任何 host realm 对象（codeGeneration 禁用 + 结果仅字符串跨界），spawn 用 process.execPath + error 监听，child --smol；逃逸回归测试全绿；威胁模型见 docs/architecture.md
+- REQ-AGENT-0001 已完成：trigger/flush 串行状态机（flushing 本地标志 + pendingTrigger 合并，markExposed 后移到 send 成功后，全链路 catch 无 unhandled rejection）；compaction_end 区分成败（空摘要走 cancel 失败路径）；exposure 重置与 kept tail 严格对齐（解析 context entries 锚定行，替代最近 40 条启发式）；search 10s 超时 + 响应护栏；send 先校验后发。回归测试 test/flush.test.ts + test/search.test.ts；真实链路 e2e-compaction-manual 验证成功/失败两路径
 - Phase 9：长运行稳定性验证（daemon 长跑 + TUI 反复 attach/detach + restart + error recovery）
 
 ## 下一步（按序）
@@ -38,7 +39,7 @@ Bun 单进程 daemon 双 AgentSession；raw Bot API 长轮询；bun:sqlite；TUI
 
 ## 最后测试状态
 
-bun test 66/66 ✅；e2e-compaction ✅（epoch 2→3→4，重启恢复）；真实遥测 50 runs hit ratio 90.0%。见 docs/testing.md。
+bun test 75/75 ✅；e2e-compaction ✅（epoch 2→3→4，重启恢复）+ e2e-compaction-manual ✅（REQ-AGENT-0001：成功 epoch 4→5 kept=41、失败不错切 epoch）；真实遥测 50 runs hit ratio 90.0%。见 docs/testing.md。
 
 ## 已知问题
 

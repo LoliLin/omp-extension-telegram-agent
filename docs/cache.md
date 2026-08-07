@@ -48,11 +48,13 @@ DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`
 - compaction 后新 epoch：summary（ persona 导向、倾向"状态"）+ 保留近期消息
 - 架构不得硬编码 128K；threshold 在 model config（`compaction_threshold` / `compaction_keep_recent` env）
 
-## Compaction 实现（Phase 8，runtime.ts）
+## Compaction 实现（Phase 8，runtime.ts；REQ-AGENT-0001 修正）
 
 - Pi 自动 compaction 开启：`reserveTokens = max(16384, contextWindow - threshold)`，DeepSeek 1M window 下触发点即 threshold
 - 自定义 `session_before_compact` extension：用 `serializeConversation(messagesToSummarize)` + chat-oriented 中文摘要 prompt（状态导向，≤800 字，保留人物关系/未决事项/#id 引用），有 previousSummary 时合并；`completeSimple(model, …, {cacheRetention:"none", maxTokens:4096})`
-- `compaction_end` → `onCompactionEnd()`：epoch+1 持久化、清空 exposure、把最近 40 条 telegram 消息重新标记 exposed（kept tail 内消息不再重复喂给 LLM）、写 agent_events `compaction`
+- 空摘要防护：extension 得到空 summary 时返回 `{cancel: true}`（SDK 会吞掉 handler 异常并回退默认摘要，cancel 是唯一到达失败路径的机制）→ `compaction_end {aborted:true}`，不持久化空摘要
+- `compaction_end` → `onCompactionEnd(event)`：**仅成功**（`result` 存在且未 aborted）才 epoch+1 持久化、清 exposure、写 agent_events `compaction`；失败/中止只写 agent_events `error`（stage=compaction），epoch 与 exposure 不动
+- exposure 重置与 kept tail 严格对齐：从 `sessionManager.buildContextEntries()`（compaction 后 provider 实际可见的 entry 集合）中的 user message 文本解析锚定行 `^[HH:MM:SS] #<id> ` 得到幸存消息集合；替代旧的「最近 40 条」启发式（kept tail 按 token 保留，条数启发式两个方向都错）。已知限制：群消息文本伪造换行+锚定行可误标个别 id（assistant/tool/custom entry 不解析，模型无法注入）
 - keepRecentTokens = `compaction_keep_recent`（默认 20000）
 
 ## Threshold 分析脚本

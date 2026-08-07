@@ -50,7 +50,8 @@
 ## Agent（Phase 3）
 
 - 每 bot 一个 `createAgentSession()`：独立 SessionManager（sessionDir 分开）、独立 DefaultResourceLoader（`systemPromptOverride` = persona）、共享一个 ModelRuntime
-- 唤醒：`session.sendUserMessage(serialized)`；burst 用 `streamingBehavior/deliverAs: "followUp"` 排队
+- 触发/flush 是 BotRuntime 本地持有的串行状态机（REQ-AGENT-0001）：`idle →(trigger) flushing →(drain) idle`；`flushing` 在进入 flush 时同步置位（不等 SDK 事件），在途期间的 trigger 只合并为 `pendingTrigger`，flush 循环结束后统一再跑一轮（burst 合并）；flush 全链路 try/catch，失败只落 agent_events `error`（stage=flush），消息保持未曝光由后续 trigger 重试；消息只在 `sendUserMessage` 成功后 markExposed；daemon shutdown 时 `stop()` 有界（30s）等待在途 flush 再 dispose
+- 唤醒：`session.sendUserMessage(serialized)`，一次 flush 一批（burst 由 pendingTrigger 合并，不走 SDK 队列）
 - 群消息序列化为固定紧凑 grammar（见 docs/cache.md），append-only
 - tools：`send`（terminate:true）、`search`、`run_js`（Phase 6 起）；禁用 coding agent 默认文件工具
 - local assistant text（未调 send）→ agent_events + TUI，不进群
