@@ -9,7 +9,7 @@ import type { MessageRow } from "../src/agent/serialize.ts";
 
 const CHAT = -1004402809405;
 const SECRET = "test-secret";
-const CFG = { secret: SECRET, pA: 0.1, pB: 0.1 };
+const CFG = { secret: SECRET, probs: [0.1, 0.1] };
 
 let db: Database;
 beforeEach(() => {
@@ -17,7 +17,7 @@ beforeEach(() => {
 	db.exec(readFileSync(join(import.meta.dir, "../src/db/schema.sql"), "utf8"));
 });
 
-const bots: [BotIdentity, BotIdentity] = [
+const bots: BotIdentity[] = [
 	{ id: "A", userId: 7776264871, username: "hastuyuki_bot", name: "小雪" },
 	{ id: "B", userId: 8734564920, username: "kosamerobot", name: "小雨" },
 ];
@@ -64,7 +64,7 @@ describe("routeMessage", () => {
 		let a = 0, b = 0;
 		const N = 5000;
 		for (let id = 1; id <= N; id++) {
-			const r = routeMessage(db, row({ message_id: id }), bots, { secret: SECRET, pA: 0.2, pB: 0.2 });
+			const r = routeMessage(db, row({ message_id: id }), bots, { secret: SECRET, probs: [0.2, 0.2] });
 			if (r === "A") a++;
 			if (r === "B") b++;
 		}
@@ -109,7 +109,7 @@ describe("routeMessage", () => {
 
 	test("p=0 means never triggered by probability", () => {
 		for (let id = 1; id < 200; id++) {
-			expect(routeMessage(db, row({ message_id: id }), bots, { secret: SECRET, pA: 0, pB: 0 })).toBe("nobody");
+			expect(routeMessage(db, row({ message_id: id }), bots, { secret: SECRET, probs: [0, 0] })).toBe("nobody");
 		}
 	});
 
@@ -120,9 +120,9 @@ describe("routeMessage", () => {
 			text: "@hastuyuki_bot 你好吗",
 			entities: JSON.stringify([{ type: "mention", offset: 0, length: 14 }]),
 		});
-		expect(routeMessage(db, botMsg, bots, { secret: SECRET, pA: 1, pB: 0 })).toBe("nobody");
+		expect(routeMessage(db, botMsg, bots, { secret: SECRET, probs: [1, 0] })).toBe("nobody");
 		// reply-to-bot path also dead for bot senders
 		const botReply = row({ message_id: 501, is_bot: 1, reply_to_message_id: 100 });
-		expect(routeMessage(db, botReply, bots, { secret: SECRET, pA: 1, pB: 0 })).toBe("nobody");
+		expect(routeMessage(db, botReply, bots, { secret: SECRET, probs: [1, 0] })).toBe("nobody");
 	});
 });

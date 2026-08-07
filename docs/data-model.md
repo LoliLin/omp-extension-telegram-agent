@@ -39,6 +39,7 @@
 ### bot_state — 每 bot 运行状态
 
 - session 文件路径、context epoch、update offset、exposure 水位线等 KV
+- bot_id 为 TEXT，任意 bot id 可用（REQ-CONF-0001 泛型化：bot_state / agent_events / llm_runs / raw_updates 的 bot 列均为 TEXT，bot 清单来自 bots.config.json，代码无 A/B 假设）
 
 ### aliases — 无 username 用户的稳定短 alias
 

@@ -31,19 +31,24 @@ function makeRuntime(): BotRuntime {
 		dataDir: "/tmp/req-agent-0001-test",
 		dbPath: ":memory:",
 		groupPeerId: GROUP,
-		bots: [] as unknown as AppConfig["bots"],
+		bots: [],
 		deepseekApiKey: "",
-		deepseekModel: "test-model",
-		deepseekReasoningEffort: "medium",
 		tinyfishApiKey: "",
 		auxiliaryVisualModel: "",
 		routerSecret: null,
-		routingPA: 0,
-		routingPB: 0,
+	};
+	const bot: BotConfig = {
+		id: "A",
+		name: "小雪",
+		token: "test-token",
+		personaPath: "",
+		routingP: 0,
+		model: "test-model",
+		reasoningEffort: "medium",
 		compactionThreshold: 128000,
 		compactionKeepRecent: 20000,
+		tools: { send: true, search: true, runJs: true },
 	};
-	const bot: BotConfig = { id: "A", name: "小雪", usernameEnv: "teleram_hastuyuki_bot", token: "test-token", personaPath: "" };
 	return new BotRuntime(db, bot, config, null as never);
 }
 

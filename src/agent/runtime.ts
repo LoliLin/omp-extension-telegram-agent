@@ -138,15 +138,15 @@ export class BotRuntime {
 		};
 		// Tool order is cache-visible protocol: never reorder (docs/cache.md, REQ-TEST-0001 R2).
 		const tools = [sendTool, searchTool, runJsTool];
-		this.toolsHash = toolsHash();
+		this.toolsHash = toolsHash(); // full protocol hash; filtered per-bot hash computed below
 
-		const model = this.modelRuntime.getModel("deepseek", this.config.deepseekModel);
-		if (!model) throw new Error(`model not found: deepseek/${this.config.deepseekModel}`);
+		const model = this.modelRuntime.getModel("deepseek", this.bot.model);
+		if (!model) throw new Error(`model not found: deepseek/${this.bot.model}`);
 		this.model = model;
 
 		// Custom compaction: chat-oriented summary (state, not replay), threshold from config.
 		// Pi's trigger formula is contextTokens > contextWindow - reserveTokens, so reserve = window - threshold.
-		const threshold = this.config.compactionThreshold;
+		const threshold = this.bot.compactionThreshold;
 		const reserveTokens = Math.max(16_384, model.contextWindow - threshold);
 		const compactionExt = {
 			name: "tg-compaction",
@@ -168,16 +168,26 @@ export class BotRuntime {
 		});
 		await loader.reload();
 
+		// Per-bot tool toggles (REQ-CONF-0001): filter the fixed-order tool list. send off
+		// means the bot cannot speak in-group (observer-only); search/run_js off saves tokens.
+		const activeTools = [sendTool, searchTool, runJsTool].filter((t) =>
+			t.name === "send" ? this.bot.tools.send : t.name === "search" ? this.bot.tools.search : this.bot.tools.runJs,
+		);
+		if (activeTools.length < tools.length) {
+			// telemetry hash reflects what THIS bot's provider actually sees
+			this.toolsHash = sha256Short(JSON.stringify(activeTools.map((t) => ({ name: t.name, params: t.parameters }))));
+		}
+
 		const { session } = await createAgentSession({
 			cwd: this.config.dataDir,
 			model,
-			thinkingLevel: this.config.deepseekReasoningEffort as "medium",
+			thinkingLevel: this.bot.reasoningEffort as "medium",
 			modelRuntime: this.modelRuntime,
 			sessionManager,
-			settingsManager: SettingsManager.inMemory({ compaction: { enabled: true, reserveTokens, keepRecentTokens: this.config.compactionKeepRecent } }),
+			settingsManager: SettingsManager.inMemory({ compaction: { enabled: true, reserveTokens, keepRecentTokens: this.bot.compactionKeepRecent } }),
 			resourceLoader: loader,
 			noTools: "builtin",
-			customTools: tools,
+			customTools: activeTools,
 		});
 		this.session = session;
 		this.subscribeEvents();
@@ -493,7 +503,7 @@ export class BotRuntime {
 			.run(
 				this.bot.id,
 				now,
-				this.config.deepseekModel,
+				this.bot.model,
 				this.epoch,
 				usage.input + usage.cacheRead + usage.cacheWrite,
 				usage.cacheRead,

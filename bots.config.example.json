@@ -1,0 +1,29 @@
+{
+	"//": "Copy to bots.config.json (project root) and edit. Secrets stay in .env — here only env key names.",
+	"group_peer_id": 4402809405,
+	"router_secret_env": "router_secret",
+	"deepseek_key_env": "deepseek_api_key",
+	"tinyfish_key_env": "tiny_fish_api_key",
+	"auxiliary_visual_model": "gpt-5-mini",
+	"db_path": "data/agent.db",
+	"model": "deepseek-v4-flash",
+	"reasoning_effort": "medium",
+	"compaction_threshold": 128000,
+	"compaction_keep_recent": 20000,
+	"bots": [
+		{
+			"id": "A",
+			"name": "小雪",
+			"token_env": "teleram_hastuyuki_bot",
+			"persona_path": "personas/xiaoxue.md",
+			"routing_p": 0.08
+		},
+		{
+			"id": "B",
+			"name": "小雨",
+			"token_env": "telegram_kosamerobot",
+			"persona_path": "personas/xiaoyu.md",
+			"routing_p": 0.08
+		}
+	]
+}

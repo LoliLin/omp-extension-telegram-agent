@@ -6,10 +6,10 @@ import type { Database } from "bun:sqlite";
 import { createHmac } from "node:crypto";
 import type { MessageRow } from "./serialize.ts";
 
-export type TriggerTarget = "A" | "B" | "nobody";
+export type TriggerTarget = string | "nobody";
 
 export interface BotIdentity {
-	id: "A" | "B";
+	id: string;
 	userId: number;
 	username: string;
 	name: string;
@@ -59,12 +59,12 @@ export function routingValue(secret: string, chatId: number, messageId: number):
 
 export interface RoutingConfig {
 	secret: string;
-	pA: number; // probability for bot A
-	pB: number; // probability for bot B
+	/** cumulative routing probabilities, one per bot, in config order (REQ-CONF-0001) */
+	probs: number[];
 }
 
 /** Full routing decision for one group message. */
-export function routeMessage(db: Database, row: MessageRow, bots: [BotIdentity, BotIdentity], config: RoutingConfig): TriggerTarget {
+export function routeMessage(db: Database, row: MessageRow, bots: BotIdentity[], config: RoutingConfig): TriggerTarget {
 	// Bot messages are observed history, never triggers — single authority point (REQ-TEST-0001
 	// R3): a caller forgetting the is_bot pre-check cannot introduce bot↔bot trigger loops.
 	if (row.is_bot) return "nobody";
@@ -75,7 +75,10 @@ export function routeMessage(db: Database, row: MessageRow, bots: [BotIdentity, 
 		if (nameKeywordTrigger(row, bot)) return bot.id;
 	}
 	const u = routingValue(config.secret, row.chat_id, row.message_id);
-	if (u < config.pA) return "A";
-	if (u < config.pA + config.pB) return "B";
+	let cumulative = 0;
+	for (let i = 0; i < bots.length; i++) {
+		cumulative += config.probs[i] ?? 0;
+		if (u < cumulative) return bots[i]!.id;
+	}
 	return "nobody";
 }

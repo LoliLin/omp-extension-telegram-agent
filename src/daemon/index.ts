@@ -35,6 +35,7 @@ if (!config.routerSecret) {
 }
 
 // resolve bot identities (getMe) so we can recognize own messages and mentions
+console.log(`[daemon] bot list: ${config.bots.map((b) => `${b.id} (${b.name}) persona=${b.personaPath} model=${b.model}`).join(", ")}`); // no tokens
 for (const bot of config.bots) {
 	const me = await new BotApi(bot.token).getMe();
 	setBotState(db, bot.id, "bot_user_id", String(me.id));
@@ -81,10 +82,9 @@ function route(result: { chatId?: number; messageId?: number }): void {
 		.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
 		.get(result.chatId, result.messageId) as MessageRow | null;
 	if (!row) return; // missing row; is_bot is enforced inside routeMessage (REQ-TEST-0001 R3)
-	const target = routeMessage(db, row, [identities[0], identities[1]], {
+	const target = routeMessage(db, row, identities, {
 		secret: config.routerSecret ?? "",
-		pA: config.routingPA,
-		pB: config.routingPB,
+		probs: config.bots.map((b) => b.routingP),
 	});
 	if (target !== "nobody") {
 		console.log(`[route] msg #${row.message_id} -> bot ${target}`);
