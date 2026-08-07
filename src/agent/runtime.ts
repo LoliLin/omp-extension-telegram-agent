@@ -19,6 +19,8 @@ import { BotApi } from "../telegram/api.ts";
 import { insertSentMessage } from "../telegram/ingest.ts";
 import { serializeMessages, type MessageRow } from "./serialize.ts";
 import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION } from "./prompt.ts";
+import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
+import { runJs } from "../tools/run-js.ts";
 
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
 const EXPOSED_KEY = "exposed_ids";
@@ -93,7 +95,43 @@ export class BotRuntime {
 				return await this.executeSend(params);
 			},
 		};
-		this.toolsHash = sha256Short(JSON.stringify({ name: "send", params: sendTool.parameters }));
+		const searchTool = {
+			name: "search",
+			label: "Search",
+			description:
+				"Search the web (TinyFish). Returns up to 5 results with title, url and a short snippet. Use when you need external facts or current information.",
+			parameters: Type.Object({
+				query: Type.String({ description: "Search query" }),
+			}),
+			execute: async (_toolCallId: string, params: { query: string }) => {
+				const hits = await tinyFishSearch(this.config.tinyfishApiKey, params.query);
+				this.recordEvent("tool_search", { query: params.query, hits: hits.length });
+				return {
+					content: [{ type: "text" as const, text: formatSearchResults(hits) }],
+					details: { query: params.query, hits: hits.length },
+				};
+			},
+		};
+		const runJsTool = {
+			name: "run_js",
+			label: "Run JS",
+			description:
+				"Run small pure-computation JavaScript (calculation, JSON, regex, transforms). Sandboxed: no filesystem, network, process or environment access. console.log output and the final expression value are returned. 3s limit.",
+			parameters: Type.Object({
+				code: Type.String({ description: "JavaScript source; the value of the last expression is returned" }),
+			}),
+			execute: async (_toolCallId: string, params: { code: string }) => {
+				const result = await runJs(params.code);
+				this.recordEvent("tool_run_js", { ok: result.ok, durationMs: result.durationMs });
+				return {
+					content: [{ type: "text" as const, text: result.output || "(no output)" }],
+					details: { ok: result.ok, durationMs: result.durationMs },
+				};
+			},
+		};
+		// Tool order is cache-visible protocol: never reorder (docs/cache.md).
+		const tools = [sendTool, searchTool, runJsTool];
+		this.toolsHash = sha256Short(JSON.stringify(tools.map((t) => ({ name: t.name, params: t.parameters }))));
 
 		const loader = new DefaultResourceLoader({
 			cwd: this.config.dataDir,
@@ -118,7 +156,7 @@ export class BotRuntime {
 			settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
 			resourceLoader: loader,
 			noTools: "builtin",
-			customTools: [sendTool],
+			customTools: tools,
 		});
 		this.session = session;
 		this.subscribeEvents();
