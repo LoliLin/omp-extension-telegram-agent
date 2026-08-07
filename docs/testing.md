@@ -1,6 +1,26 @@
-# 测试状态
+# 测试策略与状态
 
-> 当前真实测试状态，不是计划书。
+> 当前真实测试状态，不是计划书。本文件是测试与验证的唯一权威来源。
+
+## 验证漏斗（由便宜到贵，按序跑到能覆盖改动的那层）
+
+1. **目标**：`bun test test/<相关文件>` —— 直接覆盖被改行为的最小测试
+2. **全量 unit**：`bun test`（unit + replay，不触网络）+ `bun run check`（tsc --noEmit）
+3. **e2e**：`bun run scripts/e2e-agent.ts` / `e2e-compaction.ts`（需 `.env`，触真实 DeepSeek / Telegram）
+4. **真实群 / 长运行 smoke**：跨边界或稳定性改动才需要；观察 daemon.log、遥测、内存
+
+## 测试选择规则
+
+- 能确定性复现的 bug fix 必须有回归测试。
+- 契约变化（IPC 协议 / schema / 序列化 grammar）需要跨边界测试。
+- Agent 行为测可观察轨迹与结果，不断言 prompt 字符串。
+- provider cache 相关改动必须跑 `test/cache.test.ts` golden；golden 失败是报警，先查原因，不要随手更新。
+- 涉时间序列化的测试必须 pin TZ（bun test 强制 UTC，参考 test/cache.test.ts）。
+- 不得为了通过而删除或削弱断言。
+
+## 失败诊断
+
+改源码前先定位失败来源：1) 被改的行为 2) 过期的生成物 / golden 3) 缺 bootstrap / build 产物 4) 环境或工具链不一致（TZ、bun 版本）5) flaky / 外部依赖（Telegram、DeepSeek、TinyFish、codex）6) 与本次改动无关的既有失败。外部 / 既有失败单独报告，不混入本次结论。
 
 ## 测试分层
 
@@ -10,7 +30,9 @@ unit / integration / replay / real Telegram / restart / provider-cache / long-ru
 
 ```bash
 bun test                # unit + replay（不涉及网络）
-bun run test:telegram   # 真实 Telegram integration（需 .env，Phase 2+）
+bun run check           # tsc --noEmit
+bun run scripts/e2e-agent.ts        # 真实链路 e2e（需 .env）
+bun run scripts/e2e-compaction.ts   # compaction e2e（需 .env）
 ```
 
 ## 当前状态

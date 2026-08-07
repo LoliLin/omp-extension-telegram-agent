@@ -53,4 +53,4 @@
 
 ## Scope
 
-见 docs/requirement.md（4055 行完整需求）。开发方式：小 vertical slice、每步留痕（docs + devlog + handoff）、原子化签名 git 提交。
+见 docs/requirement.md（4055 行完整需求）。开发流程见 docs/engineering/development-guide.md（LLM 开发指南）：小 vertical slice、每步留痕（docs + devlog + handoff）、原子化签名 git 提交。
