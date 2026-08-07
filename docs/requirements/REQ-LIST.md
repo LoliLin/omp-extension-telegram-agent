@@ -16,9 +16,9 @@
 
 - [x] [REQ-CONF-0001](REQ-CONF-0001.md) 配置体系：任意数量 bot、persona 外置（P1）（commit 3027e95）
 - [x] [REQ-STICKER-0001](REQ-STICKER-0001.md) 固定 sticker set 支持（P2）（commit 84da315）
-- [ ] [REQ-UI-0001](REQ-UI-0001.md) 基于 pi-tui 插件化重做 Telegram 历史界面（P2）
-- [ ] [REQ-UI-0002](REQ-UI-0002.md) attach 到任意已配置的 bot（P2）
-- [ ] [REQ-UI-0003](REQ-UI-0003.md) TUI 底部可观测性面板（P2）
+- [x] [REQ-UI-0001](REQ-UI-0001.md) 基于 pi-tui 插件化重做 Telegram 历史界面（P2）（commit 014ec4c；R1 研究结论：保持独立进程 + pi-tui Image 组件，见 docs/research.md）
+- [x] [REQ-UI-0002](REQ-UI-0002.md) attach 到任意已配置的 bot（P2）（commit 014ec4c）
+- [x] [REQ-UI-0003](REQ-UI-0003.md) TUI 底部可观测性面板（P2）（commit 014ec4c）
 
 ## 顺序与依赖
 
