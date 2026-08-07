@@ -4,43 +4,44 @@
 
 ## 当前 phase
 
-Phase 9 收尾 — REQ-LIST 已全部完成（8 篇在本轮补齐，见 docs/devlog.md (17)）。剩余：真实群长运行观察。
+Phase 9 收尾 — REQ-LIST 全部勾选（真实 pi TTY 全链路验证完成）。剩余：真实群长运行观察。
 
 ## 已完成
 
-- Phase 1–9 全部完成：骨架、Telegram persistence、Basic Agent、TUI、双 bot routing、search/run_js、media、compaction、REQ 修复与功能全清单（REQ-LIST.md 全勾选）
-- 本轮（REQ-IPC/OPS/TEST/CONF/STICKER/UI-0001/2/3）：IPC 加固（streaming decoder/背压/复合游标/600/注入防护）、配置校验与 pid 锁、测试体系（离线 + golden 全锁 + e2e 可信）、bots.config.json 多 bot 配置、固定 sticker 目录（cache schema v2）、attach 过滤 + 可观测面板 + kitty 图像
+- 全部 REQ 完成：REQ-LIST.md 全勾（UI-0001/2/3/4 基于真实 pi 验证；CONF/STICKER 附注的 AC1/AC2/AC3 真实群项由用户豁免或待长运行）
+- 前端已是 pi 插件形态（REQ-UI-0004）：自绘 TUI 删除，`/tg attach|panel|status|start|stop|status-daemon` 全部真实验证通过
 
 ## 正在做
 
-- 真实群长运行观察（sticker 目录 + 后台 vision 预热完成后重启验证目录语义补全、面板实时更新、双 bot 行为无回归）；daemon 此刻应处于停止状态，`bun run src/main.ts start` 启动
+- 真实群长运行观察：daemon 运行健康（无新 error）；`bun run src/main.ts start` 启动
 
-## 下一步（按序）
+## 使用方式（用户）
 
-1. 等后台 vision 预识别跑完（日志 `[sticker-catalog]`，两个 set 共 212 个 sticker），重启 daemon 验证目录块语义补全（system hash 变化）
-2. 长运行 smoke：daemon 跑数小时，观察 daemon.log / 遥测 / 内存 / 面板实时更新
-3. 遥测对比（REQ-STICKER-0001 AC3）：`bun run scripts/analyze-context-window.ts`，观察 sticker 相关 prefix 命中
+```bash
+bun run src/main.ts start        # 后台 daemon（或 pi 里 /tg start）
+pi                              # 项目目录
+  /tg attach [bot-id]           # 全屏群历史（q/esc 返回）
+  /tg panel [bot-id]            # 常驻遥测 widget（/tg panel off 关闭）
+  /tg status [bot-id]           # 一次性遥测
+  /tg stop                      # 停止 daemon
+bun run src/main.ts stop        # 或 CLI 停止
+```
 
-## 当前架构决定
+## 关键平台事实（pi 扩展开发，踩坑记录）
 
-Bun 单进程 daemon 任意数量 AgentSession（bots.config.json 驱动）；raw Bot API 长轮询；bun:sqlite；TUI 独立进程 + Unix socket IPC（chmod 600）；自定义 compaction（threshold 128K、keepRecent 20K）；send/search/run_js 固定顺序 + 每 bot tools 开关；固定 sticker 目录（CACHE_SCHEMA_VERSION=2，system prompt 稳定块）+ 动态候选（消息之后）；lazy vision（catalog 后台预识别）；deterministic routing（mention>reply>名字>累积概率）
-
-## 重要文件
-
-- src/config.ts（bots.config.json + .env 双源，全部错误收集校验）；bots.config.example.json
-- src/agent/runtime.ts（BotRuntime：session、tools、compaction ext、exposure、epoch、usageSink）
-- src/media/sticker-catalog.ts（固定目录：fetch/persist/short_id/后台 vision/序列化）
-- src/agent/{serialize,prompt,tools,router}.ts（cache grammar v1 + v2 目录块，golden 锁定）
-- src/daemon/{index,ipc-server,pid}.ts（schema 版本 epoch bump、per-listener filter、stats lastId、排他 pid 锁）
-- src/tui/index.ts（attach filter、Image 渲染、底部面板）
-- scripts/analyze-context-window.ts（真实 compaction 同步）
+- pi 二进制 bundled 的 pi-tui：只有 Text/Container/Image/Markdown/Spacer 可用；ScrollView/VStack/HStack 不存在 → attach 视图自管理行缓冲 + tui.terminal.rows
+- jiti 扩展环境无 Bun 全局 → 用 node:net / node:child_process
+- jiti 里 process.stdout.rows/cols = 0 → 尺寸从 ctx.ui.custom 的 tui.terminal 拿；widget 行固定截 60
+- custom/widget 行超宽直接崩 pi → 所有输出行 truncateToWidth
+- setWidget 用数组形式（工厂形式不渲染）
+- 图像内联降级：kitty placement 无法跟随自管理视口 → 占位符 + vision 描述
 
 ## 最后测试状态
 
-bun test 134/134 ✅ + bun run check ✅；真实冒烟（start/status/stop/attach A/非法 id/面板数值）✅。见 docs/testing.md。
+bun test 145/145 ✅ + bun run check ✅；真实 pi TTY：attach/panel/status/start/stop 全验证。见 docs/testing.md。
 
 ## 已知问题
 
-- 后台 vision 预识别未完成前，目录 sticker 在上下文中显示 [未识别]，重启后补全（设计如此）
-- panel 数值跨 daemon 重启为全历史口径（累计含旧 epoch），见 docs/cache.md
+- 后台 vision 预识别未完成前目录 sticker 显示 [未识别]，重启后补全（设计如此）
+- attach 视图图像为占位符（bundled ScrollView 缺失，见上）
 - bun test 强制 UTC：涉时间序列化的测试必须 pin TZ（cache.test.ts 已处理）

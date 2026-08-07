@@ -4,6 +4,7 @@
 // emitted units into pi-tui components. Daemon protocol is unchanged (src/ipc.ts).
 
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { createConnection, type Socket } from "node:net";
 import {
 	encodeFrame,
 	FrameDecoder,
@@ -202,7 +203,7 @@ export class TgTimeline {
 	private baselineLastId = 0;
 	private pendingUsage = new Map<number, UsageRun>();
 	private decoder = new FrameDecoder();
-	private socket: { write: (d: string) => void; end: () => void } | null = null;
+	private socket: Socket | null = null;
 
 	constructor(sockPath: string, filter: string | null, hooks: TgHooks) {
 		this.sockPath = sockPath;
@@ -227,32 +228,34 @@ export class TgTimeline {
 			this.hooks.onEvent({ type: "disconnected", reason: "daemon not running (no data/daemon.sock). Start with: bun run src/main.ts start" });
 			return;
 		}
-		await Bun.connect({
-			unix: this.sockPath,
-			socket: {
-				open: (s) => {
-					this.connected = true;
-					this.socket = s;
-					this.status(undefined);
-					s.write(encodeFrame({ type: "hello", ...(this.filter ? { filter: this.filter } : {}) }));
-				},
-				data: (_s, chunk) => {
-					try {
-						for (const f of this.decoder.push(chunk)) {
-							this.handleFrame(f as ServerMessage);
-						}
-					} catch (err) {
-						this.hooks.onEvent({ type: "disconnected", reason: `ipc error: ${err}` });
+		// node:net on purpose: the pi extension runtime (jiti) has no Bun global
+		await new Promise<void>((resolve, reject) => {
+			const sock = createConnection(this.sockPath);
+			sock.on("connect", () => {
+				this.connected = true;
+				this.socket = sock;
+				this.status(undefined);
+				sock.write(encodeFrame({ type: "hello", ...(this.filter ? { filter: this.filter } : {}) }));
+				resolve();
+			});
+			sock.on("data", (chunk) => {
+				try {
+					for (const f of this.decoder.push(chunk)) {
+						this.handleFrame(f as ServerMessage);
 					}
-				},
-				close: () => {
-					this.connected = false;
-					this.hooks.onEvent({ type: "disconnected", reason: "daemon disconnected" });
-				},
-				error: (_s, err) => {
+				} catch (err) {
 					this.hooks.onEvent({ type: "disconnected", reason: `ipc error: ${err}` });
-				},
-			},
+				}
+			});
+			sock.on("close", () => {
+				this.connected = false;
+				this.hooks.onEvent({ type: "disconnected", reason: "daemon disconnected" });
+			});
+			sock.on("error", (err) => {
+				this.connected = false;
+				this.hooks.onEvent({ type: "disconnected", reason: `ipc error: ${err.message}` });
+				reject(err);
+			});
 		});
 	}
 

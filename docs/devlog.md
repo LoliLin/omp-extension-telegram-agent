@@ -186,3 +186,18 @@
 - 测试：bun test 134/134 ✅ + bun run check ✅；真实冒烟：daemon 秒起、socket 600、attach A 单 bot 视角 + 全局面板双 bot 遥测（hit 89.4%）、非法 id 报错、stop 2s 优雅退出
 - Cache impact: **INTENTIONAL**（REQ-STICKER-0001：v1→v2，固定目录进稳定 prefix，系统 prompt 带目录 bot hash 变化；无目录 bot 逐字节不变；golden 锁定；真实群 system hash 已变、epoch 已开新）
 - 下一步：真实群长运行观察（sticker 目录 + 后台 vision 预热完成后重启验证目录语义补全、面板实时更新、双 bot 行为无回归）
+
+## 2026-08-07 (18) — REQ-UI-0004 pi 插件形态落地 + 真实 pi TTY 全链路验证
+
+- 做了：.pi/extensions/tg-extension.ts（/tg attach|panel|status|start|stop|status-daemon）+ src/tui/engine.ts（共享数据/协议层）；删除自绘 TUI（src/tui/index.ts）与 main.ts attach
+- 真实 pi TTY 验证（expect PTY 注入）发现的平台事实：
+  1. pi 二进制把 @earendil-works/pi-tui 重定向到内置 bundled 副本，jiti 环境下 **VStack/HStack/ScrollView 不可构造、未导出**（探针验证：Text/Container/Image/Markdown/Spacer 可用）→ attach 视图用自管理行缓冲 + tui.terminal.rows 视口
+  2. **jiti 扩展环境没有 Bun 全局**（Bun.connect/Bun.spawnSync 报 ReferenceError）→ engine 改 node:net，/tg start/stop 改 node:child_process
+  3. **process.stdout.rows/cols 在 jiti 里是 0**（pi 自管 TTY 尺寸）→ 视图高度取 ctx.ui.custom 的 tui.terminal；widget 无尺寸参数 → 行固定截 60
+  4. **custom/widget 行超宽直接崩 pi**（"Rendered line exceeds terminal width"）→ 所有输出行 truncateToWidth
+  5. setWidget 工厂形式不渲染（数组形式正常）→ panel 用数组 + 每次更新重设
+- 真实验证结果（80x24 script PTY + 真实 daemon/Telegram/DeepSeek）：/tg attach A 显示真实群消息（#18902-18904）；/tg attach nobody 报错列出 A, B；/tg status A 遥测（cum in 727.7K/out 10.7K）；/tg panel A 常驻 widget（A · ep6 · last 16.0K (r 15.2K/m 792) · cum in 727.7K）；/tg stop→start 完成 daemon 重启（pid 53167→1983）
+- 遗留：kitty 内联图像在滚动视图中降级为占位符+vision 描述（bundled 缺 ScrollView，图像 placement 无法跟随自管理视口；REQ-UI-0001 AC1 以占位降级达成）
+- 测试：145/145 + check ✅（tg-engine.test.ts 真 socket 6 条、tg-extension.test.ts 5 条）
+- Cache impact: NONE（纯前端形态）
+- 下一步：真实群长运行观察（当前 daemon 健康，无新 error）

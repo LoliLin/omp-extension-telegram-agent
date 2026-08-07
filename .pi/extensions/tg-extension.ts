@@ -1,15 +1,25 @@
 // Telegram group observer as a pi extension (REQ-UI-0004).
 // Run: `pi` (project dir) → `/tg attach [bot-id]` | `/tg panel [bot-id]` | `/tg status [bot-id]`
+//                               | `/tg start` | `/tg stop` | `/tg status-daemon` | `/tg panel off`
 //
-// All rendering/input/terminal machinery is pi's: this extension only wires the daemon IPC
-// (src/tui/engine.ts) into pi-tui components (ScrollView/Text/Image) via ctx.ui.custom /
-// ctx.ui.setWidget. The daemon stays a background process; closing the view never affects it.
+// All rendering/input/terminal machinery is pi's; this extension only wires the daemon IPC
+// (src/tui/engine.ts) into renderable lines via ctx.ui.custom / ctx.ui.setWidget.
+//
+// NOTE on the bundled pi-tui: inside pi's jiti extension runtime, the bundled
+// @earendil-works/pi-tui exposes Text/Container/Image/Markdown/Spacer but NOT
+// ScrollView/VStack/HStack ("X is not a constructor" — verified with a probe extension).
+// The attach view therefore keeps its own small line buffer + viewport slice (height from
+// process.stdout.rows); pi still owns the render loop, input dispatch, themes and the
+// kitty image protocol. Real inline images inside the scrolling view are degraded to
+// placeholders (kitty placements don't follow a custom viewport); /tg panel and status
+// are unaffected.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Container, ScrollView, Text, Image, VStack, matchesKey, Key } from "@earendil-works/pi-tui";
-import { TgTimeline, type RenderUnit, type MediaImage, DIM, RESET } from "../../src/tui/engine.ts";
+import { matchesKey, Key, truncateToWidth } from "@earendil-works/pi-tui";
+import { TgTimeline, type RenderUnit, DIM, RESET } from "../../src/tui/engine.ts";
 import { loadConfig } from "../../src/config.ts";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 const SOCK_PATH = join(process.cwd(), "data", "daemon.sock");
 
@@ -25,104 +35,106 @@ function resolveBotArg(arg: string | undefined): { filter: string | null; error:
 	}
 }
 
-function itemComponent(unit: RenderUnit): { render: (w: number) => string[] } {
-	if (unit.kind === "sep") return new Text(`${DIM}--- ${unit.day} ---${RESET}`, 1, 0);
-	const item = unit;
-	const text = new Text(item.text, 1, 0);
-	if (!item.image) return text;
-	const img = new Image(
-		item.image.base64,
-		item.image.mime,
-		{ fallbackColor: (s) => `${DIM}${s}${RESET}` },
-		{ maxWidthCells: 36, filename: item.image.filename },
-	);
-	// text + image + spacer must render as one unit for scroll accounting
-	const wrap = new Container();
-	wrap.addChild(text);
-	wrap.addChild(img);
-	return wrap;
-}
-
-function scrollDelta(comp: { render: (w: number) => string[] }, width: number): number {
-	try {
-		return comp.render(width).length;
-	} catch {
-		return 1;
-	}
+/** unit -> plain display lines (media stays a placeholder line; images are degraded, see header). */
+function unitLines(unit: RenderUnit): string[] {
+	if (unit.kind === "sep") return [`${DIM}--- ${unit.day} ---${RESET}`];
+	return unit.text.split("\n");
 }
 
 // ---------------------------------------------------------------------------
 // /tg attach [bot-id] — full-screen group history inside pi
 // ---------------------------------------------------------------------------
 
+interface TgTui {
+	requestRender(): void;
+	terminal?: { columns: number; rows: number };
+}
+
 class TgAttachView {
-	private tui: { requestRender: () => void };
+	private tui: TgTui;
 	private done: (v?: unknown) => void;
 	private filter: string | null;
-	private transcript = new Container();
-	private scroll: ScrollView;
-	private statsText = new Text(`${DIM}no telemetry yet${RESET}`);
-	private statusText = new Text(`${DIM}connecting...${RESET}`);
-	private root = new VStack();
+	private lines: string[] = []; // all timeline display lines, oldest first
+	private scrollTop = 0;
+	private statsLine = `${DIM}no telemetry yet${RESET}`;
+	private statusLine = `${DIM}connecting...${RESET}`;
 	private engine: TgTimeline;
 	private poll: ReturnType<typeof setInterval> | null = null;
 	private closed = false;
+	private hidden = false; // status mode: timeline hidden, stats/status only
 
-	constructor(tui: { requestRender: () => void }, done: (v?: unknown) => void, filter: string | null) {
+	constructor(tui: TgTui, done: (v?: unknown) => void, filter: string | null) {
 		this.tui = tui;
 		this.done = done;
 		this.filter = filter;
-		this.scroll = new ScrollView(this.transcript, { follow: "end", primary: true, overscroll: "contain" });
-		this.root.addChild(this.scroll as unknown as Parameters<VStack["addChild"]>[0], { grow: 1 });
-		this.root.addChild(this.statsText as unknown as Parameters<VStack["addChild"]>[0]);
-		this.root.addChild(this.statusText as unknown as Parameters<VStack["addChild"]>[0]);
-
 		this.engine = new TgTimeline(SOCK_PATH, filter, { onEvent: (e) => this.onEngineEvent(e) });
 		void this.engine.connect().catch((err) => this.onEngineEvent({ type: "disconnected", reason: `connect failed: ${err}` }));
 
 		// scroll-to-top detection for lazy older loading
 		this.poll = setInterval(() => {
-			if (this.closed) return;
-			if (this.scroll.scrollTop === 0 && this.engine.isHasMore && !this.engine.isLoadingOlder) {
+			if (this.closed || this.hidden) return;
+			if (this.scrollTop === 0 && this.engine.isHasMore && !this.engine.isLoadingOlder) {
 				this.engine.requestOlder();
 			}
 		}, 400);
 	}
 
+	/** status mode: drop the timeline from the view. */
+	hideTimeline(): void {
+		this.hidden = true;
+	}
+
 	private onEngineEvent(e: { type: string; units?: RenderUnit[]; lines?: string[]; text?: string; reason?: string }): void {
 		if (this.closed) return;
 		if (e.type === "append" && e.units) {
-			for (const unit of e.units) this.transcript.addChild(itemComponent(unit) as never);
+			for (const unit of e.units) this.lines.push(...unitLines(unit));
+			this.followEnd();
 			this.tui.requestRender();
 		} else if (e.type === "prepend" && e.units) {
-			const children = (this.transcript as unknown as { children: unknown[] }).children;
-			const width = 100; // scroll accounting uses component render height; close enough per unit
-			let added = 0;
-			for (let i = e.units.length - 1; i >= 0; i--) {
-				const comp = itemComponent(e.units[i]!);
-				children.unshift(comp as never);
-				added += scrollDelta(comp, width) + 1;
-			}
-			this.scroll.scrollTo(this.scroll.scrollTop + added);
+			const newLines: string[] = [];
+			for (const unit of e.units) newLines.push(...unitLines(unit));
+			this.lines.unshift(...newLines);
+			this.scrollTop += newLines.length; // keep the viewport anchored
 			this.tui.requestRender();
 		} else if (e.type === "stats" && e.lines) {
-			this.statsText.setText(e.lines.length > 0 ? e.lines.map((l) => l.slice(0, 100)).join("\n") : `${DIM}no telemetry yet${RESET}`);
+			this.statsLine = e.lines.length > 0 ? e.lines.map((l) => l.slice(0, 100)).join("\n") : `${DIM}no telemetry yet${RESET}`;
 			this.tui.requestRender();
 		} else if (e.type === "status" && e.text != null) {
-			this.statusText.setText(`${DIM}${e.text}${RESET}`);
+			this.statusLine = `${DIM}${e.text}${RESET}`;
 			this.tui.requestRender();
 		} else if (e.type === "disconnected") {
-			this.statusText.setText(`${DIM}${e.reason ?? "disconnected"} · esc 返回${RESET}`);
+			this.statusLine = `${DIM}${e.reason ?? "disconnected"} · esc 返回${RESET}`;
 			this.tui.requestRender();
 		}
 	}
 
+	private followEnd(): void {
+		this.scrollTop = Math.max(0, this.lines.length - 1);
+	}
+
+	/** real terminal height comes from pi's TUI instance (process.stdout.rows is 0 in jiti). */
+	private viewportRows(): number {
+		return Math.max(8, (this.tui.terminal?.rows ?? 24) - 2); // reserve stats + status lines
+	}
+
 	render(width: number): string[] {
-		return this.root.render(width);
+		const rows = this.viewportRows();
+		const out: string[] = [];
+		if (!this.hidden) {
+			const maxTop = Math.max(0, this.lines.length - rows);
+			this.scrollTop = Math.max(0, Math.min(this.scrollTop, maxTop));
+			for (let i = this.scrollTop; i < Math.min(this.lines.length, this.scrollTop + rows); i++) {
+				// pi's renderer hard-fails on over-width lines; truncate every line
+				out.push(truncateToWidth(this.lines[i]!, width));
+			}
+		}
+		out.push(truncateToWidth(this.statsLine, width));
+		out.push(truncateToWidth(this.statusLine, width));
+		return out;
 	}
 
 	invalidate(): void {
-		this.root.invalidate();
+		// nothing cached
 	}
 
 	handleInput(data: string): void {
@@ -130,18 +142,15 @@ class TgAttachView {
 			this.close();
 			return;
 		}
-		// keyboard scrolling (pi routes mouse wheel to the primary scroll view itself)
-		if (matchesKey(data, Key.up)) this.scroll.scrollTo(Math.max(0, this.scroll.scrollTop - 1));
-		else if (matchesKey(data, Key.down)) this.scroll.scrollTo(this.scroll.scrollTop + 1);
-		else if (matchesKey(data, Key.pageUp)) this.scroll.scrollTo(Math.max(0, this.scroll.scrollTop - 20));
-		else if (matchesKey(data, Key.pageDown)) this.scroll.scrollTo(this.scroll.scrollTop + 20);
-		else if (matchesKey(data, Key.home)) this.scroll.scrollToStart();
-		else if (matchesKey(data, Key.end)) this.scroll.scrollToEnd();
-	}
-
-	/** status mode: keep the stats/status lines, drop the timeline from the view. */
-	hideTimeline(): void {
-		this.root.removeChild(this.scroll as never);
+		const rows = this.viewportRows();
+		if (matchesKey(data, Key.up)) this.scrollTop = Math.max(0, this.scrollTop - 1);
+		else if (matchesKey(data, Key.down)) this.scrollTop = Math.min(Math.max(0, this.lines.length - rows), this.scrollTop + 1);
+		else if (matchesKey(data, Key.pageUp)) this.scrollTop = Math.max(0, this.scrollTop - 20);
+		else if (matchesKey(data, Key.pageDown)) this.scrollTop = Math.min(Math.max(0, this.lines.length - rows), this.scrollTop + 20);
+		else if (matchesKey(data, Key.home)) this.scrollTop = 0;
+		else if (matchesKey(data, Key.end)) this.scrollTop = Math.max(0, this.lines.length - rows);
+		else return;
+		this.tui.requestRender();
 	}
 
 	private close(): void {
@@ -183,9 +192,8 @@ export default function (pi: ExtensionAPI) {
 				}
 				// one-shot stats overlay; esc to close
 				await ctx.ui.custom(
-					(tui, theme, _kb, done) => {
+					(tui, _theme, _kb, done) => {
 						const view = new TgAttachView(tui, done, filter);
-						// status mode: hide the timeline; show stats + status lines only
 						view.hideTimeline();
 						return view;
 					},
@@ -202,35 +210,28 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify(error, "error");
 					return;
 				}
+				// Simple array form for setWidget: the factory form is unreliable in the bundled
+				// pi-tui (verified: array form renders, factory form did not). Every update
+				// re-sets the widget with fresh lines.
+				// no terminal size available inside widget scope (jiti reports 0); keep lines
+				// short so pi's over-width guard can never trip on narrow terminals
+				const showWidget = (lines: string[]) =>
+					ctx.ui.setWidget("tg-panel", lines.map((l) => truncateToWidth(l, 60)));
+				showWidget(["no telemetry yet"]);
 				const engine = new TgTimeline(SOCK_PATH, filter, {
 					onEvent: (e) => {
 						if (e.type === "stats" && e.lines) {
-							lastLines = e.lines.map((l) => l.slice(0, 100));
-							tuiRef?.requestRender();
+							showWidget(e.lines);
 						} else if (e.type === "disconnected") {
-							lastLines = [e.reason ?? "disconnected"];
-							tuiRef?.requestRender();
+							showWidget([e.reason ?? "disconnected"]);
 						}
 					},
 				});
-				// keep references for the widget factory below
-				let tuiRef: { requestRender: () => void } | null = null;
-				let lastLines: string[] = ["no telemetry yet"];
-				ctx.ui.setWidget("tg-panel", (tui) => {
-					tuiRef = tui;
-					return {
-						render: () => lastLines,
-						invalidate: () => {},
-					};
-				});
-				void engine.connect().catch((err) => {
-					lastLines = [`connect failed: ${err}`];
-					tuiRef?.requestRender();
-				});
+				void engine.connect().catch((err) => showWidget([`connect failed: ${err}`]));
 				ctx.ui.notify(`telegram panel ${filter ? `(bot ${filter})` : "(global)"} — 常驻遥测；/tg panel off 关闭`, "info");
-			} else if (sub === "start" || sub === "stop" || sub === "status") {
-				// daemon lifecycle without leaving pi
-				const res = Bun.spawnSync(["bun", "run", "src/main.ts", sub], { cwd: process.cwd() });
+			} else if (sub === "start" || sub === "stop" || sub === "status-daemon") {
+				// daemon lifecycle without leaving pi (node API: jiti has no Bun global)
+				const res = spawnSync("bun", ["run", "src/main.ts", sub === "status-daemon" ? "status" : sub], { cwd: process.cwd() });
 				ctx.ui.notify((res.stdout.toString() + res.stderr.toString()).trim() || `daemon ${sub}`, "info");
 			} else {
 				ctx.ui.notify("usage: /tg attach [bot] | /tg panel [bot] | /tg status [bot] | /tg start | /tg stop | /tg status-daemon | /tg panel off", "info");
