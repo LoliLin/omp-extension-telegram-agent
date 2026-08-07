@@ -7,6 +7,7 @@ import { BotApi } from "../telegram/api.ts";
 import { Poller } from "../telegram/poller.ts";
 import { BotRuntime } from "../agent/runtime.ts";
 import { explicitTrigger, type BotIdentity } from "../agent/router.ts";
+import { IpcServer } from "./ipc-server.ts";
 import type { MessageRow } from "../agent/serialize.ts";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { randomBytes } from "node:crypto";
@@ -52,6 +53,22 @@ const identities: BotIdentity[] = config.bots.map((bot) => ({
 	name: bot.name,
 }));
 
+// IPC server for TUI attach/detach
+const botNames = new Map(config.bots.map((b) => [b.id, b.name] as [string, string]));
+const botUserIds = new Map(identities.map((i) => [i.id, i.userId] as [string, number]));
+const ipc = new IpcServer(db, join(config.dataDir, "daemon.sock"), botNames, botUserIds);
+for (const [botId, rt] of runtimes) {
+	rt.eventSink = (kind, payload) => {
+		ipc.broadcast({ kind: "evt", ts: Date.now(), botId, botName: botNames.get(botId) ?? botId, evtKind: kind, payload: JSON.stringify(payload) });
+	};
+	rt.sentMessageSink = (rawMsg) => {
+		const m = rawMsg as { chat: { id: number }; message_id: number };
+		const row = db.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?").get(m.chat.id, m.message_id) as MessageRow | null;
+		if (row) ipc.broadcast(ipc.msgToItem(row));
+	};
+}
+ipc.start();
+
 // route an ingested group message to a bot if it explicitly addresses one
 function route(result: { chatId?: number; messageId?: number }): void {
 	if (result.chatId == null || result.messageId == null) return;
@@ -73,6 +90,12 @@ const pollers = config.bots.map(
 		new Poller(db, bot.id, bot.token, config.groupPeerId, (result, _update, botId) => {
 			console.log(`[msg] bot=${botId} ${result.kind} chat=${result.chatId} msg=${result.messageId}`);
 			route(result);
+			if (result.chatId != null && result.messageId != null) {
+				const row = db
+					.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
+					.get(result.chatId, result.messageId) as MessageRow | null;
+				if (row) ipc.broadcast(ipc.msgToItem(row));
+			}
 		}),
 );
 
@@ -86,6 +109,7 @@ async function shutdown(signal: string) {
 	console.log(`[daemon] ${signal} received, shutting down`);
 	for (const p of pollers) p.stop();
 	for (const rt of runtimes.values()) await rt.stop();
+	ipc.stop();
 	rmSync(pidPath, { force: true });
 	// give pollers a moment to exit their loops
 	await new Promise((r) => setTimeout(r, 500));

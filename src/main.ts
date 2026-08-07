@@ -68,8 +68,8 @@ switch (cmd) {
 		break;
 	}
 	case "attach": {
-		console.log("TUI attach lands in Phase 4");
-		process.exit(1);
+		await import("./tui/index.ts");
+		break;
 	}
 	default:
 		console.log("usage: bun run src/main.ts <start [--foreground] | status | stop | attach>");

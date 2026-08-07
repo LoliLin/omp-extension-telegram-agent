@@ -44,6 +44,10 @@ export class BotRuntime {
 	private runStartTs = 0;
 	private systemHash = "";
 	private toolsHash = "";
+	/** Optional sink for TUI/live broadcasting of agent events. */
+	eventSink: ((kind: string, payload: unknown) => void) | null = null;
+	/** Optional sink for messages this bot sent (poller echo dedupes them, so TUI needs this path). */
+	sentMessageSink: ((rawMsg: unknown) => void) | null = null;
 
 	constructor(db: Database, bot: BotConfig, config: AppConfig, modelRuntime: ModelRuntime) {
 		this.db = db;
@@ -180,6 +184,7 @@ export class BotRuntime {
 			const canonical = insertSentMessage(this.db, this.bot.id, m);
 			sentIds.push(canonical.message_id);
 			this.markExposed([canonical.message_id]);
+			this.sentMessageSink?.(m);
 		}
 		if (params.sticker) {
 			// sticker ids map to telegram file_id in Phase 7; for now treat as file_id directly
@@ -187,6 +192,7 @@ export class BotRuntime {
 			const canonical = insertSentMessage(this.db, this.bot.id, m);
 			sentIds.push(canonical.message_id);
 			this.markExposed([canonical.message_id]);
+			this.sentMessageSink?.(m);
 		}
 		this.recordEvent("send", { reply_to: params.reply_to ?? null, sticker: params.sticker ?? null, sent: sentIds });
 		return {
@@ -239,6 +245,7 @@ export class BotRuntime {
 		this.db
 			.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (?, ?, ?, ?)")
 			.run(this.bot.id, Date.now(), kind, JSON.stringify(payload));
+		this.eventSink?.(kind, payload);
 	}
 
 	private recordUsage(
