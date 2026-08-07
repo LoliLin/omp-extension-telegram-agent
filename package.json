@@ -1,0 +1,25 @@
+{
+	"name": "pi-telegram-agent",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Two persona Telegram group-chat bots living in a group, powered by Pi coding agent",
+	"scripts": {
+		"start": "bun run src/main.ts start",
+		"status": "bun run src/main.ts status",
+		"attach": "bun run src/main.ts attach",
+		"stop": "bun run src/main.ts stop",
+		"test": "bun test",
+		"check": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@earendil-works/pi-agent-core": "file:../pi/packages/agent",
+		"@earendil-works/pi-ai": "file:../pi/packages/ai",
+		"@earendil-works/pi-coding-agent": "file:../pi/packages/coding-agent",
+		"@earendil-works/pi-tui": "file:../pi/packages/tui"
+	},
+	"devDependencies": {
+		"@types/node": "^24.0.0",
+		"typescript": "^5.9.0"
+	}
+}
