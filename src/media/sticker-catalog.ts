@@ -36,18 +36,16 @@ export async function fetchStickerSet(api: BotApi, setName: string): Promise<Cat
 }
 
 /**
- * Load the catalog for one bot: persist media identity + per-bot file_id, assign short_ids,
- * then pre-recognize vision with bounded concurrency (cached results skip downloads/codex).
- * A failed set (bad name / network) logs and is skipped — startup must not be blocked.
- * Returns the number of catalog stickers.
+ * Load the catalog for one bot (blocking part): persist media identity + per-bot file_id,
+ * assign short_ids. A failed set (bad name / network) logs and is skipped — startup must
+ * not be blocked. Returns the number of catalog stickers and how many lack vision yet.
  */
 export async function ensureStickerCatalog(
 	db: Database,
 	api: BotApi,
 	botId: string,
 	sets: string[],
-	envModel: string,
-): Promise<{ total: number; truncated: boolean }> {
+): Promise<{ total: number; truncated: boolean; pendingVision: number }> {
 	let total = 0;
 	let truncated = false;
 	for (const setName of sets) {
@@ -93,7 +91,29 @@ export async function ensureStickerCatalog(
 	if (truncated) {
 		console.warn(`[sticker-catalog] ${botId}: catalog truncated at ${STICKER_CATALOG_MAX} stickers (REQ-STICKER-0001 R5)`);
 	}
-	// Pre-recognize vision: bounded concurrency (4); ensureVision dedupes in-flight and skips cache.
+	const pendingVision = db
+		.query(
+			`SELECT COUNT(*) c FROM media
+			 WHERE kind = 'sticker' AND sticker_set IN (SELECT value FROM json_each(?))
+			   AND (vision IS NULL OR json_extract(vision, '$.text') IS NULL OR json_extract(vision, '$.unsupported') = 1)`,
+		)
+		.get(JSON.stringify(sets)) as { c: number };
+	return { total, truncated, pendingVision: pendingVision.c };
+}
+
+/**
+ * Background vision pre-recognition (REQ-STICKER-0001 R1). NOT awaited during startup:
+ * codex calls are slow (minutes for a full set) and must not hold the poller offline.
+ * Unrecognized stickers serialize as [未识别] this run and complete on a later restart
+ * (vision results persist). Bounded concurrency; per-sticker errors are logged and skipped.
+ */
+export function preRecognizeCatalogVision(
+	db: Database,
+	api: BotApi,
+	botId: string,
+	sets: string[],
+	envModel: string,
+): void {
 	const pending = db
 		.query(
 			`SELECT file_unique_id FROM media
@@ -101,28 +121,29 @@ export async function ensureStickerCatalog(
 			   AND (vision IS NULL OR json_extract(vision, '$.text') IS NULL OR json_extract(vision, '$.unsupported') = 1)`,
 		)
 		.all(JSON.stringify(sets)) as { file_unique_id: string }[];
+	if (pending.length === 0) return;
+	console.log(`[sticker-catalog] ${botId}: pre-recognizing vision for ${pending.length} stickers in background (first start takes minutes)`);
 	const workers = Math.min(4, pending.length);
 	let next = 0;
 	let doneCount = 0;
-	if (pending.length > 0) console.log(`[sticker-catalog] ${botId}: pre-recognizing vision for ${pending.length} stickers (first start can take minutes)`);
-	const results = await Promise.all(
-		Array.from({ length: workers }, async () => {
-			while (next < pending.length) {
-				const fid = pending[next++]!.file_unique_id;
-				try {
-					await ensureVision(db, api, botId, envModel, fid);
-				} catch (err) {
-					console.error(`[sticker-catalog] ${botId}: vision failed for ${fid}: ${err}`);
+	void (async () => {
+		await Promise.all(
+			Array.from({ length: workers }, async () => {
+				while (next < pending.length) {
+					const fid = pending[next++]!.file_unique_id;
+					try {
+						await ensureVision(db, api, botId, envModel, fid);
+					} catch (err) {
+						console.error(`[sticker-catalog] ${botId}: vision failed for ${fid}: ${err}`);
+					}
+					doneCount++;
+					if (doneCount % 10 === 0) {
+						console.log(`[sticker-catalog] ${botId}: vision ${doneCount}/${pending.length}`);
+					}
 				}
-				doneCount++;
-				if (doneCount % 10 === 0) {
-					console.log(`[sticker-catalog] ${botId}: vision ${doneCount}/${pending.length}`);
-				}
-			}
-		}),
-	);
-	void results;
-	return { total, truncated };
+			}),
+		);
+	})();
 }
 
 /**

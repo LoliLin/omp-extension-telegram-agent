@@ -78,7 +78,7 @@ function sticker(id: string, emoji: string): { file_id: string; file_unique_id: 
 describe("ensureStickerCatalog (R1)", () => {
 	test("persists media identity, per-bot file_id and rowid-based short_ids; block is deterministic", async () => {
 		const api = fakeApi({ cats: [sticker("c1", "😺"), sticker("c2", "🐱")] });
-		const res = await ensureStickerCatalog(db, api as never, "A", ["cats"], "m");
+		const res = await ensureStickerCatalog(db, api as never, "A", ["cats"]);
 		expect(res.total).toBe(2);
 		expect(res.truncated).toBe(false);
 
@@ -99,7 +99,7 @@ describe("ensureStickerCatalog (R1)", () => {
 		expect(stickerCatalogBlock(db, ["cats"])).toBe(block); // deterministic
 
 		// idempotent reload: same ids, no duplicates
-		await ensureStickerCatalog(db, api as never, "A", ["cats"], "m");
+		await ensureStickerCatalog(db, api as never, "A", ["cats"]);
 		expect(db.query("SELECT COUNT(*) c FROM media WHERE kind='sticker'").get()).toEqual({ c: 2 });
 	});
 
@@ -108,7 +108,7 @@ describe("ensureStickerCatalog (R1)", () => {
 			JSON.stringify({ model: "m", kind: "sticker", text: "得意的赞同", at: 1 }),
 		);
 		const api = fakeApi({ cats: [sticker("c1", "😺"), sticker("c2", "🐱")] });
-		await ensureStickerCatalog(db, api as never, "A", ["cats"], "m");
+		await ensureStickerCatalog(db, api as never, "A", ["cats"]);
 		const block = stickerCatalogBlock(db, ["cats"]);
 		expect(block).toContain("s1 = 😺 得意的赞同");
 		expect(block).toContain("s2 = 🐱 [未识别]");
@@ -117,7 +117,7 @@ describe("ensureStickerCatalog (R1)", () => {
 	test("R5: catalog is capped at STICKER_CATALOG_MAX with truncation flag", async () => {
 		const many = Array.from({ length: STICKER_CATALOG_MAX + 5 }, (_, i) => sticker(`x${i}`, "😶"));
 		const api = fakeApi({ big: many });
-		const res = await ensureStickerCatalog(db, api as never, "A", ["big"], "m");
+		const res = await ensureStickerCatalog(db, api as never, "A", ["big"]);
 		expect(res.total).toBe(STICKER_CATALOG_MAX);
 		expect(res.truncated).toBe(true);
 		expect(db.query("SELECT COUNT(*) c FROM media WHERE kind='sticker'").get()).toEqual({ c: STICKER_CATALOG_MAX });
@@ -128,7 +128,7 @@ describe("ensureStickerCatalog (R1)", () => {
 		const warn = console.error;
 		console.error = () => {};
 		try {
-			const res = await ensureStickerCatalog(db, api as never, "A", ["missing-set", "good"], "m");
+			const res = await ensureStickerCatalog(db, api as never, "A", ["missing-set", "good"]);
 			expect(res.total).toBe(1);
 		} finally {
 			console.error = warn;

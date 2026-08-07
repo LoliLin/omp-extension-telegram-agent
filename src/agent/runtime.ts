@@ -28,7 +28,7 @@ import { TOOL_DEFS, toolsHash, type SendParams } from "./tools.ts";
 import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
 import { ensureVision, fileIdForBot } from "../media/vision.ts";
-import { ensureStickerCatalog, stickerCatalogBlock } from "../media/sticker-catalog.ts";
+import { ensureStickerCatalog, stickerCatalogBlock, preRecognizeCatalogVision } from "../media/sticker-catalog.ts";
 
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
 const EXPOSED_KEY = "exposed_ids";
@@ -98,7 +98,10 @@ export class BotRuntime {
 		// system prompt is built (REQ-STICKER-0001 R1/R2). Empty for bots without sets.
 		let stickerCatalog = "";
 		if (this.bot.stickerSets.length > 0) {
-			await ensureStickerCatalog(this.db, this.api, this.bot.id, this.bot.stickerSets, this.config.auxiliaryVisualModel);
+			// fetch + persist + short_ids block startup (seconds); vision pre-recognition runs in
+			// the background so the poller is never held offline for minutes (REQ-STICKER-0001 R1)
+			await ensureStickerCatalog(this.db, this.api, this.bot.id, this.bot.stickerSets);
+			preRecognizeCatalogVision(this.db, this.api, this.bot.id, this.bot.stickerSets, this.config.auxiliaryVisualModel);
 			stickerCatalog = stickerCatalogBlock(this.db, this.bot.stickerSets);
 		}
 		const systemPrompt = buildSystemPrompt(persona, stickerCatalog);
