@@ -34,8 +34,8 @@ attach 或兼容 `/tg panel` 开启后，Telegram usage 由 Pi 自己的 `Footer
 ## 需求
 
 - **R1 — 原生组件：** stats footer factory 必须直接返回 Pi 导出的 `FooterComponent`；生产代码不得实现 footer `render(width)`、`formatTokens`、padding/truncate、ANSI/theme 样式。
-- **R2 — 精确映射：** `↑ = cacheMiss`、`↓ = outputTokens`、`R = cacheRead`、`CH = cacheRead/(cacheRead+cacheMiss)`、`$ = cost`；context 使用最近 run `contextTokens / selected model.contextWindow`，右侧使用该 bot 配置的 model/reasoning。
-- **R3 — 范围：** filtered attach/panel 显示该 bot 累计 usage；全局视角聚合配置顺序内所有 bot 的 totals，context/model 取最新 run 所属 bot；无 run 时仍由原生组件显示 `0.0%/<window>`。
+- **R2 — 精确映射：** `↑ = cacheMiss`、`↓ = outputTokens`、`R = cacheRead`、`$ = cost`；context 使用最近 run `contextTokens / selected model.contextWindow`，右侧使用该 bot 配置的 model/reasoning。REQ-UI-0009 补齐非零 `W=cacheWrite` 后，CH 按 Pi 原生 `read/(miss+read+write)`；当前 deployment write=0 时与 `read/(read+miss)` 相同。
+- **R3 — 范围：** filtered attach/panel 显示该 bot 在 SQLite telemetry 保留期内的 lifetime usage（跨 daemon/Pi restart 与 epoch）；全局视角聚合配置顺序内所有 bot 的 totals，context/model 取最新 run 所属 bot；无 run 时仍由原生组件显示 `0.0%/<window>`。
 - **R4 — 上下文隔离：** telemetry session view 只存在于 extension 内存；不得调用 `appendMessage`、`appendEntry`、`sendUserMessage` 或修改 `ctx.sessionManager.getEntries()` 返回的真实数据。
 - **R5 — 数据正确性：** active feed 复用 snapshot+usage merge；standalone panel subscription 只有一个 owner。baseline `lastId` 继续防 live 双计，`/tg status` 保留完整明细。
 - **R6 — 生命周期：** attach 自动挂 native stats footer；attach/filter 切换更新同一 owner。detach、panel off、daemon disconnect、session shutdown 恢复 `setFooter(undefined)` 并清理 standalone socket。

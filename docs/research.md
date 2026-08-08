@@ -264,3 +264,13 @@ custom entry 不进入 LLM context；IPC 与 provider serialization 不变。Cac
 - 因此一级建议 value=`attach`，二级建议 value=`attach A`，未来三级同理。callback 可返回动态 bot id/name 与 `off`。
 - 不需要自定义 autocomplete provider/editor/menu；命令树应同时生成 handler dispatch、completion 与 help，防止清单漂移。
 - 详细 prefix/leaf/config-error 验收见 `requirements/REQ-UI-0008.md`。
+
+## REQ-UI-0009 调查：lifetime 累计与 Pi 能原生显示的更多指标（2026-08-08）
+
+**结论：现有 footer totals 已是 SQLite 首条 telemetry 以来的全生命周期累计；补齐 `W`，其余明细放 `/tg status`。**
+
+- `IpcServer.loadStats()` 对 `llm_runs` 无时间下界地 COUNT/SUM，且只按 bot filter；因此 baseline 跨 daemon/Pi restart、epoch 和 compaction。Timeline snapshot 的 `lastId=MAX(id)` 会滤掉竞态中已进入 baseline 的 push，live run 恰好累计一次。
+- Pi `FooterComponent` 把 entries 全历史 usage 汇总为 `↑/↓/R/W/$`，CH 用最新 entry 的 `read/(input+read+write)`；本插件只有一个 synthetic lifetime entry，所以 CH 也是 lifetime。context 则必须是 latest occupancy，不能累加历史 context。
+- 当前 telemetry 丢失了 provider `cacheWrite` 的独立值；`llm_runs` 需加默认 0 的兼容列，新 run 精确记录，历史未知值不回填。这样 Pi 在非零时自然显示 `W`。
+- runs、epoch、first/last time、reasoning total 与 latency 不属于 Pi native usage layout；`reasoning_tokens/latency_ms` 已在 DB，可作为 `/tg status` 的 lifetime/latest 详情。拒绝额外 footer status 行、session name hack 或自绘 renderer。
+- Cache impact **NONE**：只补 provider response telemetry 的持久化/IPC/TUI，不改请求字节或 agent context。详细契约见 `requirements/REQ-UI-0009.md`。

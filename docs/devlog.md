@@ -310,3 +310,10 @@
 - `attach/status/compose/panel` 从已验证配置缓存 bot `id/name`，compose/panel 加 `off`；config 失败安全退回静态一级候选，不接触 token value、DB、网络或 LLM。
 - tests 覆盖 A/B/C、空/partial/trailing/连续空格、unknown/extra、无参数 leaf、所有 suggestion parser round-trip 与 future third-level，targeted extension/cache 28 pass，typecheck 通过；真实 Pi 菜单留 T14。
 - Cache impact: **NONE**——deterministic TUI autocomplete/help，不进入 provider context，token/cost 增量 0。
+
+## 2026-08-08 (32) — 调查 footer lifetime 与更多原生统计（文档）
+
+- 用户新增 note 已转写为 `REQ-UI-0009`：`loadStats()` 无时间下界，所以现有 totals 是 SQLite telemetry 首条 run 以来的 lifetime，跨 daemon/Pi restart、epoch/compaction；snapshot `lastId` 与 live merge 保证恰好一次。
+- Pi `FooterComponent` 已消费 `↑/↓/R/CH/$/latest context/model/reasoning`，唯一尚可原生补齐的 token 字段是非零 cache-write `W`。runs/epoch/reasoning total/latency 不属于原生 usage layout，后续进入完整 `/tg status`，不加第三行或自绘。
+- T10b 将做 `cache_write DEFAULT 0` 幂等 migration（历史不伪造）、additive IPC、restart regression 和详情输出；provider request/session/cache grammar 不变。
+- Cache impact: **NONE（docs/research only）**；未来实现也仅记录 provider response telemetry，token/cost 增量 0。

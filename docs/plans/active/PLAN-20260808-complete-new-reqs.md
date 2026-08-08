@@ -1,12 +1,12 @@
 # PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
 
 - **Status:** Active
-- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-PLAT-0001
+- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-PLAT-0001
 - **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
 
 ## 结果
 
-REQ-LIST 当前新增的 7 项全部实现、验证并以 commit 标注勾选；Telegram plugin 能从 Pi editor 发消息、实时补视觉理解、使用原生 footer stats 与分级命令补全；router 有 busy/cooldown gate；sticker 候选满足 per-bot sendability；平台外围收口为可配置 N-bot/provider。每个 task 是一个独立签名 commit。
+REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegram plugin 能从 Pi editor 发消息、实时补视觉理解、使用 lifetime 原生 footer stats 与分级命令补全；router 有 busy/cooldown gate；sticker 候选满足 per-bot sendability；平台外围收口为可配置 N-bot/provider。每个 task 是一个独立签名 commit。
 
 ## 已确认边界
 
@@ -29,6 +29,8 @@ REQ-LIST 当前新增的 7 项全部实现、验证并以 commit 标注勾选；
 - [x] **T9a** — 吸收用户重新打开的 UI-0003，核对 Pi FooterComponent 源码并重写 UI-0003/UI-0007；validates: 用户给出的原生 footer 样例；commit: docs/research only
 - [x] **T9b** — 删除自定义 stats panel，用 `setFooter` 直接挂 Pi `FooterComponent` + IPC telemetry read view，保留完整 `/tg status`；validates: UI-0003/UI-0007 AC1–AC6；commit: native footer behavior
 - [x] **T10** — 建共享 `/tg` command tree + `getArgumentCompletions`，覆盖动态 bot 与多级 prefix；validates: UI-0008 AC1–AC6；commit: command UX
+- [x] **T10a** — 调查用户新增的 lifetime/more stats note，写 UI-0009 并明确 Pi 原生字段边界；validates: documented scope/AC；commit: docs/research only
+- [ ] **T10b** — 增加 cache-write migration/telemetry、跨重启 lifetime 回归与完整 `/tg status`；validates: UI-0009 AC1–AC6；commit: telemetry completeness
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
 - [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification
 - [ ] **T13** — 将 package/project/runbook/example 文案收口为平台 + example deployment，明确单 deployment 单群边界；validates: PLAT-0001 AC6；commit: docs/metadata only
@@ -58,7 +60,7 @@ REQ-LIST 当前新增的 7 项全部实现、验证并以 commit 标注勾选；
 
 - T3: **INTENTIONAL** prefix correction；bump `CACHE_SCHEMA_VERSION`、new epoch、golden/docs/cache。
 - T4: **NONE** provider grammar；预期减少 run count/miss tokens，用 deterministic counters/tests证明。
-- T5–T10: **NONE**；TUI/IPC/operator I/O 不进入 provider context，vision UI 不新增 inference。
+- T5–T10b: **NONE**；TUI/IPC/operator I/O 与 response telemetry 不进入 provider context，vision UI 不新增 inference。
 - T11–T13: 现有 deployment **NONE**；provider choice 是配置边界，现有 golden 必须不变。
 
 ## 风险
