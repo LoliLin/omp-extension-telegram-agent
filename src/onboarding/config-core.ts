@@ -197,7 +197,7 @@ ${pinnedModel}	reasoning_effort: "off",
 		persona_path: ${value(draft.personaRelativePath)},
 		routing_p: 0.1,
 		sticker_sets: [],
-		tools: { send: true, search: false, run_js: false },
+		tools: { send: true, search: false, run_js: true },
 	}],
 });
 `;

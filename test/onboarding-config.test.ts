@@ -116,7 +116,7 @@ describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
 			expect(readFileSync(join(root, ".env"), "utf8")).toBe(`telegram_bot_token: ${TELEGRAM_SECRET}\n`);
 			const loaded = loadConfig(root);
 			expect(loaded.bots[0]!.tools.search).toBe(false);
-			expect(loaded.bots[0]!.tools.runJs).toBe(false);
+			expect(loaded.bots[0]!.tools.runJs).toBe(true);
 			expect(loaded.bots[0]!.reasoningEffort).toBe("off");
 			expect(loaded.vision?.enabled).toBe(false);
 			expect(loaded.tinyfishApiKey).toBe("");
