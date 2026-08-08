@@ -12,6 +12,7 @@ import {
 	itemComponent,
 	parseTgArguments,
 	registerTelegramExtension,
+	streamComponent,
 	supportsPiVersion,
 	TG_COMMAND_TREE,
 	TelegramFeed,
@@ -706,16 +707,36 @@ describe("native Pi Telegram extension", () => {
 		expect(host.clients.at(-1)?.disposed).toBe(true);
 	});
 
-	test("message and LOCAL event cards are native components, safe at narrow widths", () => {
-		const controlMessage = { ...message, text: "safe\x1b]52;c;pwnd\x07 text" };
-		const messageCard = itemComponent(controlMessage, theme);
-		const eventCard = itemComponent({ kind: "evt", ts: 1, evtId: 2, botId: "A", botName: "小雪", evtKind: "tool_call", payload: JSON.stringify({ tool: "send", args: { message: "hi" } }) }, theme);
-		for (const component of [messageCard, eventCard]) {
-			const lines = component.render(24);
-			expect(lines.every((line) => Tui.visibleWidth(line) <= 24)).toBe(true);
-			expect(lines.join("\n")).not.toContain("\x1b]52");
+	test("message, LOCAL event and stream cards share trailing native headers at every width", () => {
+		const messageCard = itemComponent({ ...message, text: "safe\x1b]52;c;pwnd\x07 text" }, theme);
+		const eventCard = itemComponent({ kind: "evt", ts: message.ts, evtId: 2, botId: "A", botName: "小雪", evtKind: "tool_call", payload: JSON.stringify({ tool: "send", args: { message: "hi" } }) }, theme);
+		const streamCard = streamComponent({ phase: "update", streamId: "s1", botId: "A", botName: "小雪", ts: message.ts, thinking: "先想", text: "流式正文", toolCalls: [] }, theme);
+		for (const width of [40, 60, 80, 120]) {
+			for (const component of [messageCard, eventCard, streamCard]) {
+				const lines = component.render(width);
+				expect(lines.every((line) => Tui.visibleWidth(line) <= width)).toBe(true);
+				expect(lines.join("\n")).not.toContain("\x1b]52");
+			}
 		}
-		expect(eventCard.render(40).join("\n")).toContain("小雪 · LOCAL");
+
+		for (const width of [80, 120]) {
+			const headers = [messageCard, eventCard, streamCard].map((component) => Tui.stripTerminalSequences(component.render(width)[0]!).trimEnd());
+			for (const header of headers) expect(Tui.visibleWidth(header)).toBe(width - 1);
+			expect(headers[0]).toMatch(/^ Alice · @alice\s+#5 · \d{2}:\d{2}:\d{2} · edited$/);
+			expect(headers[1]).toMatch(/^ 小雪 · bot A\s+LOCAL · \d{2}:\d{2}:\d{2}$/);
+			expect(headers[2]).toMatch(/^ 小雪 · bot A\s+STREAMING · \d{2}:\d{2}:\d{2}$/);
+		}
+
+		const narrow = Tui.stripTerminalSequences(itemComponent({
+			...message, messageId: 812, senderName: "非常非常长的中文用户🙂名字", username: "extraordinarily_long_username", text: "正文保留",
+		}, theme).render(40).join("\n"));
+		expect(narrow).toContain("非常非常");
+		expect(narrow).toContain("#812");
+		expect(narrow).toContain("正文保留");
+		const botHeader = Tui.stripTerminalSequences(itemComponent({ ...message, isBot: true, botId: "helper", username: "telegram_name" }, theme).render(80)[0]!);
+		expect(botHeader).toContain("Alice · bot helper");
+		expect(botHeader).not.toContain("@telegram_name");
+		expect(itemComponent({ ...message, replyTo: null, text: "one line" }, theme).render(80)).toHaveLength(2);
 	});
 
 	test("a supported local media file becomes Pi's Image component", () => {

@@ -440,3 +440,11 @@
 - 实现边界固定为共享native header：身份leading，message id/time/state trailing；窄宽度metadata退到次行且身份/正文优先。只补显示已有botId/username/status，raw payload/file/chat id不进入card。
 - `better-ui`与`better-layout`约束落实为保留宿主theme/density、共享边缘、按重要性排序、高频卡片不动画。production card rendering LOC净增必须≤0，通过删除重复header formatting抵消布局glue。
 - Cache impact: **NONE（docs/research only）**。后续也只重排TUI现有字符串/媒体，DB/IPC/provider grammar、LLM/vision/network调用与每turn token增量均为0。
+
+## 2026-08-08 (48) — 对齐 Pi 原生聊天卡片身份与元数据
+
+- message、persisted event与ephemeral stream改为共享Pi `HStack/TruncatedText` header：sender/bot identity保持leading，`#message · time · edited`或`LOCAL/STREAMING · time`落在trailing；自有bot明确显示configured bot id。
+- 40/60/80/120 columns回归逐行检查Pi `visibleWidth`和宽屏trailing edge，并覆盖CJK、emoji、长username、ANSI/OSC、reply、media/vision和thinking/text stream；普通80-column纯文本仍为两行。
+- 真实Pi TTY在80/40 columns及当前/浅色主题attach feed验证无溢出或错位；连续partial继续复用已锁定的原位stream component/lifecycle，真实Telegram generation留总验收。
+- 生产扩展diff精确为15 additions / 15 deletions；没有新dependency、presentation file、timer或自绘layout engine。targeted extension/engine 37 tests / 352 assertions、typecheck与cache v5 golden通过。
+- Cache impact: **NONE**——只重排TUI已有字段；DB/IPC/provider grammar、provider-visible bytes、模型/vision/network调用与每turn token均不变。

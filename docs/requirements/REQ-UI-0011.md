@@ -1,6 +1,6 @@
 # REQ-UI-0011: Pi 原生聊天卡片的信息层级与自适应排版
 
-- **Status:** Approved（2026-08-08 已调查，未实现）
+- **Status:** Implemented（2026-08-08；确定性与真实 Pi TTY 验证完成，REQ-LIST completion record 待实现 commit hash）
 - **Priority:** P2
 - **Source:** 用户新增 REQ-LIST：「Pi 聊天界面 UI 优化；确保复用 Pi、做成 Pi 插件、不要过度设计；信息右对齐并适量补充信息；不增加代码量地改善聊天卡片展示体验」
 - **依赖:** REQ-UI-0004、REQ-UI-0001、REQ-UI-0006、REQ-UI-0010
@@ -86,3 +86,11 @@
 
 - Plans: `PLAN-20260808-complete-new-reqs#T10r/T10s`
 - Commits: 从 `Requirement: REQ-UI-0011` git trailer 查
+
+## 实现证据
+
+- message、persisted event、ephemeral stream 复用单一 Pi `HStack` / `TruncatedText` header；身份位于 leading，message id/time/state 位于 trailing，bot identity 优先显示 configured bot id。
+- 40/60/80/120 columns 回归锁定 visible-width、trailing edge、CJK/emoji/长 username、ANSI/OSC sanitize、reply/media/vision/stream ordering；普通纯文本卡片仍为两行。
+- `.pi/extensions/tg-extension.ts` 的实现 diff 为 15 additions / 15 deletions，production dependency/file 均未增加。
+- 真实 Pi TTY 已在 80/40 columns 与当前/浅色主题 attach feed 验证；连续 stream frame lifecycle 由既有 update-in-place 回归覆盖，最终真实 Telegram generation smoke 并入 T14。
+- Cache impact: **NONE**；cache v5 golden不变。

@@ -240,22 +240,28 @@ function eventBody(event: EvtItem): string {
 	}
 }
 
+function cardHeader(identity: string, metadata: string, theme: Theme, color: Parameters<Theme["fg"]>[0]): Tui.Component {
+	const left = theme.bold(theme.fg(color, sanitize(identity))), right = theme.fg("dim", metadata);
+	return new Tui.HStack([
+		{ component: new Tui.TruncatedText(left), basis: Tui.visibleWidth(left), grow: 1, minSize: 8 },
+		{ component: new Tui.TruncatedText(right), basis: Tui.visibleWidth(right), minSize: 12 },
+	], { gap: 2 });
+}
+
 export function itemComponent(item: TimelineItem, theme: Theme): Tui.Component {
 	const box = new Tui.Box(1, 0, (text) => theme.bg(item.kind === "msg" && !item.isBot ? "userMessageBg" : "customMessageBg", text));
 	if (item.kind === "evt") {
-		box.addChild(new Tui.Text(theme.bold(theme.fg("warning", `${sanitize(item.botName)} · LOCAL`)) + theme.fg("dim", `  ${fmtClock(item.ts)}`), 0, 0));
+		box.addChild(cardHeader(`${item.botName} · bot ${item.botId}`, `LOCAL · ${fmtClock(item.ts)}`, theme, "warning"));
 		box.addChild(new Tui.Text(theme.fg("customMessageText", eventBody(item)), 0, 0));
 		return box;
 	}
 
-	const sender = item.username ? `${sanitize(item.senderName)} · @${sanitize(item.username)}` : sanitize(item.senderName);
-	const meta = `#${item.messageId} · ${fmtClock(item.ts)}${item.edited ? " · edited" : ""}`;
-	box.addChild(new Tui.Text(theme.bold(theme.fg(item.isBot ? "accent" : "userMessageText", sender)) + theme.fg("dim", `  ${meta}`), 0, 0));
+	const sender = `${item.senderName}${item.botId ? ` · bot ${item.botId}` : item.username ? ` · @${item.username}` : ""}`;
+	box.addChild(cardHeader(sender, `#${item.messageId} · ${fmtClock(item.ts)}${item.edited ? " · edited" : ""}`, theme, item.isBot ? "accent" : "userMessageText"));
 	if (item.replyTo != null) box.addChild(new Tui.Text(theme.fg("muted", `↪ reply to #${item.replyTo}`), 0, 0));
 	if (item.text) box.addChild(new Tui.Text(theme.fg(item.isBot ? "customMessageText" : "userMessageText", sanitize(item.text)), 0, 0));
 	if (item.mediaKind) {
-		const label = `[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]`;
-		box.addChild(new Tui.Text(theme.fg("muted", label), 0, 0));
+		box.addChild(new Tui.Text(theme.fg("muted", `[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]`), 0, 0));
 		const image = readMediaImage(item);
 		if (image) box.addChild(new Tui.Image(image.base64, image.mime, { fallbackColor: (text) => theme.fg("muted", text) }, { maxWidthCells: 56, maxHeightCells: 16, filename: basename(image.filename) }));
 		if (item.mediaDesc?.trim()) box.addChild(new Tui.Text(theme.fg("muted", `视觉理解 · ${sanitize(item.mediaDesc.trim())}`), 0, 0));
@@ -263,18 +269,12 @@ export function itemComponent(item: TimelineItem, theme: Theme): Tui.Component {
 	return box;
 }
 
-function streamComponent(stream: Extract<AgentStreamFrame, { phase: "update" }>, theme: Theme): Tui.Component {
+export function streamComponent(stream: Extract<AgentStreamFrame, { phase: "update" }>, theme: Theme): Tui.Component {
 	const box = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
-	box.addChild(new Tui.Text(
-		theme.bold(theme.fg("warning", `${sanitize(stream.botName)} · STREAMING`)) + theme.fg("dim", `  ${fmtClock(stream.ts)}`),
-		0,
-		0,
-	));
+	box.addChild(cardHeader(`${stream.botName} · bot ${stream.botId}`, `STREAMING · ${fmtClock(stream.ts)}`, theme, "warning"));
 	if (stream.thinking) box.addChild(new Tui.Text(theme.fg("muted", `thinking · ${sanitize(stream.thinking)}`), 0, 0));
 	if (stream.text) box.addChild(new Tui.Text(theme.fg("customMessageText", sanitize(stream.text)), 0, 0));
-	for (const tool of stream.toolCalls) {
-		box.addChild(new Tui.Text(theme.fg("accent", `${sanitize(tool.name)} · ${sanitize(tool.arguments)}`), 0, 0));
-	}
+	for (const tool of stream.toolCalls) box.addChild(new Tui.Text(theme.fg("accent", `${sanitize(tool.name)} · ${sanitize(tool.arguments)}`), 0, 0));
 	return box;
 }
 

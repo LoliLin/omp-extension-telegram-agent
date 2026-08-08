@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：ONBOARD-0001 与 Pi native card polish UI-0011 已正式化；下一步先实现零净LOC卡片布局，再做deployment-wide一键restart。
+2026-08-08：Pi native card polish UI-0011 已实现并通过多宽度/明暗 TTY 验证；下一步记录commit并勾选REQ-LIST，再做deployment-wide一键restart。
 
 ## 已完成
 
@@ -33,7 +33,7 @@
 15. **已实现 `REQ-REPLY-0001`**：只存嵌入父sender numeric id；canonical+obligation在offset前原子提交。reason/chat/message id穿过dispatch，reply优先占≤40 batch；45 reply按40+5提交，busy/cooldown/stopping/file reopen与A/B隔离已锁。provider成功才清，绝无内容兜底/额外纠错call；targeted 70/2680通过，真实trace留T14。
 16. **已调查 `REQ-OPS-0002`**：当前所有bot共享daemon，故一键操作定义为deployment-wide `/tg restart`；PID身份校验→graceful stop→资源释放→规范start/ready，并恢复调用前Pi feed filter，绝不热重建单runtime。
 17. **已调查 `REQ-ONBOARD-0001`**：当前`file:../pi`、手工JSON配置、tracked真实persona与单语内部索引阻断fresh clone。实施拆为portable launcher、typed local config/prompt privacy、atomic config core、Pi原生`/tg config`、双语用户/成本/维护指南和mdBook Pages六个原子task；legacy JSON兼容，不偷偷改写Git历史。
-18. **已调查 `REQ-UI-0011`**：当前已是Pi原生card，但message/event/stream各自拼header且metadata全在leading。下一task只用Pi `HStack/VStack/Box/Text`共享header，宽屏trailing、窄屏次行退化；多宽度CJK/emoji锁宽，production card渲染LOC净增≤0。
+18. **已实现 `REQ-UI-0011`**：message/event/stream复用Pi `HStack/TruncatedText` header；身份leading、metadata trailing，bot id优先。40/60/80/120 columns覆盖CJK/emoji/长username与OSC，普通消息仍两行；真实Pi 80/40 columns和当前/浅色主题通过，production extension精确`+15/-15`净零行。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 
@@ -55,4 +55,4 @@ attach 默认只读；仅显式 compose 时 interactive editor 发 Telegram，of
 - 本次 native UI 重写：Cache impact **NONE**，IPC/DB/provider grammar 未变。
 - 新的 UI-0005/UI-0006 设计也要求 NONE。
 - STICKER-0002 是 **INTENTIONAL** cache change：schema 已从 2 bump 到 3，golden 通过；daemon 下次受控重启会自动开新 epoch。
-- 原子提交规范已在 `c32d937` 固化；ONBOARD-0001 已拆成六个实施task，UI-0011拆成独立presentation task；全部按目标测试→显式暂存→签名commit推进。
+- 原子提交规范已在 `c32d937` 固化；ONBOARD-0001 已拆成六个实施task；全部按目标测试→显式暂存→签名commit推进。
