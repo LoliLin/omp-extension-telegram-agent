@@ -693,3 +693,9 @@
 - `CACHE_SCHEMA_VERSION` 5→6，tools hash由`631bf05405d1`变为`09d2e154259d`；system中英模板、message serialization、compaction与catalog hash不变。daemon下次启动检测版本后全bot只开一个新epoch。
 - 验证：全量409 pass / 4981 assertions（37 files，外网guard生效）、`bun run check`、cache v6 golden、双语mdBook 18 Markdown/98 links与21 HTML/620 links、diff check全部通过。
 - Cache impact: **INTENTIONAL**——稳定prefix只增加既有search的url字段与短说明；不新增tool或eager fetch。未调用时没有动态token/网络成本；显式fetch单次最多把8,000字符加入当前tool suffix。
+
+## 2026-08-08 (80) — 关闭TinyFish网页读取需求
+
+- 用签名行为提交`0c450cd`记录REQ-SEARCH-0001实现、现行API纠正、cache 5→6、离线guard和双语文档；AC1–AC7全部有可重复证据后才在REQ-LIST勾选。
+- 自动测试永久只走loopback fake upstream；一次性真实search/fetch脚手架已经删除。全量409 pass / 4981 assertions、typecheck、cache v6 golden与双语mdBook门禁通过。
+- Cache impact: **NONE**——本条只更新完成追溯与清单；provider-visible bytes、context epoch、调用数和token不再变化。

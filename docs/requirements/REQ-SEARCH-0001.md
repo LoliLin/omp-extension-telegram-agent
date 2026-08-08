@@ -1,6 +1,6 @@
 # REQ-SEARCH-0001: 用 TinyFish 读取群友链接并增强检索
 
-- **Status:** Implemented（2026-08-08；完成记录待行为 commit hash）
+- **Status:** Implemented（2026-08-08）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「添加 tinyfish 的 fetch 功能看群友发的链接以及搜索加强」
 - **依赖:** REQ-AGENT-0001、REQ-SEND-0001
@@ -80,4 +80,4 @@
 ## 追溯
 
 - Plans: `PLAN-20260808-complete-new-reqs#T13g/T13m`
-- Commits: 从`Requirement: REQ-SEARCH-0001` git trailer查
+- Commits: `0c450cd`（实现、离线测试门禁与文档）

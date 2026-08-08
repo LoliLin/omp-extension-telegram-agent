@@ -34,7 +34,7 @@
 - [ ] [REQ-REPLY-0001](REQ-REPLY-0001.md) 直接回复 bot 的消息保证进入对应模型上下文（P1，durable provider-delivery已实现，待真实 A/B trace 后勾选）
 - [x] [REQ-OPS-0002](REQ-OPS-0002.md) 从 Pi 一键受控重启全部 bot 服务（P1，commit `3d7f9b3`）
 - [x] [REQ-UI-0011](REQ-UI-0011.md) 用 Pi 原生 stack 优化聊天卡片信息层级、trailing 对齐与窄终端退化（P2，commit `614d6d3`）
-- [ ] [REQ-SEARCH-0001](REQ-SEARCH-0001.md) 用 TinyFish 读取群友链接并增强检索（P1，已调查/未实现）
+- [x] [REQ-SEARCH-0001](REQ-SEARCH-0001.md) 用 TinyFish 读取群友链接并增强检索（P1，commit `0c450cd`）
 
 
 ## Bug
