@@ -21,6 +21,7 @@
 - `adr/` — 长期架构决策（模板 `ADR-TEMPLATE.md`）
 - `engineering/development-guide.md` — **LLM 开发指南，日常开发流程以此为准**
 - `engineering/documentation-guide.md` — 文档写作规范
+- `engineering/debugging-guide.md` — **结构化日志、只读诊断与新功能Debug impact规范**
 - `engineering/traceability.md` — 需求 ↔ 计划 ↔ 提交 追溯
 - `testing.md` — 测试策略、规范命令、当前状态
 

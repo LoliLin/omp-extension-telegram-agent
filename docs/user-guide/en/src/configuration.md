@@ -98,7 +98,7 @@ Changing model, reasoning, cache policy, persona, tools, serializer, or another 
 - `search`: enables bounded TinyFish search and single-page retrieval through one tool; it requires the TinyFish key selected by `tinyfish_key_env` in `.env`;
 - `run_js`: constrained deterministic computation; it is off by default because model-provided JavaScript still has a residual sandbox risk.
 
-Search and `run_js` are both off by default. Before enabling search, add the TinyFish credential to `.env` (the default key name is `tiny_fish_api_key`); it is unrelated to Pi model authentication. Once enabled, the agent can search explicitly or read one public HTTP(S) page when an answer needs its contents. It never eagerly fetches every group link and does not support authenticated, private, or local targets.
+The wizard and example configs explicitly disable search and `run_js`. For compatibility, an older deployment that omits `tools.search` entirely keeps search enabled; existing configs should state the intended value explicitly. Before enabling search, add the TinyFish credential to `.env` (the default key name is `tiny_fish_api_key`); it is unrelated to Pi model authentication. Once enabled, the agent can search explicitly or read one public HTTP(S) page when an answer needs its contents. It never eagerly fetches every group link and does not support authenticated, private, or local targets.
 
 ## Routing and administrative commands
 

@@ -50,6 +50,7 @@ bun run scripts/benchmark-vision.ts --photo <local.jpg> --sticker <local.webp> -
 | Telegram ingestion/dedupe/restart | ✅ | 2026-08-07 bun test 12/12 + 真实群 e2e + restart 全通过 |
 | unified terminating send（REQ-SEND-0001） | ✅ unit + real Telegram | 2026-08-08 唯一 message/sticker/reply_to schema、固定 `ok`/terminate 与 providerCalls=1 回归通过；T14 只读聚合确认两只 bot 都有真实 text、映射目录 sticker、message+sticker 与 reply 发送记录。 |
 | send commit boundary（REQ-SEND-0002） | ✅ deterministic failure + real send | 2026-08-08 双连接真实 SQLite lock精确复现remote commit后`SQLITE_BUSY`且create/broadcast各一次、poller最终一行；33 targeted / 190 assertions覆盖unknown/partial/no-retry。T14真实组合发送与canonical聚合通过，不在生产群故意注入本地故障。 |
+| same-turn精确回复（REQ-SEND-0003） | ✅ deterministic regression | 2026-08-09生产SQLite/agent_events确认Telegram create正常而本轮`reply_to`连续被本地`reply_not_visible`拒绝；fake Pi custom turn在`sendCustomMessage`返回前执行send，锁定一次create保留reply id，submit失败回滚turn-local visibility，未知id仍零create。未调用真实provider/Telegram。 |
 | local assistant 不进群 | ✅ | e2e：assistant_text/thinking 只进 agent_events |
 | Pi 原生 Telegram attach/detach | ✅ | 2026-08-08 项目 Pi 真实 fullscreen TTY完成 filtered attach、older-page prepend与detach；内容保留且退出 Pi 不影响 daemon。 |
 | deterministic routing property tests | ✅ | 2026-08-07 33/33 + 真实群双 bot 实况 |
@@ -96,7 +97,7 @@ bun run scripts/benchmark-vision.ts --photo <local.jpg> --sticker <local.webp> -
 | threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ✅ aggregate evidence | 2026-08-08 只读telemetry确认两只bot都有多次超过5秒的真实run及后续send；T14不为重复证明而新增provider/TinyFish成本。 |
 | T14 真实总验收 | ✅ | 受控 restart、Pi attach/editor/footer/completion/stream/media、Telegram Markdown/new-photo 与只读双 bot send/reply/sticker审计通过。T14 自身只调用 Telegram，不启动 provider/TinyFish；一次性脚手架均未留在仓库。 |
-| 当前全量回归 | ✅ | 2026-08-09 `bun test`：442 pass / 0 fail / 5118 assertions（42 files，全局外网guard生效）；`bun run check`通过；cache v8 golden 7/7；mdBook 0.5.4检查18个Markdown/98 links与21个HTML/620 links通过。 |
+| 当前全量回归 | ✅ | 2026-08-09 `bun test`：454 pass / 0 fail / 5179 assertions（45 files，全局外网guard生效）；`bun run check`通过；cache v8 golden 7/7；mdBook 0.5.4检查18个Markdown/98 links与21个HTML/620 links通过。新增logger/report/provider-context、TinyFish legacy omission、同turn reply与foreground PID identity回归。 |
 
 ## 已知 flaky
 

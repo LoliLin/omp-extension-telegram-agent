@@ -57,7 +57,7 @@
 - 每 bot 一个 `createAgentSession()`，各自拥有SessionManager和DefaultResourceLoader；整个daemon只创建一个Pi `ModelRuntime`，各session绑定解析后的provider/model/reasoning/cache retention。shared runtime在pid lock后、任何Telegram调用前预检全部聊天、compaction与启用的vision模型；认证完全由Pi auth store提供。
 - runtime在打开session前计算完整context fingerprint（Pi/provider/api/model/reasoning/cache retention/schema/shared protocol/persona/serializer/compaction/catalog snapshot/extensions/tools）。manifest fingerprint与session文件都匹配才resume；否则保留旧文件、创建新session、推进epoch并清当前visibility。
 - 固定hidden extension顺序为`tg-context → tg-compaction → tg-cache-observer → tg-assistant-persistence`。shared protocol是system prompt首段，persona随后；sticker catalog不进入system。
-- 触发/flush 是 BotRuntime 串行状态机：`idle → flushing → idle`。在途trigger只合并为`pendingTrigger`；shutdown最多等待30秒。每轮从`message_events`按cursor做有界索引读取，用保守token估算打包成`telegram_context_v2` custom message；session持久化成功或startup reconcile证明entry存在后才推进cursor/visibility。
+- 触发/flush 是 BotRuntime 串行状态机：`idle → flushing → idle`。在途trigger只合并为`pendingTrigger`；shutdown最多等待30秒。每轮从`message_events`按cursor做有界索引读取，用保守token估算打包成`telegram_context_v2` custom message。Pi 的`sendCustomMessage(triggerTurn)`会在promise返回前执行完整provider/tool turn，因此本批完整打包的message id先获得turn-local内存可见性，使同轮`send.reply_to`可通过preflight；session提交失败则从structured entries恢复。只有session持久化成功或startup reconcile证明entry存在后才推进durable cursor/visibility。
 - 群消息、edit、metadata与media completion使用固定紧凑grammar追加；恢复和compaction只读structured details，不从文本正则反推identity。成功compaction只替换visibility与epoch，业务cursor永不回退。
 - tools 固定为 `send`、`search`、`run_js`（Phase 6 起），禁用 coding agent 默认文件工具。`src/agent/tools.ts` 是 provider-facing 用法唯一权威；persona/protocol 不复制参数。`send(message?,sticker?,reply_to?)` 是唯一公开通道，`message` 为自然Markdown；本地仅映射bold/italic/strike/code/public link/heading/list/blockquote/simple table等固定子集，不启用HTML/MarkdownV2 parser或远程图片。完整成功返回固定 `ok`，远端 committed/partial/unknown 的退化路径返回固定 `no_retry`，两者都用 `terminate:true` 阻止 follow-up provider call，sent ids 只留本地 details/event。
 - `search(query?|url?)`复用同一TinyFish tool且强制二选一：query只发送现行`query`并在本地保留≤5条短结果；url只允许≤2048字符的public HTTP(S)，本机不做DNS/GET，提交一个URL到Fetch API。fetch固定一页、≤1 MiB、≤8,000字符/50秒，进入provider前再截到≤2,048 tokens并套untrusted boundary；事件不记录query、URL path/query/fragment、正文或key。群消息不会触发eager fetch。
@@ -77,6 +77,12 @@
 ## SQLite
 
 - 见 docs/data-model.md。WAL 模式，直接 SQL
+
+## Observability 与 debug
+
+- `src/observability/log.ts`是daemon生产日志唯一入口：schema v1 JSONL、flat bounded fields、secret/content-shaped key与credential/URL/path二次脱敏；sink失败永不改变业务结果。controller在spawn前把`daemon.log`按8 MiB轮转，保留3代并统一0600。
+- 日志覆盖daemon/ingest/routing/runtime/provider/tool/send/IPC/media边界，但不承担业务authority。SQLite routing claims、cursor/obligation、agent events与llm runs仍是durable evidence；日志用既有bot/message/run/epoch identity关联，不保存正文、prompt/response/thinking、tool args、完整URL/path或stack。
+- `bun run debug`通过不依赖Pi认证的deployment loader、readonly SQLite/Pi session与最后64 KiB JSONL生成有界业务报告，并默认重建无正文的完整pre-adapter provider结构；显式单bot开关才把完整system与active messages写到stdout。机械finding区分cursor backlog、pending reply、route无run、model silence、tool preflight failure与send degraded。完整调查流程和新功能门禁见`docs/engineering/debugging-guide.md`。
 
 ## Pi 原生 Telegram transcript（REQ-UI-0001/2/3/4）
 

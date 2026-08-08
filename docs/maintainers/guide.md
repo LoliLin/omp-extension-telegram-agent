@@ -5,7 +5,7 @@
 ## 开始一个任务
 
 1. 读 [handoff](../handoff.md) 与相关 [REQ-LIST](../requirements/REQ-LIST.md) 项。
-2. 按 [architecture](../architecture.md) 确认归属层；涉及持久化时读 [data model](../data-model.md)，涉及provider-visible bytes时读 [cache](../cache.md)。
+2. 按 [architecture](../architecture.md) 确认归属层；涉及持久化时读 [data model](../data-model.md)，涉及provider-visible bytes时读 [cache](../cache.md)；任何新功能/行为改动必须读 [debug guide](../engineering/debugging-guide.md)。
 3. 先搜现有模式，并过一遍 [development guide 的方案最小化检查](../engineering/development-guide.md#方案最小化检查)：能否少一层、一个tool、一次模型调用或一个动态字段。多文件、跨边界或行为变化再在 `docs/plans/active/` 建 commit-sized task。
 4. 按 [development guide](../engineering/development-guide.md) 一次完成一个内聚结果：实现、测试、必需文档、自审、提交。
 
@@ -19,6 +19,10 @@
 - **INTENTIONAL**：system/persona/tool order或schema、消息/摘要grammar等cache-visible协议改变；必须升级`CACHE_SCHEMA_VERSION`，让完整fingerprint在restore前建立新session/epoch，更新[cache](../cache.md)并验证golden。
 
 UI、operator command、日志和telemetry属于side channel。若纯UI任务改变provider payload，这是边界错误，不是可忽略的小变化。任何每turn新增内容必须有界；确定性代码能完成的工作不花LLM token。
+
+## Debug impact 检查
+
+每项新功能在REQ/PLAN中写成功、合法no-op/沉默、失败/unknown如何观察，复用哪些identity关联，以及字段/查询上限和禁止记录内容。实现后用`bun run debug -- --since 30m`或fixture报告确认第一处分叉可定位；生产daemon模块不得绕过结构化logger。完整清单与事件字典只以[debug guide](../engineering/debugging-guide.md)为准。
 
 ## 验证漏斗
 

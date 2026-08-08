@@ -109,3 +109,7 @@ daemon 启动时执行一次、之后每 24 小时执行 maintenance，并做 pa
 - bot 自发消息：Telegram send result 立即 normalize/insert，随后 poller 副本按 canonical/event key 去重。
 
 LLM 序列化 grammar 与 fingerprint 边界见 `docs/cache.md`。
+
+## 非SQLite本地日志
+
+`data/daemon.log`不是业务表，也不是恢复authority。它是schema v1 JSONL side channel，固定8 MiB后轮转并保留`.1`–`.3`，文件0600；debug报告最多读当前文件尾64 KiB。字段、隐私和关联契约见`docs/engineering/debugging-guide.md`。SQLite retention与log rotation彼此独立。

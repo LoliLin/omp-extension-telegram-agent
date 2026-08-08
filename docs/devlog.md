@@ -747,3 +747,21 @@
 - 签名原子提交：`8c23c92`、`dbdc438`、`15c82cc`、`f50f10d`、`ea066c0`、`b7477b6`、`6977b02`，completion文档commit另以PLAN T6 trailer追溯。
 - 验证：`bun test` 442 pass / 0 fail / 5118 assertions（42 files，外网guard生效），`bun run check`，cache v8 golden 7/7，mdBook 0.5.4 18 Markdown/98 links与21 HTML/620 links，`git diff --check`全部通过。百万event索引fixture约2.1秒。未运行真实provider/Telegram/TinyFish smoke。
 - Cache impact: **INTENTIONAL**——`CACHE_SCHEMA_VERSION` 7→8；共享protocol/persona顺序、structured Telegram context/delta、assistant silence与sticker suffix改变provider bytes。完整fingerprint在restore前建立新session/epoch并保留旧文件；稳定prefix缩短、每turn suffix有界，不新增固定provider call。历史50-run 90% hit仅保留为历史样本，不外推为当前成本承诺。
+
+## 2026-08-09 (87) — 修复同一provider turn的精确回复
+
+- 只读关联生产`routing_claims`、`llm_runs`、`agent_events`与canonical messages：Telegram create及普通send持续成功，模型也频繁调用send；真正失败是模型对本轮suffix里的message id调用`reply_to`时，本地连续返回`messaging.reply_not_visible`，随后才用第二次无引用send兜底。另一次普通概率turn主动沉默符合现有策略，不是传输故障。
+- 根因是Pi `sendCustomMessage(triggerTurn)`在promise返回前执行完整provider/tool turn，而runtime原本等promise返回后才更新内存visibility。现在只把token packer确认完整可见的ids在调用前加入turn-local集合；成功仍由既有transaction提交cursor/visibility，失败从structured session entries恢复，compat test seam恢复旧集合。
+- 新增fake Pi custom-turn回归：在`sendCustomMessage`尚未返回时执行`send(reply_to=42)`，只创建一次Telegram message并保留reply id；provider在session persistence前失败则内存/SQLite visibility均回滚。既有未知id preflight继续零create。
+- 验证：targeted 35 pass / 357 assertions；全量`bun test` 444 pass / 0 fail / 5128 assertions（42 files，零外网）；`bun run check`、cache v8 golden 7/7、mdBook 18 Markdown/98 links与21 HTML/620 links门禁通过。未restart运行中daemon，未调用真实provider或Telegram。
+- Cache impact: **NONE**——system/persona、tool schema/description/order、serializer、suffix字节与context fingerprint均未改变，新增0 token/LLM call；修复后可避免`reply_not_visible`造成的一次额外tool follow-up。
+
+## 2026-08-09 (88) — 建立全链路debug并恢复TinyFish可见性
+
+- daemon生产路径统一使用schema v1 JSONL logger：flat/bounded fields、secret/content-shaped双层脱敏、sink失败隔离、8 MiB/3代0600 rotation；ingest/routing/flush/provider/tool/send/IPC/media/daemon均有稳定生命周期事件，source audit禁止重新引入裸console。
+- 新增只读`bun run debug`，有界关联cursor/obligation/claim/run/event/log并分类backlog、route无run、model silence、send preflight/degraded。默认还重建完整provider结构元数据与tool schema；单bot显式开关才向stdout显示完整system/current session内容，常规日志永不保存。
+- 生产session证明TinyFish历史`toolResult`完整且可见；回归来自`15c82cc`把legacy omission从enabled改成disabled。loader恢复旧语义，新向导仍显式false，当前A/B配置显式true；最终runtime日志与debug inventory均为`send,search`。
+- Debug系统现场定位并修复foreground PID身份遗漏；controller最终回收38474/40093双实例并启动唯一PID 40594，同权限域status确认running/socket。A/B旧context因fingerprint变化被新epoch隔离；manual compact对已轮换空session被Pi拒绝，未产生无用summary或伪报成功。
+- 验证：全量454 pass / 0 fail / 5179 assertions（45 files，零外网）、typecheck、cache v8 golden 7/7、docs 18 Markdown/98 links与21 HTML/620 links、diff check通过。真实操作只包括用户授权的Telegram identity/catalog/restart与一次未触发模型的空session compact尝试；未调用TinyFish。
+- 签名行为提交：`6afaa8d`（同轮精确reply）、`5891ac0`（结构化日志、provider context诊断与TinyFish恢复）、`6082b8e`（foreground daemon ownership）。
+- Cache impact: **INTENTIONAL（deployment config）**——日志/debug/PID/reply修复本身NONE；A/B重新加入既有`search` schema使fingerprint开新epoch并承担固定tool schema token，但不新增自动tool/LLM调用。新session隔离旧污染，旧文件保留。

@@ -14,6 +14,7 @@
 
 ## 功能
 
+- [x] [REQ-OBS-0001](REQ-OBS-0001.md) 结构化全链路日志、只读诊断报告与 agent debug 门禁（P0，commit `5891ac0`）
 - [x] [REQ-CONF-0001](REQ-CONF-0001.md) 配置体系：任意数量 bot、persona 外置（P1）（commit 3027e95）
   （附注：AC1允许的三bot dry-run已通过完整composition/IPC链；当前无第三token的真实C仍是PLAT-0001 AC7文档化opt-in）
 - [x] [REQ-STICKER-0001](REQ-STICKER-0001.md) 固定 sticker set 支持（P2）（commit 84da315）
@@ -39,6 +40,9 @@
 
 ## Bug
 
+- [x] [REQ-SEARCH-0002](REQ-SEARCH-0002.md) 旧配置省略 `tools.search` 时不得让 TinyFish 从 provider context 消失（P0，commit `5891ac0`）
+- [x] [REQ-OPS-0003](REQ-OPS-0003.md) foreground daemon 必须与后台 daemon 使用同一 PID 身份规则（P0，commit `6082b8e`）
+- [x] [REQ-SEND-0003](REQ-SEND-0003.md) 本轮 provider 可见消息必须可被 `reply_to` 精确引用（P0，commit `6afaa8d`）
 - [x] [REQ-STICKER-0002](REQ-STICKER-0002.md) 固定目录与动态候选必须按 bot 可发送性隔离（P0，commit `8eb3b97`）
 - [x] [REQ-SEND-0001](REQ-SEND-0001.md) 统一 message/sticker/reply_to、tool-local 用法与 terminating 最小结果（P1，commit `8efd5ba`）
 - [x] [REQ-UI-0010](REQ-UI-0010.md) 恢复 Pi 原生 feed 的即时刷新与流式 Agent 输出（P1，commit `f85045f`）
