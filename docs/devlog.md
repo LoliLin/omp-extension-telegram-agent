@@ -287,3 +287,11 @@
 - feed 对所有匹配消息替换内存 item 并 rebuild Pi component tree；不 append Pi entry。图片或 sticker fallback 正下方统一显示 Pi theme `视觉理解 · ...`，snapshot/live 使用同一 `mediaDesc`。
 - 测试覆盖 update 先到、older page、300 update 驱逐后 size=256、同 uid 两卡片、重复幂等、ANSI/OSC strip，以及 session entry 数量不变；44 plugin/timeline/IPC tests + typecheck 通过。
 - Cache impact: **NONE**——纯 IPC/TUI state merge，不改 DB schema、provider serialization、prompt/tool grammar或 vision 调用次数；token/cost 增量 0。
+
+## 2026-08-08 (29) — 重新调查 UI-0003 的 Pi 原生 footer 定义（文档）
+
+- 用户实机重新打开 UI-0003：现有 `TelegramStatsPanel` 是 editor 上方自定义结构，且 `setStatus("telegram")` 多出第三行；期望明确为 Pi 默认第二行 `↑/↓/R/CH/$/context/model`。
+- 核对本地 Pi 0.84.1：`setStatus` 只能产生 extension-status 第三行，无法注入 usage stats；此前 UI-0007 的 setStatus 方案作废。`FooterComponent` 与 `setFooter` 均是公开 API，前者拥有全部 token/context/model/theme/width renderer。
+- 新方案写入 UI-0003/UI-0007：factory 直接返回 Pi `FooterComponent`；IPC stats 只映射成内存 telemetry session view，不复制 render、format、padding或 theme，不修改/append Pi session。off/detach 恢复 default footer。
+- mapping 固定为 miss→↑、output→↓、read→R、read/(read+miss)→CH、cost→$、latest context/model→右侧；global totals aggregate。后续 T9b 必须用 render test 锁用户样例。
+- Cache impact: **NONE（docs/research only）**；未来实现也是 TUI-only、provider token 0。

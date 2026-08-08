@@ -21,7 +21,7 @@
 - [x] [REQ-UI-0004](REQ-UI-0004.md) Telegram 前端成为真正的 Pi 原生 transcript 插件（P0）（commit 19819c9）
 - [x] [REQ-UI-0001](REQ-UI-0001.md) 用 Pi 原生组件呈现 Telegram 消息与媒体（P1，依赖 UI-0004）（commit 19819c9）
 - [x] [REQ-UI-0002](REQ-UI-0002.md) 原生 transcript 中 attach / more / detach 与任意 bot 过滤（P1，依赖 UI-0004）（commit 19819c9）
-- [x] [REQ-UI-0003](REQ-UI-0003.md) 用 Pi 原生 widget 呈现实时可观测性（P2，依赖 UI-0004）（commit 19819c9）
+- [ ] [REQ-UI-0003](REQ-UI-0003.md) 用 Pi 原生 FooterComponent 呈现实时可观测性（P1，已重新调查；`19819c9` widget 不满足）
 - [ ] [REQ-UI-0005](REQ-UI-0005.md) 用 Pi 底部 editor 直接发送 Telegram 消息（P1，已调查/未实现）
 - [ ] [REQ-UI-0006](REQ-UI-0006.md) 媒体识别完成后在原生 UI 下方显示视觉理解（P1，UI-only，已调查/未实现）
 - [ ] [REQ-ROUTE-0001](REQ-ROUTE-0001.md) 忙碌 bot 跳过概率采样并在回复后冷却 2 秒（P1，已调查/未实现）

@@ -246,14 +246,15 @@ custom entry 不进入 LLM context；IPC 与 provider serialization 不变。Cac
 - 2 秒停顿用 `cooldownUntil` + 可注入 clock，不用真实 sleep；skip 的消息只存库，不在 cooldown 到期时补抽，下一次合法 trigger 再由 exposure batch 带入。
 - explicit mention/reply/name 不是概率采样，调查建议保留 pending coalesce，避免直接呼叫丢失。详细边界见 `requirements/REQ-ROUTE-0001.md`。
 
-## REQ-UI-0007 调查：Pi default footer 已有原生 extension status 行（2026-08-08）
+## REQ-UI-0003/0007 再调查：精确复用 Pi 原生 usage 行（2026-08-08）
 
-**结论：stats 使用 `ctx.ui.setStatus`；不要把 widget 移位置，也不要替换 footer。**
+**结论：`setStatus` 无法满足用户样例；用 `setFooter` 直接挂 Pi 导出的 `FooterComponent`，不复制 renderer。**
 
-- 当前 `TelegramStatsPanel` 是自定义 Container/Text，并以默认 `setWidget` placement 出现在 editor 上方。
-- Pi `FooterComponent` 会在默认 cwd/usage/model 行下方渲染 `setStatus` 的 extension statuses，统一完成 control sanitization、排序、theme 与宽度截断。
-- `setWidget(...,{placement:"belowEditor"})` 仍是自定义样式；`setFooter()` 会复制并替换 Pi 原生 footer，两者都不符合用户要求。
-- footer status 是单行：常驻只显示 active/filter 的紧凑关键指标，完整多 bot 数值继续由 `/tg status` 提供。详见 `requirements/REQ-UI-0007.md`。
+- 用户实机要求的是 default footer 第二行的 `↑/↓/R/CH/$/context/model` 结构，不是第三行 extension status。源码确认 `setStatus` 永远在 cwd/usage/model 后另起一行，因此先前 UI-0007 的 setStatus 结论作废。
+- `FooterComponent` 公开导出并独占 token formatting、context/model、theme、width/truncate 与 extension status 合并；`setFooter(factory)` 是官方 mount point。
+- extension API 没有 external usage setter。插件将 IPC `BotStats` 映射为只读内存 telemetry session view后交给 `FooterComponent`；view 委托真实 sessionManager 的 cwd/name和 modelRegistry 的 model/context window，但不写真实 Pi session、也不进入 provider context。
+- 精确 mapping：cacheMiss→input `↑`、output→`↓`、cacheRead→`R`、read/(read+miss)→`CH`、cost→`$`、latest context/model→context/model。全局 aggregate totals，latest run 决定 context/model。
+- 生产代码不得实现 footer render/format/padding/theme；Pi 升级不兼容时显式适配 view contract，不能复制 FooterComponent 源码。完整数值继续由 `/tg status` 提供。
 
 ## REQ-UI-0008 调查：一个 `/tg` 可用原生 API 做任意层参数补全（2026-08-08）
 

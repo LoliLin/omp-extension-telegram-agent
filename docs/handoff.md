@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：UI-0006 transport + native media card 实时刷新已完成；下一项 T9 先吸收用户重新打开的 UI-0003，再与 UI-0007 一起实现 Pi default footer stats。
+2026-08-08：用户重新打开的 UI-0003 已完成源码再调查与需求重写；下一项 T9b 用 Pi 导出的 FooterComponent 实现原生 usage 行。
 
 ## 已完成
 
@@ -20,11 +20,11 @@
 2. **已实现 `REQ-ROUTE-0001`**：probability 命中 busy/cooldown target 时 fast-skip 且不改投；默认 2 秒 monotonic deadline；explicit trigger 保留 pending/bypass。44 个 routing/flush/config/cache 测试通过。
 3. **已实现 `REQ-UI-0005`**：daemon request-id send→DB→broadcast + Pi interactive `handled` compose 全链完成；footer 唯一身份、附件/失败恢复、ACK unknown/no-retry 与 lifecycle cleanup 共 39 个 plugin/IPC targeted tests 通过。真实发送 smoke 留 T14。
 4. **已实现 `REQ-UI-0006`**：T7/T8 完成 identity update、256-entry/10-minute 乱序缓存、多引用/older page/重复幂等合并，以及 `视觉理解` native card 原位刷新与 sanitize；真实 media smoke 留 T14。
-5. **P2 `REQ-UI-0007`**：删除自定义 stats widget，改用 Pi default footer 的 `setStatus` 原生状态行；完整明细留 `/tg status`。
+5. **已重写、待实现 `REQ-UI-0003/0007`**：`setStatus` 会另起第三行，不能满足用户样例；T9b 删除 widget，用 `setFooter` 直接返回 Pi `FooterComponent`，IPC stats 只做内存 read view，完整明细留 `/tg status`。
 6. **P2 `REQ-UI-0008`**：用 `registerCommand.getArgumentCompletions` + 共享命令树实现 `/tg` 任意层原生补全。
 7. **P1 `REQ-PLAT-0001`**：N-bot daemon 已通用；剩余 DeepSeek provider hardcode、e2e `bots[0]`、双 bot 产品文案与第三 bot 全链验证。
 
-用户在工作树重新打开 `REQ-UI-0003` 并给出 Pi default footer 预期；两处改动仍未暂存，T9 先调查/重写 UI-0003/UI-0007 验收再共同实现。
+UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，但不再算 UI-0003 完成。
 
 建议顺序：STICKER-0002 → ROUTE-0001 → UI-0005 / UI-0006 / UI-0007 / UI-0008 → PLAT-0001。
 

@@ -1,70 +1,71 @@
-# REQ-UI-0003: 用 Pi 原生 widget 呈现实时可观测性
+# REQ-UI-0003: 用 Pi 原生 FooterComponent 呈现实时可观测性
 
-- **Status:** Done (2026-08-08)
-- **Priority:** P2
-- **Source:** 原 TUI 面板需求；2026-08-08 因数组字符串 widget/hard truncation 不符合原生组件要求而重新打开
+- **Status:** Reopened / specified（2026-08-08；`19819c9` 的 component widget 不满足用户给出的原生 footer 样例）
+- **Priority:** P1
+- **Source:** 原 TUI 面板需求；用户实机复核要求统计必须进入 Pi 原生 `↑/↓/R/CH/$/context/model` 行，不接受 editor 上方 widget 或额外 status 行
 - **依赖:** REQ-UI-0004
 
 ## 问题
 
-当前 panel 每次把 ANSI 字符串数组重新传给 `setWidget`，并硬截到 60 字符；它没有使用 Pi theme/组件布局，也继承了旧 Pi 0.83 的错误探针结论。
+当前 attach 会创建 `TelegramStatsPanel`，在 transcript 与 editor 之间显示 `connected · bot A` 和一整行自定义 label。虽然它由 Pi `Container/Text` 组成，统计行的结构、文案和位置仍由插件自建；同时 `ctx.ui.setStatus("telegram",...)` 又在默认 footer 下追加第三行。用户要求的结果是 Pi 自带 footer 第二行，例如：
+
+```text
+↑13k ↓817 R20k CH66.1% $0.002 1.5%/1.0M (auto)        deepseek-v4-flash • max
+```
+
+## 调查结论
+
+- Pi 0.84.1 `FooterComponent` 自己从 session entries 计算 `↑ input / ↓ output / R cache read / CH / cost`，并负责 context、model、reasoning、theme、resize、truncate 和 cwd/git 行。
+- `ctx.ui.setStatus` 只进入 `FooterComponent` 的 extension-status **第三行**；它适合 compose 身份等安全状态，但不能把 Telegram telemetry 注入原生统计行。
+- extension API 没有“外部 usage provider”setter。精确复用原生统计行的最小方案是 `ctx.ui.setFooter` 返回 Pi 公开导出的 `FooterComponent`，给它一个只读、内存中的 telemetry session view；不得复制 `FooterComponent.render()` 或它的 token/width/theme 逻辑。
+- telemetry view 只从 IPC `BotStats` 生成临时 entries，并委托真实 `ctx.sessionManager` 提供 cwd/session name、`ctx.modelRegistry` 提供 model/context window。它不 append/persist Pi entry，不参与 provider context。
 
 ## 目标
 
-用 `ctx.ui.setWidget` 的 component factory 和 Pi `Container`/`Text` 组件显示实时 usage，宽度、换行与 theme 全交给 Pi。
+attach 或兼容 `/tg panel` 开启后，Telegram usage 由 Pi 自己的 `FooterComponent` 按原生第二行渲染；关闭后无损恢复当前 Pi session 的默认 footer。
 
 ## 非目标
 
-- 不新增 telemetry schema。
-- 不做趋势图。
-- 不把 llm_runs 复制到 Pi session。
+- 不修改 Pi session、provider context、daemon telemetry schema或 cache grammar。
+- 不复制/改写 Pi footer renderer、token formatter、theme、宽度算法。
+- 不用 `setStatus` 冒充统计行；compose 身份仍可用独立 namespace status。
+- 不在本需求支持图表、趋势或跨 deployment 汇总。
 
 ## 需求
 
-- **R1:** 每 bot 显示 epoch、最近 run context/read/miss、累计 input/output/cost、cache hit ratio；无数据时显示明确空态。
-- **R2:** widget 必须使用 component factory；不得传 ANSI 字符串数组、硬编码 60 列或自行 truncate。
-- **R3:** active feed 复用同一 IPC usage 数据；独立 `/tg panel [bot-id]` 可在未 attach 时订阅；切换/关闭 panel 必须 dispose 自己拥有的 socket。
-- **R4:** `/tg panel off` 移除 widget；`/tg status [bot-id]` 提供一次性 Pi 通知，均复用同一格式化逻辑。
-- **R5:** baseline `lastId` 与 live usage 合并仍防双计，数值与 `llm_runs` 一致。
+- **R1 — 原生组件：** stats footer factory 必须直接返回 Pi 导出的 `FooterComponent`；生产代码不得实现 footer `render(width)`、`formatTokens`、padding/truncate、ANSI/theme 样式。
+- **R2 — 精确映射：** `↑ = cacheMiss`、`↓ = outputTokens`、`R = cacheRead`、`CH = cacheRead/(cacheRead+cacheMiss)`、`$ = cost`；context 使用最近 run `contextTokens / selected model.contextWindow`，右侧使用该 bot 配置的 model/reasoning。
+- **R3 — 范围：** filtered attach/panel 显示该 bot 累计 usage；全局视角聚合配置顺序内所有 bot 的 totals，context/model 取最新 run 所属 bot；无 run 时仍由原生组件显示 `0.0%/<window>`。
+- **R4 — 上下文隔离：** telemetry session view 只存在于 extension 内存；不得调用 `appendMessage`、`appendEntry`、`sendUserMessage` 或修改 `ctx.sessionManager.getEntries()` 返回的真实数据。
+- **R5 — 数据正确性：** active feed 复用 snapshot+usage merge；standalone panel subscription 只有一个 owner。baseline `lastId` 继续防 live 双计，`/tg status` 保留完整明细。
+- **R6 — 生命周期：** attach 自动挂 native stats footer；attach/filter 切换更新同一 owner。detach、panel off、daemon disconnect、session shutdown 恢复 `setFooter(undefined)` 并清理 standalone socket。
+- **R7 — 共存：** factory 使用 Pi 提供的 `footerData`，所以 cwd/git、其他 extension statuses 与 compose identity 仍由同一个原生组件渲染；不得覆盖别的 status key。
 
 ## 验收标准
 
-- **AC1:** fake Pi host 证明 `setWidget` 收到 factory，factory 返回 Pi Component；不存在数组形式与 `truncateToWidth`。
-- **AC2:** 一次 usage push 后 widget 在 1 秒内刷新；窄宽度 render 不抛错。
-- **AC3:** attach filter、panel filter 与 stats 行一致；切换 filter 不保留旧 bot 行。
-- **AC4:** panel off/session shutdown 释放 standalone stats socket；active feed 不因隐藏 panel 被断开。
-- **AC5:** 聚合单测与 DB fixture 一致；`bun test` + `bun run check` + cache golden 通过。
+- **AC1:** fake Pi host 证明 stats 路径调用 `setFooter(factory)`，factory 返回 `FooterComponent`；不调用 stats `setWidget`，也不出现项目自有 footer renderer。
+- **AC2:** fixture `cacheMiss=13000/output=817/cacheRead=20000/cost=.002` 渲染包含 `↑13k ↓817 R20k CH60.6% $0.002`，context/model/reasoning 使用 Pi 原生格式。
+- **AC3:** attach A → usage push → attach B、global aggregate、detach；数值、filter 与 socket ownership 均确定，窄/宽 render 不崩。
+- **AC4:** Pi session entries 在 stats update 前后逐项相同；provider/cache golden 逐字节不变。
+- **AC5:** panel off、disconnect、shutdown 都调用 `setFooter(undefined)`；重新开启不累积 footer/controller/socket。
+- **AC6:** `bun test`、`bun run check`、cache golden 与真实 Pi TTY footer smoke 通过。
 
 ## 约束
 
-- Cache impact: **NONE**。
-- widget 仅展示 daemon 聚合数据，不直连 DB。
-- Pi host 负责宽度、wrap 与主题。
-
-## 例子与边界 case
-
-- 无 run：`A · ep0 · no runs yet`。
-- hit denominator 为 0：显示 `hit 0.0%`。
-- panel A → panel B：dispose A 订阅，只显示 B。
+- Cache impact: **NONE**；IPC telemetry → TUI-only read model，provider token/cost 增量 0。
+- 本仓库 pin Pi `>=0.84.1`；FooterComponent constructor/render contract 由 compile + fake-host render test 锁定，Pi 升级若不兼容必须显式适配，不能降级复制源码。
 
 ## 可观察性
 
-本需求本身是可观察性入口；断线时 widget 显示恢复提示。
+- `/tg status [bot]` 是完整数值权威；native footer 是同一数据的 Pi 原生紧凑视图。
+- footer 开启期间显示 Telegram usage，而不是当前 operator Pi session usage；`/tg panel off` 恢复后者。
 
 ## 文档影响
 
-`docs/architecture.md`、`docs/testing.md`、`docs/runbooks/daemon.md`。
-
-## 待决问题
-
-无。
+`docs/research.md`、`docs/architecture.md`、`docs/runbooks/daemon.md`、`docs/testing.md`。
 
 ## 追溯
 
-- Plans: `../plans/completed/PLAN-20260808-native-pi-telegram-ui.md`
-- Commits: 从 `Requirement:` git trailer 查
-
-## 完成证据
-
-- fake Pi host 证明 widget 使用 component factory；active feed stats 复用、standalone panel socket ownership 与 shutdown cleanup 均有回归测试。
-- 全量测试、类型检查与 cache golden 通过。
+- Plans: `PLAN-20260808-complete-new-reqs` T9a/T9b
+- Invalidated implementation: `19819c9`（widget 形态保留为 transcript commit，但不再算 UI-0003 完成）
+- Commits: 从 `Requirement: REQ-UI-0003` trailer 查
