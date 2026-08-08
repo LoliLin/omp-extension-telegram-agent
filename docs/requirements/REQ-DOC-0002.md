@@ -1,6 +1,6 @@
 # REQ-DOC-0002: 明确单目录单群与极简省 token 的项目哲学
 
-- **Status:** Approved（2026-08-08 已调查，待强化）
+- **Status:** Done（2026-08-08；implementation `dfc23b5`）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「强调为什么一份工作目录只能安全运行一个群 deployment；强调极简、极省token和项目哲学，让以后Agent避免过度设计」
 - **依赖:** REQ-DOC-0001、REQ-ONBOARD-0001、REQ-PLAT-0001
@@ -70,7 +70,13 @@ README和guide已经写“一工作目录一群”，AGENTS也要求最小改动
 
 无。同目录多群若未来成为目标，必须另做数据/进程namespace ADR与migration，不能把本需求文字删除后直接实现。
 
+## 实现证据
+
+- `dfc23b5`：project权威原则、AGENTS/development减法检查、中英README/operations/cost guide与文档gate。
+- 验证：7个docs tests / 62 assertions；双mdBook 18 Markdown / 98 links、21 HTML / 608 links；全量340 tests / 4641 assertions与typecheck通过。
+- Cache impact: **NONE**；只改文档和文档测试。
+
 ## 追溯
 
-- Plans: `PLAN-20260808-complete-new-reqs#T13g/T13h`
+- Plans: `PLAN-20260808-complete-new-reqs#T13g/T13h1/T13h2`
 - Commits: 从`Requirement: REQ-DOC-0002` git trailer查

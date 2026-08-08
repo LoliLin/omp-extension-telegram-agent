@@ -56,7 +56,7 @@
 - [ ] [REQ-PLAT-0001](REQ-PLAT-0001.md) 收口为通用、快速、简洁的可配置 bot 平台（P1，已完成代码库调查/未实现）
 - [ ] [REQ-DOC-0001](REQ-DOC-0001.md) README 从用户视角解释平台、配置、使用与边界（P1，已调查/未实现）
 - [ ] [REQ-ONBOARD-0001](REQ-ONBOARD-0001.md) clone → `bun run pi` → `/tg config`、TypeScript 本机配置、提示词隐私与双语 mdBook 用户文档（P1，已调查/未实现）
-- [ ] [REQ-DOC-0002](REQ-DOC-0002.md) 明确单目录单群与极简省 token 的项目哲学（P1，已调查/未实现）
+- [x] [REQ-DOC-0002](REQ-DOC-0002.md) 明确单目录单群与极简省 token 的项目哲学（P1，commit `dfc23b5`）
 
 ## 顺序与依赖
 
