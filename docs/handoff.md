@@ -35,7 +35,7 @@
 17. **已调查 `REQ-ONBOARD-0001`**：当前`file:../pi`、手工JSON配置、tracked真实persona与单语内部索引阻断fresh clone。实施拆为portable launcher、typed local config/prompt privacy、atomic config core、Pi原生`/tg config`、双语用户/成本/维护指南和mdBook Pages六个原子task；legacy JSON兼容，不偷偷改写Git历史。
 18. **已实现 `REQ-UI-0011`**：message/event/stream复用Pi `HStack/TruncatedText` header；身份leading、metadata trailing，bot id优先。40/60/80/120 columns覆盖CJK/emoji/长username与OSC，普通消息仍两行；真实Pi 80/40 columns和当前/浅色主题通过，production extension精确`+15/-15`净零行。
 19. **已实现 `REQ-SEND-0002`（`bd4be62`）**：Telegram create后canonical SQLite按25/100/250ms仅本地重试；committed/partial/unknown统一固定`no_retry`+terminate，exposure/broadcast/event/typing失败隔离并只记脱敏诊断。真实双连接lock复现`#19614`路径只有一次create，poller echo最终一行；33 targeted / 190 assertions、全量268 / 3949通过，真实组合发送留T14。
-20. **已实现 `REQ-UI-0012`**：只服从Pi capability；Kitty路径以公开`convertToPng`异步归一化JPEG/GIF/WebP并继续由`Tui.Image`渲染。path/size/mtime revision共享in-flight，32项/32 MiB LRU、8 MiB单项、32 pending及失败记忆有界；完成只替换相关卡片，detach/restart/shutdown迟到callback失效。targeted 50/469、全量279/4041通过，真实Kitty/Ghostty smoke留T14。
+20. **已实现 `REQ-UI-0012`（`49e3067`）**：只服从Pi capability；Kitty路径以公开`convertToPng`异步归一化JPEG/GIF/WebP并继续由`Tui.Image`渲染。path/size/mtime revision共享in-flight，32项/32 MiB LRU、8 MiB单项、32 pending及失败记忆有界；完成只替换相关卡片，detach/restart/shutdown迟到callback失效。targeted 50/469、全量279/4041通过，真实Kitty/Ghostty smoke留T14。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 
