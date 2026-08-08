@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：生产重复消息已定位为Telegram成功后的SQLite失败被误报为可重试，并正式化为SEND-0002；下一步正式化Kitty/Ghostty媒体note，再逐项实现。
+2026-08-08：新增raw notes已分别正式化为SEND-0002与UI-0012；下一步先修远端commit后的重复发送，再修Kitty/Ghostty原生媒体转换。
 
 ## 已完成
 
@@ -35,6 +35,7 @@
 17. **已调查 `REQ-ONBOARD-0001`**：当前`file:../pi`、手工JSON配置、tracked真实persona与单语内部索引阻断fresh clone。实施拆为portable launcher、typed local config/prompt privacy、atomic config core、Pi原生`/tg config`、双语用户/成本/维护指南和mdBook Pages六个原子task；legacy JSON兼容，不偷偷改写Git历史。
 18. **已实现 `REQ-UI-0011`**：message/event/stream复用Pi `HStack/TruncatedText` header；身份leading、metadata trailing，bot id优先。40/60/80/120 columns覆盖CJK/emoji/长username与OSC，普通消息仍两行；真实Pi 80/40 columns和当前/浅色主题通过，production extension精确`+15/-15`净零行。
 19. **已调查 `REQ-SEND-0002`**：`#19614/#19615`、`#19619/#19621`证明Telegram首次已成功，后置SQLite lock却给模型error，模型重试造成重复。修复边界是远端调用后的committed/partial/unknown全部terminal no-retry，仅幂等恢复本地canonical/event/broadcast；OPS singleton只是降低锁竞争，不能代替发送层保证。
+20. **已调查 `REQ-UI-0012`**：Pi已把Kitty/Ghostty判为kitty protocol，但底层固定`f=100`只接受PNG；插件却原样传WebP/JPEG。实施跟随Pi自己的ToolExecution模式：公开`convertToPng`异步归一化、同revision去重、有界LRU，成功后仍由`Tui.Image`原位渲染。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 

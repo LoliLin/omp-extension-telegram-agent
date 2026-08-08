@@ -319,3 +319,13 @@ custom entry 不进入 LLM context；IPC 与 provider serialization 不变。Cac
 - `sendRichTextAndPersist`已经抛出专门的`SentMessagePersistenceError`，但runtime没有把它与preflight/network rejection区分。sticker insert、markExposed、broadcast/event，以及message成功后sticker失败也有相同半提交风险。
 - Telegram没有本项目可用的通用idempotency key。确定性rich rejection的一次plain fallback仍合法；timeout/网络断开、远端成功后的本地失败和组合partial都必须是terminal no-retry，且本地canonical恢复按message id幂等、绝不触网。
 - Cache impact **NONE**：send tool/schema/grammar不变；正常路径零token变化，异常路径减少重复Telegram请求和provider纠错turn。完整边界见`requirements/REQ-SEND-0002.md`。
+
+## REQ-UI-0012 调查：Kitty/Ghostty能力检测正确，payload格式错误（2026-08-08）
+
+**结论：保留Pi `Image`，按Pi自己coding-agent的模式在Kitty路径先异步`convertToPng`。**
+
+- Context7当前Pi文档声明`Image`可接收PNG/JPEG/GIF/WebP，且Ghostty使用Kitty graphics protocol；本地已升级Pi源码也明确把Kitty/Ghostty/WezTerm/Warp检测为`images:"kitty"`。
+- 同一源码的`encodeKitty()`固定`f=100`，Kitty官方协议规定该值只表示PNG。项目目前把Telegram WebP sticker/JPEG photo原样base64传入，因此尺寸解析虽成功，终端wire payload仍无效并可静默不显示。
+- Pi coding-agent公开导出`convertToPng()`，其注释和`ToolExecutionComponent`都明确在Kitty路径异步转换非PNG、完成后requestRender；这就是插件应复用的native integration，不需要改Pi或自写escape。
+- 实施边界是同file revision in-flight去重与32项/32MiB LRU；source继续≤1MiB、单converted≤8MiB。失败/超限/迟到completion保持文本fallback，不发无效`f=100`、不无限重试。
+- Cache impact **NONE**：仅本地extension内存与host render，IPC/DB/provider grammar、LLM/vision/network调用和每turn token均不变。完整验收见`requirements/REQ-UI-0012.md`。

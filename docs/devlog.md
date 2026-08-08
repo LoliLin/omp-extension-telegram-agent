@@ -464,3 +464,10 @@
 - 同期重复daemon/409解释了锁竞争来源，OPS-0002已恢复deployment单写者；独立发送缺口仍是runtime没有消费`SentMessagePersistenceError`，且sticker、markExposed、broadcast/event与组合第二段同样可能在远端commit后抛出。
 - 正式边界固定为：所有preflight先于网络；rich确定性拒绝只允许既有一次plain fallback；一旦create call开始，committed/partial/unknown均以terminal no-retry结束，本地canonical恢复按message id幂等且绝不触网。
 - Cache impact: **NONE（docs/research only）**。后续不改send tool/schema/provider grammar；正常turn零token变化，异常路径减少重复模型turn与Telegram消息。
+
+## 2026-08-08 (51) — 调查 Kitty/Ghostty 原生媒体显示（文档）
+
+- 用户raw note已正式化为`REQ-UI-0012`。Context7、当前本地Pi源码与Kitty官方协议交叉确认：Pi正确识别Kitty/Ghostty，但`encodeKitty`固定`f=100`，wire payload必须是PNG；项目把Telegram WebP/JPEG/GIF原样交给`Tui.Image`导致静默拒绝。
+- Pi coding-agent已公开`convertToPng`并在自己的`ToolExecutionComponent`用“Kitty-only异步转换→updateDisplay→requestRender”模式。本项目将复用它与`getCapabilities`/`Tui.Image`，不patch Pi、不自写terminal escape、不引入图像依赖。
+- 实施约束为同file revision in-flight去重、32项/32MiB LRU、单项8MiB、dispose generation与可读fallback；PNG零转换，iTerm2/unsupported继续完全服从Pi。
+- Cache impact: **NONE（docs/research only）**。只影响本地TUI图像payload准备，DB/IPC/provider与vision调用不变。

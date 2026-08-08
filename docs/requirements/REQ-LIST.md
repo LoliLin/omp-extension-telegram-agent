@@ -42,6 +42,7 @@
 - [ ] [REQ-SEND-0001](REQ-SEND-0001.md) 统一 message/sticker/reply_to、tool-local 用法与 terminating 最小结果（P1，已实现/待真实群总验收）
 - [ ] [REQ-UI-0010](REQ-UI-0010.md) 恢复 Pi 原生 feed 的即时刷新与流式 Agent 输出（P1，已实现/待真实 Pi 总验收）
 - [ ] [REQ-SEND-0002](REQ-SEND-0002.md) Telegram 远端提交后不得因本地失败而重复发送（P0，已复现定位/未实现）
+- [ ] [REQ-UI-0012](REQ-UI-0012.md) 用Pi原生PNG转换与Image修复Kitty/Ghostty媒体显示（P1，已调查/未实现）
 
 
 ## 代码库与文档
@@ -67,6 +68,7 @@
 - REQ-UI-0009 固化 UI-0003/0007 的 lifetime 范围，并补齐 Pi 原生 cache-write 与 `/tg status` 详情；不得退回第三行或自绘 footer
 - REQ-UI-0010 复用 Pi AgentSession `message_update` 与宿主 `TUI.requestRender()`；流式帧只存在于 IPC/TUI 内存，不写 DB/Pi session/provider context
 - REQ-UI-0011 只重组 UI-0001/0006/0010 的现有卡片数据，复用 Pi `HStack/VStack` 与 theme；不新增生产渲染 LOC、依赖、数据字段或provider字节
+- REQ-UI-0012 继续由Pi检测Kitty/Ghostty并由`Tui.Image`渲染；插件只按Pi公开模式异步把非PNG归一化为Kitty `f=100`所需PNG，不自写terminal protocol
 - REQ-TG-0002 承认 private draft 原生 Thinking；当前 supergroup 使用 `typing` lease 每 4 秒续约，绝不误发 trigger sender 私聊；send 成功或 flush settle 后停止
 - REQ-TG-0003 用现有 `send.message` 承载 Rich Markdown，incoming/outgoing rich structure持久化后只把有界纯文本投影交给 Pi/provider；group 不调用 private draft
 - REQ-REPLY-0001 保证 direct reply 的原始消息进入对应 bot provider suffix，不提供 runtime 内容兜底；嵌套父 sender、busy/catch-up 与 restart 都不得丢 obligation
