@@ -3,13 +3,11 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 7; // v7: send tool uses bounded Markdown mapped to Telegram entities
+export const CACHE_SCHEMA_VERSION = 8; // v8: structured Telegram context, deltas, assistant policy, shared-prefix-first
 
-// Fixed shared protocol block, appended after the persona. Never reorder.
-const PROTOCOL = `
----
-
-# 群聊协议
+// Fixed shared protocol is deliberately the first byte of every bot's system prompt so bots in
+// the same provider/cache cohort share the longest possible exact prefix.
+export const SHARED_PROTOCOL = `# 群聊协议
 
 你在一个 Telegram 群里。群消息按时间顺序以如下格式出现在对话里：
 
@@ -27,10 +25,8 @@ const PROTOCOL = `
 - 群里还有另一个 AI bot（你的姐妹），她的消息你能看到，但不要替她说话，也不要回复她的消息
 `;
 
-export function buildSystemPrompt(personaText: string, stickerCatalog = ""): string {
-	// stickerCatalog (if any) is a STABLE per-bot block appended after the protocol — part of
-	// the stable prefix. Its content changes only with config (REQ-STICKER-0001 R2).
-	return `${personaText.trim()}\n${PROTOCOL}${stickerCatalog}`;
+export function buildSystemPrompt(personaText: string, _legacyStickerCatalog = ""): string {
+	return `${SHARED_PROTOCOL}\n---\n\n# 人格与回应策略\n\n${personaText.trim()}`;
 }
 
 /**

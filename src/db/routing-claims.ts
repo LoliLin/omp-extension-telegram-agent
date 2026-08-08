@@ -22,9 +22,14 @@ export function claimRoutingDecision(
 	if (accepted) return false;
 	const now = Date.now();
 	const result = db.query(`
-		INSERT OR IGNORE INTO routing_claims
+		INSERT INTO routing_claims
 			(chat_id, message_id, bot_id, route_version, reason, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+		ON CONFLICT(chat_id, message_id, bot_id, route_version) DO UPDATE SET
+			reason = excluded.reason,
+			status = 'pending',
+			updated_at = excluded.updated_at
+		WHERE routing_claims.status NOT IN ('started', 'coalesced')
 	`).run(
 		decision.chatId,
 		decision.messageId,

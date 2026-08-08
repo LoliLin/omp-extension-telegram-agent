@@ -1,25 +1,25 @@
-// BotRuntime: one persona bot = one Pi AgentSession + send tool + exposure tracking.
+// BotRuntime: one persona bot = one Pi AgentSession + immutable event consumption + visible refs.
 // See docs/architecture.md and docs/research.md.
 
 import type { Database } from "bun:sqlite";
-import { readFileSync, mkdirSync, readdirSync } from "node:fs";
+import { readFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
 	createAgentSession,
 	DefaultResourceLoader,
 	SessionManager,
 	SettingsManager,
+	VERSION as PI_VERSION,
 	serializeConversation,
 	type AgentSession,
 	type AgentSessionEvent,
 	type CompactionResult,
-	type ExtensionAPI,
 	type ModelRuntime,
+	type SessionEntry,
 	type SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import type { BotConfig, AppConfig } from "../config.ts";
-import { getBotState, setBotState } from "../db/db.ts";
+import { deleteBotState, getBotState, setBotState } from "../db/db.ts";
 import { BotApi, TelegramApiError } from "../telegram/api.ts";
 import { TelegramTypingLease, type ActivityScheduler } from "../telegram/activity.ts";
 import {
@@ -31,14 +31,13 @@ import {
 	SentMessagePersistenceError,
 	type SentMessageTransport,
 } from "../telegram/send.ts";
-import { serializeMessages, type MessageRow } from "./serialize.ts";
-import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT } from "./prompt.ts";
+import { type MessageRow, TELEGRAM_SERIALIZER_VERSION } from "./serialize.ts";
+import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT, SHARED_PROTOCOL } from "./prompt.ts";
 import {
 	degradedSendResult,
 	successfulSendResult,
 	TOOL_DEFS,
 	toolProtocolHash,
-	toolsHash,
 	type SendComponentOutcome,
 	type SendDegradedOutcome,
 	type SendParams,
@@ -53,7 +52,12 @@ import {
 	type VisionExecutor,
 	type VisionUpdateSink,
 } from "../media/vision.ts";
-import { ensureStickerCatalog, stickerCatalogBlock, preRecognizeCatalogVision } from "../media/sticker-catalog.ts";
+import {
+	ensureStickerCatalog,
+	preRecognizeCatalogVision,
+	stickerCandidatesForTurn,
+	stickerCatalogSnapshotHash,
+} from "../media/sticker-catalog.ts";
 import {
 	createReplyObligation,
 	listReplyObligations,
@@ -64,9 +68,45 @@ import type { RoutingTrigger, TriggerResult, TriggerSource } from "./router.ts";
 import type { AgentStreamFrame, AgentStreamToolCall } from "../ipc.ts";
 import { consumedControlMessageIds } from "../telegram/control-command.ts";
 import { classifyPiProviderFailure } from "./model-runtime.ts";
+import {
+	commitConsumedContext,
+	addVisibleMessageIds,
+	getConsumedSeq,
+	getSessionManifest,
+	listRecentMessageEvents,
+	listReplyObligationEvents,
+	listVisibleMessageIds,
+	messageEventHighWater,
+	replaceVisibleMessageIds,
+	setConsumedSeq,
+	setSessionManifest,
+	type MessageEvent,
+} from "../db/message-events.ts";
+import {
+	availableSuffixBudget,
+	estimateProviderTokensUpperBound,
+	packMessageEvents,
+} from "./token-packer.ts";
+import {
+	makeAssistantPersistencePolicyExtension,
+	makeCachePayloadObserverExtension,
+	makeTelegramCompactionExtension,
+	makeTelegramContextExtension,
+	TELEGRAM_CONTEXT_TYPE,
+	TELEGRAM_CONTEXT_VERSION,
+	TELEGRAM_EXTENSION_ORDER,
+	isTelegramContextDetails,
+	type ProviderPayloadObservation,
+	type TelegramContextDetails,
+} from "./extensions/index.ts";
+import { buildContextFingerprint, canResumeContextSession, sha256 } from "./context-fingerprint.ts";
+import { parsePiModelReference, type PiRequestThinkingLevel } from "./model-ref.ts";
+import type { VisionScheduler } from "../media/vision-scheduler.ts";
 
-const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
-const EXPOSED_KEY = "exposed_ids";
+const MAX_EVENT_SCAN = 256;
+const MAX_OBLIGATION_SCAN = 64;
+const LEGACY_EXPOSED_KEY = "exposed_ids";
+const TELEGRAM_CONTEXT_COMMIT_TYPE = "telegram_context_commit_v2";
 const EPOCH_KEY = "context_epoch";
 const STREAM_TEXT_MAX = 4096;
 const STREAM_TOOL_ARGS_MAX = 2048;
@@ -118,7 +158,9 @@ export class BotRuntime {
 	private visionExecutor: VisionExecutor | null;
 	private api: BotApi;
 	private session: AgentSession | null = null;
-	private model: ReturnType<ModelRuntime["getModel"]>; // resolved in init(); used by the compaction extension
+	private model!: NonNullable<ReturnType<ModelRuntime["getModel"]>>; // resolved in init()
+	private compactionModel!: NonNullable<ReturnType<ModelRuntime["getModel"]>>;
+	private compactionReasoning: PiRequestThinkingLevel = "low";
 	private running = false;
 	// Flush state machine (REQ-AGENT-0001): `flushing` is owned locally and set synchronously
 	// at trigger time — never gated on SDK events. While flushing, triggers only coalesce
@@ -132,13 +174,23 @@ export class BotRuntime {
 	private controlCompacting = false;
 	private lastControlCompact: RuntimeControlSnapshot["lastCompact"] = null;
 	private readonly monotonicNow: () => number;
-	private exposed = new Set<number>();
+	private visibleMessageIds = new Set<number>();
 	private epoch = 1;
 	private runStartTs = 0;
 	private systemHash = "";
 	private toolsHash = "";
 	private streamSequence = 0;
 	private activeStreamId: string | null = null;
+	private contextFingerprint = "";
+	private telemetryHmacKey = "";
+	private staticPrefixTokenEstimate = 0;
+	private pendingPayloadObservations: ProviderPayloadObservation[] = [];
+	private currentTriggerMessageId: number | null = null;
+	private pendingInputMetrics = { inputEvents: 0, estimatedTokens: 0, rowsScanned: 0, visionCalls: 0 };
+	private providerCallsInRun = 0;
+	private lastLlmRunId: number | null = null;
+	private readonly visionScheduler: VisionScheduler | null;
+	private readonly visionEnabled: boolean;
 	private readonly typingLease: TelegramTypingLease;
 	/** Optional sink for TUI/live broadcasting of agent events. */
 	eventSink: ((kind: string, payload: unknown) => void) | null = null;
@@ -177,6 +229,7 @@ export class BotRuntime {
 			activityScheduler?: ActivityScheduler;
 			chatActionSender?: () => Promise<unknown>;
 			visionExecutor?: VisionExecutor;
+			visionScheduler?: VisionScheduler;
 		} = {},
 	) {
 		this.db = db;
@@ -184,6 +237,8 @@ export class BotRuntime {
 		this.config = config;
 		this.modelRuntime = modelRuntime;
 		this.visionExecutor = options.visionExecutor ?? null;
+		this.visionScheduler = options.visionScheduler ?? null;
+		this.visionEnabled = config.vision?.enabled ?? options.visionExecutor != null;
 		this.monotonicNow = options.monotonicNow ?? (() => performance.now());
 		this.api = new BotApi(bot.token);
 		const chatId = Number(`-100${config.groupPeerId}`);
@@ -201,8 +256,8 @@ export class BotRuntime {
 				},
 			},
 		);
-		this.exposed = new Set(JSON.parse(getBotState(db, bot.id, EXPOSED_KEY) ?? "[]") as number[]);
 		this.epoch = Number(getBotState(db, bot.id, EPOCH_KEY) ?? "1");
+		this.visibleMessageIds = new Set(listVisibleMessageIds(db, bot.id, chatId, this.epoch));
 	}
 
 	get botUserId(): number {
@@ -215,35 +270,29 @@ export class BotRuntime {
 
 	async init(): Promise<void> {
 		const persona = readFileSync(this.bot.personaPath, "utf8");
-		// Resolve fixed catalog membership and short ids before taking the one immutable
-		// system-prompt snapshot. Vision continues in the background and only appears
-		// after a future restart; it never mutates this session's prefix.
-		let stickerCatalog = "";
+		const chatId = Number(`-100${this.config.groupPeerId}`);
+		// Catalog membership remains local. No catalog row is placed in the stable system prefix.
 		if (this.bot.stickerSets.length > 0) {
-			// fetch + persist + short_ids block startup (seconds); vision pre-recognition runs in
-			// the background so the poller is never held offline for minutes (REQ-STICKER-0001 R1)
 			await ensureStickerCatalog(this.db, this.api, this.bot.id, this.bot.stickerSets);
-			void preRecognizeCatalogVision(
-				this.db,
-				this.api,
-				this.bot.id,
-				this.bot.stickerSets,
-				this.getVisionExecutor(),
-				(fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
-				(telemetry) => this.recordEvent("vision", telemetry),
-				{ cacheDir: join(this.config.dataDir, "media") },
-			);
-			stickerCatalog = stickerCatalogBlock(this.db, this.bot.id, this.bot.stickerSets);
+			if (this.visionEnabled) {
+				void preRecognizeCatalogVision(
+					this.db,
+					this.api,
+					this.bot.id,
+					this.bot.stickerSets,
+					this.getVisionExecutor(),
+					(fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
+					(telemetry) => this.recordEvent("vision", telemetry),
+					{
+						cacheDir: join(this.config.dataDir, "media"),
+						scheduler: this.visionScheduler ?? undefined,
+						chatId,
+					},
+				);
+			}
 		}
-		const systemPrompt = buildSystemPrompt(persona, stickerCatalog);
+		const systemPrompt = buildSystemPrompt(persona);
 		this.systemHash = sha256Short(systemPrompt);
-
-		const sessionsDir = join(this.config.dataDir, "sessions", this.bot.id);
-		mkdirSync(sessionsDir, { recursive: true });
-		const hasSession = readdirSync(sessionsDir).some((f) => f.endsWith(".jsonl"));
-		const sessionManager = hasSession
-			? SessionManager.continueRecent(this.config.dataDir, sessionsDir)
-			: SessionManager.create(this.config.dataDir, sessionsDir);
 
 		const sendTool = {
 			name: "send",
@@ -284,24 +333,93 @@ export class BotRuntime {
 		};
 		// Tool order is cache-visible protocol: never reorder (docs/cache.md, REQ-TEST-0001 R2).
 		const tools = [sendTool, searchTool, runJsTool];
-		this.toolsHash = toolsHash(); // full protocol hash; filtered per-bot hash computed below
 
 		const model = this.modelRuntime.getModel(this.bot.provider, this.bot.model);
 		if (!model) throw new Error(`model not found: ${this.bot.provider}/${this.bot.model}`);
 		this.model = model;
+		const compactionSelection = parsePiModelReference(
+			this.bot.compactionModel ?? this.config.auxiliaryVisualModel,
+		);
+		if (!compactionSelection) throw new Error("invalid compaction_model; expected provider/model:effort");
+		const compactionModel = this.modelRuntime.getModel(compactionSelection.provider, compactionSelection.model);
+		if (!compactionModel) {
+			throw new Error(`compaction model not found: ${compactionSelection.provider}/${compactionSelection.model}`);
+		}
+		this.compactionModel = compactionModel;
+		this.compactionReasoning = compactionSelection.thinkingLevel;
 
 		// Custom compaction: chat-oriented summary (state, not replay), threshold from config.
 		// Pi's trigger formula is contextTokens > contextWindow - reserveTokens, so reserve = window - threshold.
 		const threshold = this.bot.compactionThreshold;
 		const reserveTokens = Math.max(16_384, model.contextWindow - threshold);
-		const compactionExt = {
-			name: "tg-compaction",
-			hidden: true,
-			factory: (pi: ExtensionAPI) => {
-				pi.on("session_before_compact", (event: SessionBeforeCompactEvent) => this.handleBeforeCompact(event));
-			},
-		};
+		// Per-bot tool toggles (REQ-CONF-0001): filter the fixed-order tool list. send off
+		// means the bot cannot speak in-group (observer-only); search/run_js off saves tokens.
+		const activeTools = [sendTool, searchTool, runJsTool].filter((t) =>
+			t.name === "send" ? this.bot.tools.send : t.name === "search" ? this.bot.tools.search : this.bot.tools.runJs,
+		);
+		this.toolsHash = toolProtocolHash(activeTools);
+		this.staticPrefixTokenEstimate = estimateProviderTokensUpperBound(
+			`${systemPrompt}\n${JSON.stringify(activeTools.map(({ name, description, parameters }) => ({ name, description, parameters })))}`,
+		);
+		this.contextFingerprint = buildContextFingerprint({
+			piVersion: PI_VERSION,
+			provider: this.bot.provider,
+			api: model.api,
+			model: this.bot.model,
+			reasoningEffort: this.bot.reasoningEffort,
+			cacheRetention: this.bot.cacheRetention ?? "short",
+			cacheSchemaVersion: CACHE_SCHEMA_VERSION,
+			commonPromptSha256: sha256(SHARED_PROTOCOL),
+			personaSha256: sha256(persona),
+			serializerVersion: TELEGRAM_SERIALIZER_VERSION,
+			compactionPromptSha256: sha256(COMPACTION_SUMMARY_PROMPT),
+			compactionModel: compactionSelection.canonical,
+			stickerCatalogSnapshotSha256: stickerCatalogSnapshotHash(
+				this.db,
+				this.bot.id,
+				this.bot.stickerSets,
+			),
+			extensionOrder: TELEGRAM_EXTENSION_ORDER,
+			tools: activeTools.map((tool) => ({
+				name: tool.name,
+				description: tool.description,
+				parameters: tool.parameters,
+			})),
+		});
 
+		const sessionsDir = join(this.config.dataDir, "sessions", this.bot.id);
+		mkdirSync(sessionsDir, { recursive: true });
+		const manifest = getSessionManifest(this.db, this.bot.id);
+		const hasAnySession = readdirSync(sessionsDir).some((file) => file.endsWith(".jsonl"));
+		const canResume = canResumeContextSession(
+			manifest,
+			this.contextFingerprint,
+			manifest != null && existsSync(manifest.sessionFile),
+		);
+		const sessionManager = canResume
+			? SessionManager.open(manifest!.sessionFile, sessionsDir, this.config.dataDir)
+			: SessionManager.create(this.config.dataDir, sessionsDir);
+		if (!canResume && (manifest != null || hasAnySession)) {
+			this.epoch += 1;
+			setBotState(this.db, this.bot.id, EPOCH_KEY, String(this.epoch));
+			replaceVisibleMessageIds(this.db, this.bot.id, chatId, this.epoch, []);
+			this.visibleMessageIds.clear();
+		}
+		deleteBotState(this.db, this.bot.id, LEGACY_EXPOSED_KEY);
+
+		const payloadKey = sha256(
+			`telegram-payload-observer:${this.config.routerSecret ?? this.config.dataDir}:${this.bot.id}`,
+		);
+		this.telemetryHmacKey = payloadKey;
+		const extensions = [
+			makeTelegramContextExtension(),
+			makeTelegramCompactionExtension((event) => this.handleBeforeCompact(event)),
+			makeCachePayloadObserverExtension(payloadKey, (observation) => {
+				this.pendingPayloadObservations.push(observation);
+				if (this.pendingPayloadObservations.length > 8) this.pendingPayloadObservations.shift();
+			}),
+			makeAssistantPersistencePolicyExtension((text) => this.recordEvent("assistant_text", { text })),
+		];
 		const loader = new DefaultResourceLoader({
 			cwd: this.config.dataDir,
 			agentDir: join(this.config.dataDir, "pi-agent"),
@@ -310,19 +428,9 @@ export class BotRuntime {
 			noSkills: true,
 			noPromptTemplates: true,
 			noContextFiles: true,
-			extensionFactories: [compactionExt],
+			extensionFactories: extensions,
 		});
 		await loader.reload();
-
-		// Per-bot tool toggles (REQ-CONF-0001): filter the fixed-order tool list. send off
-		// means the bot cannot speak in-group (observer-only); search/run_js off saves tokens.
-		const activeTools = [sendTool, searchTool, runJsTool].filter((t) =>
-			t.name === "send" ? this.bot.tools.send : t.name === "search" ? this.bot.tools.search : this.bot.tools.runJs,
-		);
-		if (activeTools.length < tools.length) {
-			// telemetry hash reflects what THIS bot's provider actually sees
-			this.toolsHash = toolProtocolHash(activeTools);
-		}
 
 		const { session } = await createAgentSession({
 			cwd: this.config.dataDir,
@@ -336,20 +444,117 @@ export class BotRuntime {
 			customTools: activeTools,
 		});
 		this.session = session;
+		const streamFunction = session.agent.streamFunction;
+		session.agent.streamFunction = (requestModel, context, options) => streamFunction(
+			requestModel,
+			context,
+			{ ...options, cacheRetention: this.bot.cacheRetention ?? "short" },
+		);
+		const sessionFile = session.sessionFile;
+		if (!sessionFile) throw new Error(`persistent session file unavailable for bot ${this.bot.id}`);
+		setSessionManifest(this.db, {
+			botId: this.bot.id,
+			sessionId: session.sessionId,
+			sessionFile,
+			contextFingerprint: this.contextFingerprint,
+			createdAt: canResume ? manifest!.createdAt : Date.now(),
+		});
+		this.reconcileContextStateFromSession();
 		this.subscribeEvents();
 		console.log(
-			`[bot ${this.bot.id}] session ready (${hasSession ? "resumed" : "new"}), epoch=${this.epoch}, system=${this.systemHash}, tools=${this.toolsHash}, cache_schema=v${CACHE_SCHEMA_VERSION}`,
+			`[bot ${this.bot.id}] session ready (${canResume ? "resumed" : "new"}), epoch=${this.epoch}, fingerprint=${this.contextFingerprint.slice(0, 12)}, system=${this.systemHash}, tools=${this.toolsHash}, cache_schema=v${CACHE_SCHEMA_VERSION}`,
 		);
+	}
+
+	/** Recover the SQLite half of prior custom-message commits without parsing rendered text. */
+	private reconcileContextStateFromSession(): void {
+		if (!this.session) return;
+		const chatId = Number(`-100${this.config.groupPeerId}`);
+		const state = this.contextStateFromEntries(
+			this.session.sessionManager.buildContextEntries(),
+			getConsumedSeq(this.db, this.bot.id, chatId),
+		);
+		setConsumedSeq(this.db, this.bot.id, chatId, state.consumedSeq);
+		replaceVisibleMessageIds(this.db, this.bot.id, chatId, this.epoch, [...state.visible]);
+		const manager = this.session.sessionManager as typeof this.session.sessionManager & {
+			getBranch?: () => SessionEntry[];
+		};
+		if (typeof manager.getBranch === "function") {
+			const delivered = this.deliveredCommitIdsFromEntries(manager.getBranch());
+			removeReplyObligations(
+				this.db,
+				this.bot.id,
+				[...delivered].map((messageId) => ({ chatId, messageId })),
+			);
+		}
+		this.visibleMessageIds = state.visible;
+	}
+
+	/** Structured context ownership; provider-rendered strings are never parsed for identities. */
+	private contextStateFromEntries(
+		entries: readonly SessionEntry[],
+		initialConsumedSeq = 0,
+	): { consumedSeq: number; visible: Set<number> } {
+		let consumedSeq = initialConsumedSeq;
+		const visible = new Set<number>();
+		for (const entry of entries) {
+			if (entry.type === "custom_message" && isTelegramContextDetails(entry.details)) {
+				consumedSeq = Math.max(consumedSeq, entry.details.consumedSeq);
+				for (const messageId of entry.details.visibleMessageIds) visible.add(messageId);
+				continue;
+			}
+			if (entry.type === "compaction") {
+				// Compaction is a replacement boundary. Entries summarized away may remain in the
+				// session tree, but their message ids are no longer provider-visible.
+				visible.clear();
+				const details = entry.details as {
+					consumedSeq?: unknown;
+					visibleMessageIds?: unknown;
+				} | undefined;
+				if (Number.isSafeInteger(details?.consumedSeq)) consumedSeq = Math.max(consumedSeq, details!.consumedSeq as number);
+				if (Array.isArray(details?.visibleMessageIds)) {
+					for (const messageId of details.visibleMessageIds) {
+						if (Number.isSafeInteger(messageId) && (messageId as number) > 0) visible.add(messageId as number);
+					}
+				}
+				continue;
+			}
+			if (entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "send") {
+				const sent = (entry.message.details as { sent?: unknown } | undefined)?.sent;
+				if (Array.isArray(sent)) {
+					for (const messageId of sent) {
+						if (Number.isSafeInteger(messageId) && (messageId as number) > 0) visible.add(messageId as number);
+					}
+				}
+			}
+		}
+		return { consumedSeq, visible };
+	}
+
+	private deliveredCommitIdsFromEntries(entries: readonly SessionEntry[]): Set<number> {
+		const delivered = new Set<number>();
+		for (const entry of entries) {
+			if (entry.type !== "custom" || entry.customType !== TELEGRAM_CONTEXT_COMMIT_TYPE) continue;
+			const ids = (entry.data as { deliveredObligationIds?: unknown } | undefined)?.deliveredObligationIds;
+			if (!Array.isArray(ids)) continue;
+			for (const messageId of ids) {
+				if (Number.isSafeInteger(messageId) && (messageId as number) > 0) delivered.add(messageId as number);
+			}
+		}
+		return delivered;
 	}
 
 	private subscribeEvents(): void {
 		if (!this.session) return;
 		this.session.subscribe((event) => {
 			const now = Date.now();
-			switch (event.type) {
+				switch (event.type) {
 				case "agent_start":
 					this.running = true;
 					this.runStartTs = now;
+					this.providerCallsInRun = 0;
+					this.lastLlmRunId = null;
+					this.pendingPayloadObservations = [];
 					break;
 				case "message_start":
 					if (event.message.role === "assistant") {
@@ -364,15 +569,10 @@ export class BotRuntime {
 					const msg = event.message;
 					if (msg.role === "assistant") {
 						this.endAssistantStream(now);
-						const text = msg.content
-							.filter((c) => c.type === "text")
-							.map((c) => (c as { text: string }).text)
-							.join("\n");
 						const thinking = msg.content
 							.filter((c) => c.type === "thinking")
 							.map((c) => (c as { thinking: string }).thinking)
 							.join("\n");
-						if (text.trim()) this.recordEvent("assistant_text", { text });
 						if (thinking.trim()) this.recordEvent("thinking", { text: thinking });
 						if (msg.usage) this.recordUsage(msg.usage, now);
 					}
@@ -475,10 +675,7 @@ export class BotRuntime {
 		return this.streamSink != null && (this.streamDemand?.() ?? true);
 	}
 
-	/**
-	 * Compaction ended. Only a successful compaction (result present, not aborted) starts a
-	 * new epoch and resets exposure; failure/abort leaves epoch and exposure untouched (R4).
-	 */
+	/** Successful compaction rotates only provider visibility; the business cursor is monotonic. */
 	private onCompactionEnd(event: Extract<AgentSessionEvent, { type: "compaction_end" }>): void {
 		if (event.aborted || !event.result) {
 			const category = classifyPiProviderFailure(event.errorMessage ?? "compaction failed");
@@ -488,40 +685,15 @@ export class BotRuntime {
 		}
 		this.epoch += 1;
 		setBotState(this.db, this.bot.id, EPOCH_KEY, String(this.epoch));
-		this.exposed.clear();
-		// Re-mark exactly the telegram messages that survive inside the kept tail (R5) —
-		// derived from the entries the provider actually sees, not a count heuristic.
-		const kept = this.keptTailMessageIds();
-		this.markExposed(kept);
+		const details = event.result.details as { visibleMessageIds?: unknown } | undefined;
+		const kept = Array.isArray(details?.visibleMessageIds)
+			? details.visibleMessageIds.filter((messageId): messageId is number => Number.isSafeInteger(messageId) && (messageId as number) > 0)
+			: [];
+		this.visibleMessageIds = new Set(kept);
+		const chatId = Number(`-100${this.config.groupPeerId}`);
+		replaceVisibleMessageIds(this.db, this.bot.id, chatId, this.epoch, kept);
 		this.recordEvent("compaction", { epoch: this.epoch, kept: kept.length });
 		console.log(`[bot ${this.bot.id}] compaction -> epoch ${this.epoch}, kept tail ${kept.length} msgs`);
-	}
-
-	/**
-	 * Ids of telegram messages still visible in context after compaction, parsed out of the
-	 * user-message entries in the session's current context (compaction entry + kept tail +
-	 * post-compaction entries). The SDK does not map session entries back to telegram ids, so
-	 * we parse our own serialization grammar (`[HH:MM:SS] #<id> ` at line start) — the same
-	 * bytes the provider sees. Known limit: a chat message whose text contains a newline
-	 * followed by a forged `[HH:MM:SS] #<id> ` line would be mis-marked exposed (accepted;
-	 * assistant/tool/custom entries are never parsed, so the model cannot inject these).
-	 */
-	private keptTailMessageIds(): number[] {
-		if (!this.session) return [];
-		const ids = new Set<number>();
-		for (const entry of this.session.sessionManager.buildContextEntries()) {
-			if (entry.type !== "message" || entry.message.role !== "user") continue;
-			const content = entry.message.content;
-			const text =
-				typeof content === "string"
-					? content
-					: (content ?? [])
-							.filter((c) => c.type === "text")
-							.map((c) => (c as { text: string }).text)
-							.join("\n");
-			for (const m of text.matchAll(/^\[\d{2}:\d{2}:\d{2}\] #(\d+) /gm)) ids.add(Number(m[1]));
-		}
-		return [...ids];
 	}
 
 	/** session_before_compact handler: empty summary is refused via cancel, never persisted. */
@@ -534,12 +706,25 @@ export class BotRuntime {
 			this.recordEvent("error", { stage: "compaction", error: "empty summary" });
 			return { cancel: true };
 		}
+		const branchEntries = event.branchEntries ?? [];
+		const keptIndex = branchEntries.findIndex((entry) => entry.id === prep.firstKeptEntryId);
+		const keptEntries = keptIndex >= 0 ? branchEntries.slice(keptIndex) : [];
+		const chatId = Number(`-100${this.config.groupPeerId}`);
+		const state = this.contextStateFromEntries(keptEntries, getConsumedSeq(this.db, this.bot.id, chatId));
+		const unresolvedReplyMessageIds = listReplyObligations(this.db, this.bot.id, chatId, MAX_OBLIGATION_SCAN)
+			.map((obligation) => obligation.messageId);
 		return {
 			compaction: {
 				summary: gen.summary,
 				firstKeptEntryId: prep.firstKeptEntryId,
 				tokensBefore: prep.tokensBefore,
 				usage: gen.usage,
+				details: {
+					version: TELEGRAM_CONTEXT_VERSION,
+					consumedSeq: state.consumedSeq,
+					visibleMessageIds: [...state.visible],
+					unresolvedReplyMessageIds,
+				},
 			},
 		};
 	}
@@ -555,13 +740,14 @@ export class BotRuntime {
 				? `<previous-summary>\n${prep.previousSummary}\n</previous-summary>\n\n把上面的旧摘要与新内容合并成一份更新的摘要。`
 				: "请输出摘要。");
 		const result = await this.modelRuntime.completeSimple(
-			this.model as never,
+			this.compactionModel as never,
 			{
 				systemPrompt: COMPACTION_SUMMARY_PROMPT,
 				messages: [{ role: "user", content: userText, timestamp: Date.now() }],
 			},
-			{ cacheRetention: "none", maxTokens: 4096 },
+			{ cacheRetention: "none", maxTokens: 4096, reasoning: this.compactionReasoning },
 		);
+		this.recordCompactionUsage(result.usage, Date.now());
 		const summary = result.content
 			.filter((c: { type: string }) => c.type === "text")
 			.map((c: unknown) => (c as { text: string }).text)
@@ -574,7 +760,7 @@ export class BotRuntime {
 		if (!params.message && !params.sticker) {
 			throw new Error("send requires at least one of message or sticker");
 		}
-		if (params.reply_to != null && !this.exposed.has(params.reply_to)) {
+		if (params.reply_to != null && !this.visibleMessageIds.has(params.reply_to)) {
 			throw new Error("messaging.reply_not_visible");
 		}
 		// Validate everything (incl. sticker resolution) before any network send (R7):
@@ -628,9 +814,10 @@ export class BotRuntime {
 			transport?: SentMessageTransport,
 		): Promise<void> => {
 			remoteCommits++;
+			await runLocalEffect(component, "telemetry_failed", () => this.recordPublicSend(), true);
 			if (messageId != null && !sentIds.includes(messageId)) sentIds.push(messageId);
 			if (messageId != null) {
-				await runLocalEffect(component, "exposure_failed", () => this.markExposed([messageId]), true);
+				await runLocalEffect(component, "visibility_failed", () => this.markVisible([messageId]), true);
 			}
 			await runLocalEffect(component, "broadcast_failed", () => this.sentMessageSink?.(raw), false);
 			if (component === "message" && messageId != null && transport) {
@@ -780,7 +967,8 @@ export class BotRuntime {
 		const isDirectReply = routingTrigger?.reason === "reply";
 		let directReplyPending = false;
 		let directReplyMessageId: number | null = null;
-		if (isDirectReply && !this.exposed.has(routingTrigger.messageId)) {
+		if (routingTrigger) this.currentTriggerMessageId = routingTrigger.messageId;
+		if (isDirectReply && !this.visibleMessageIds.has(routingTrigger.messageId)) {
 			const created = createReplyObligation(
 				this.db,
 				this.bot.id,
@@ -822,7 +1010,7 @@ export class BotRuntime {
 		this.flushPromise = this.flushLoop()
 			.catch((err) => {
 				// R3: a failed flush only produces an error event; nothing escapes as an
-				// unhandled rejection. Messages stay unexposed and are retried by later triggers.
+				// unhandled rejection. Uncommitted events are retried by later triggers.
 				try {
 					this.recordEvent("error", { stage: "flush", category: classifyPiProviderFailure(err) });
 				} catch {
@@ -853,62 +1041,149 @@ export class BotRuntime {
 		}
 	}
 
-	/** Serialize unexposed messages into a new context suffix and wake the agent. */
+	/** Read a bounded immutable event window, commit its cursor, and wake the agent. */
 	private async flush(): Promise<boolean> {
 		if (!this.session) return false;
 		const chatId = Number(`-100${this.config.groupPeerId}`);
-		let obligations = listReplyObligations(this.db, this.bot.id, chatId);
-		const alreadyExposed = obligations.filter((obligation) => this.exposed.has(obligation.messageId));
-		if (alreadyExposed.length > 0) {
-			removeReplyObligations(this.db, this.bot.id, alreadyExposed);
-			obligations = obligations.filter((obligation) => !this.exposed.has(obligation.messageId));
-		}
-		const rows = this.db
-			.query("SELECT * FROM messages WHERE chat_id = ? ORDER BY date, message_id")
-			.all(chatId) as MessageRow[];
+		const obligations = listReplyObligations(this.db, this.bot.id, chatId, MAX_OBLIGATION_SCAN);
+
+		const consumedSeq = getConsumedSeq(this.db, this.bot.id, chatId);
+		let highWater = messageEventHighWater(this.db, chatId);
+		let recent = listRecentMessageEvents(this.db, chatId, consumedSeq, highWater, MAX_EVENT_SCAN);
+		let obligationEvents = listReplyObligationEvents(
+			this.db,
+			this.bot.id,
+			chatId,
+			MAX_OBLIGATION_SCAN,
+		);
+		let rowsScanned = recent.length + obligationEvents.length;
 		const consumedControl = consumedControlMessageIds(this.db, chatId);
-		const fresh = rows.filter((r) => !this.exposed.has(r.message_id) && !consumedControl.has(r.message_id));
-		if (fresh.length === 0) return false;
-
 		const obligationIds = new Set(obligations.map((obligation) => obligation.messageId));
-		const mandatory = fresh.filter((row) => obligationIds.has(row.message_id));
-		const selectedMandatory = mandatory.slice(0, MAX_CATCHUP_MESSAGES);
-		const remainingCapacity = MAX_CATCHUP_MESSAGES - selectedMandatory.length;
-		const normal = fresh.filter((row) => !obligationIds.has(row.message_id));
-		const selectedNormal = remainingCapacity > 0 ? normal.slice(-remainingCapacity) : [];
-		const selectedIds = new Set([...selectedMandatory, ...selectedNormal].map((row) => row.message_id));
-		const batch = fresh.filter((row) => selectedIds.has(row.message_id));
-		const skipped = normal.filter((row) => !selectedIds.has(row.message_id));
+		const ordinaryEvents = (): MessageEvent[] => recent.filter((event) =>
+			!consumedControl.has(event.messageId)
+			&& !obligationIds.has(event.messageId)
+			&& !(event.kind === "message" && this.visibleMessageIds.has(event.messageId))
+		);
+		const requiredEvents = (): MessageEvent[] => [
+			...obligationEvents,
+			...recent.filter((event) => obligationIds.has(event.messageId)),
+		].filter((event) => !consumedControl.has(event.messageId));
+		let mandatory = requiredEvents();
+		let normal = ordinaryEvents();
 
-		const visibleIds = new Set(this.exposed);
-		await this.ensureBatchVision(batch);
-		const text = serializeMessages(this.db, batch, { visibleIds });
-		if (!text.trim()) return false;
-		const suffix = [text, this.stickerCandidatesBlock()].filter(Boolean).join("\n\n");
-		await this.session.sendUserMessage(suffix);
-		// mark exposed only after the batch actually entered context (R2): on send failure
-		// the ids stay unexposed and a later trigger re-serializes them
-		this.markExposed(batch.map((r) => r.message_id));
+		this.pendingInputMetrics = { inputEvents: 0, estimatedTokens: 0, rowsScanned: 0, visionCalls: 0 };
+		await this.ensureBatchVision([...mandatory, ...normal], obligationIds);
+		const postVisionHighWater = messageEventHighWater(this.db, chatId);
+		if (postVisionHighWater > highWater) {
+			highWater = postVisionHighWater;
+			recent = listRecentMessageEvents(this.db, chatId, consumedSeq, highWater, MAX_EVENT_SCAN);
+			obligationEvents = listReplyObligationEvents(
+				this.db,
+				this.bot.id,
+				chatId,
+				MAX_OBLIGATION_SCAN,
+			);
+			rowsScanned += recent.length + obligationEvents.length;
+			mandatory = requiredEvents();
+			normal = ordinaryEvents();
+		}
+		const getContextUsage = (this.session as { getContextUsage?: () => { tokens: number | null; contextWindow: number } | undefined })
+			.getContextUsage;
+		const usage = typeof getContextUsage === "function" ? getContextUsage.call(this.session) : undefined;
+		const suffixBudget = availableSuffixBudget({
+			contextWindow: usage?.contextWindow ?? this.model?.contextWindow ?? 200_000,
+			currentContextTokens: usage?.tokens ?? 0,
+			staticPrefixTokens: this.staticPrefixTokenEstimate,
+			maxSuffixTokens: this.bot.maxSuffixTokens,
+			outputReserve: Math.min(4096, this.model?.maxTokens ?? 4096),
+			reasoningReserve: this.bot.reasoningEffort === "off" ? 0 : 4096,
+			toolFollowupReserve: this.bot.tools.search || this.bot.tools.runJs ? 6144 : 2048,
+		});
+		const packed = packMessageEvents(
+			this.db,
+			mandatory,
+			normal,
+			suffixBudget,
+			{ visibleIds: new Set(this.visibleMessageIds) },
+			this.bot.maxMessageTokens,
+		);
+		if (!packed.text.trim()) {
+			if (highWater > consumedSeq) setConsumedSeq(this.db, this.bot.id, chatId, highWater);
+			return replyObligationCount(this.db, this.bot.id, chatId) > 0;
+		}
+
+		const stickerBlock = stickerCandidatesForTurn(this.db, this.bot.id, packed.text);
+		const candidateTokens = stickerBlock ? estimateProviderTokensUpperBound(`\n\n${stickerBlock}`) : 0;
+		const suffix = stickerBlock && packed.estimatedTokens + candidateTokens <= suffixBudget
+			? `${packed.text}\n\n${stickerBlock}`
+			: packed.text;
+		const selectedIds = new Set(packed.visibleMessageIds);
 		const delivered = obligations.filter((obligation) => selectedIds.has(obligation.messageId));
-		removeReplyObligations(this.db, this.bot.id, delivered);
+		const details: TelegramContextDetails = {
+			version: TELEGRAM_CONTEXT_VERSION,
+			consumedSeq: highWater,
+			providerText: suffix,
+			visibleMessageIds: packed.visibleMessageIds,
+			events: packed.events.map((event) => ({
+				ingestSeq: event.ingestSeq,
+				kind: event.kind,
+				chatId: event.chatId,
+				messageId: event.messageId,
+				fullMessageVisible: event.kind === "message" || event.kind === "edit",
+			})),
+		};
+		this.currentTriggerMessageId = packed.events.at(-1)?.messageId ?? this.currentTriggerMessageId;
+		this.pendingInputMetrics = {
+			inputEvents: packed.events.length,
+			estimatedTokens: estimateProviderTokensUpperBound(suffix),
+			rowsScanned,
+			visionCalls: this.pendingInputMetrics.visionCalls,
+		};
+		const supportsCustomMessages = typeof (this.session as { sendCustomMessage?: unknown }).sendCustomMessage === "function";
+		try {
+			if (supportsCustomMessages) {
+				await this.session.sendCustomMessage(
+					{ customType: TELEGRAM_CONTEXT_TYPE, content: suffix, display: false, details },
+					{ triggerTurn: true },
+				);
+			} else {
+				// Compatibility seam for old deterministic test doubles only.
+				await this.session.sendUserMessage(suffix);
+			}
+		} catch (error) {
+			if (supportsCustomMessages) this.reconcileContextStateFromSession();
+			throw error;
+		}
+		const deliveredObligationIds = delivered.map((obligation) => obligation.messageId);
+		const appendCommit = (this.session.sessionManager as { appendCustomEntry?: (type: string, data: unknown) => string })
+			.appendCustomEntry;
+		if (deliveredObligationIds.length > 0 && typeof appendCommit === "function") {
+			appendCommit.call(this.session.sessionManager, TELEGRAM_CONTEXT_COMMIT_TYPE, {
+				consumedSeq: highWater,
+				deliveredObligationIds,
+			});
+		}
+		commitConsumedContext(this.db, {
+			botId: this.bot.id,
+			chatId,
+			consumedSeq: highWater,
+			epoch: this.epoch,
+			visibleMessageIds: packed.visibleMessageIds,
+			deliveredObligationIds,
+		});
+		for (const messageId of packed.visibleMessageIds) this.visibleMessageIds.add(messageId);
 		for (const obligation of delivered) {
 			this.recordEvent("reply_obligation_delivered", { message_id: obligation.messageId });
 		}
-		// catchup overflow is deliberately dropped, but only once the batch landed —
-		// otherwise a failed send would silently lose the skipped messages too
-		if (skipped.length > 0) this.markExposed(skipped.map((r) => r.message_id));
 		return replyObligationCount(this.db, this.bot.id, chatId) > 0;
 	}
 
-	/** Schedule persisted direct replies after startup; exposed rows are reconciled idempotently. */
+	/** Schedule persisted direct replies after startup; committed rows reconcile idempotently. */
 	recoverReplyObligations(): TriggerResult | null {
 		const chatId = Number(`-100${this.config.groupPeerId}`);
-		const obligations = listReplyObligations(this.db, this.bot.id, chatId);
-		const alreadyExposed = obligations.filter((obligation) => this.exposed.has(obligation.messageId));
-		removeReplyObligations(this.db, this.bot.id, alreadyExposed);
-		const pending = obligations.filter((obligation) => !this.exposed.has(obligation.messageId));
-		if (pending.length === 0) return null;
-		for (const obligation of pending) {
+		const obligations = listReplyObligations(this.db, this.bot.id, chatId, MAX_OBLIGATION_SCAN);
+		if (obligations.length === 0) return null;
+		for (const obligation of obligations) {
 			this.recordEvent("reply_obligation_recovered", { message_id: obligation.messageId });
 		}
 		return this.trigger("explicit");
@@ -927,7 +1202,6 @@ export class BotRuntime {
 	/** Keep a control command/reply out of the current epoch; durable exclusion is audit-backed. */
 	consumeControlMessage(messageId: number): void {
 		if (!Number.isSafeInteger(messageId) || messageId <= 0) return;
-		this.markExposed([messageId]);
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		removeReplyObligations(this.db, this.bot.id, [{ chatId, messageId }]);
 	}
@@ -957,11 +1231,18 @@ export class BotRuntime {
 		}
 	}
 
-	/** Lazy vision: resolve media descriptions only now that they enter this bot's context. */
-	private async ensureBatchVision(batch: MessageRow[]): Promise<void> {
+	/** Lazy vision: bounded per turn, with direct-reply events ordered before ordinary catch-up. */
+	private async ensureBatchVision(batch: readonly MessageEvent[], obligationIds: ReadonlySet<number>): Promise<void> {
+		if (!this.visionEnabled || (this.config.vision?.foregroundMediaLimit ?? 2) <= 0) return;
 		const pending: string[] = [];
 		const seen = new Set<string>();
-		for (const row of batch) {
+		const prioritized = [...batch].sort((left, right) =>
+			Number(obligationIds.has(right.messageId)) - Number(obligationIds.has(left.messageId))
+			|| right.ingestSeq - left.ingestSeq
+		);
+		for (const event of prioritized) {
+			if (event.kind === "media_update") continue;
+			const row = event.payload as MessageRow;
 			if (!row.media) continue;
 			const media = JSON.parse(row.media) as { kind: string; file_unique_id?: string };
 			if (!media.file_unique_id || (media.kind !== "photo" && media.kind !== "sticker")) continue;
@@ -972,6 +1253,7 @@ export class BotRuntime {
 				| null;
 			if (existing?.vision) continue; // persistent cache hit, shared by both bots
 			pending.push(media.file_unique_id);
+			if (pending.length >= (this.config.vision?.foregroundMediaLimit ?? 2)) break;
 		}
 
 		let next = 0;
@@ -986,10 +1268,19 @@ export class BotRuntime {
 
 	private async ensureOneVision(fileUniqueId: string): Promise<void> {
 		try {
+			const chatId = Number(`-100${this.config.groupPeerId}`);
 			await ensureVision(this.db, this.api, this.bot.id, fileUniqueId, this.getVisionExecutor(), {
 				cacheDir: join(this.config.dataDir, "media"),
 				onPersist: (fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
-				onTelemetry: (telemetry) => this.recordEvent("vision", telemetry),
+				onTelemetry: (telemetry) => {
+					if (telemetry.sourceBytesBucket !== "unavailable" && telemetry.outcome !== "budget_exceeded") {
+						this.pendingInputMetrics.visionCalls++;
+					}
+					this.recordEvent("vision", telemetry);
+				},
+				scheduler: this.visionScheduler ?? undefined,
+				chatId,
+				foreground: true,
 			});
 		} catch {
 			this.recordEvent("error", { stage: "vision", category: "request_failed" });
@@ -1003,64 +1294,15 @@ export class BotRuntime {
 		return this.visionExecutor;
 	}
 
-	/** Small dynamic sticker candidate list (semantic, short ids). Empty string when catalog is empty.
-	 * Stickers from the fixed catalog are excluded: they are already in the stable prefix
-	 * (REQ-STICKER-0001 R4/R6 — the dynamic block only carries set-EXTERNAL stickers seen in context). */
-	private stickerCandidatesBlock(): string {
-		// assign short ids (rowid-based: stable and unique, race-free)
-		const unassigned = this.db
-			.query(
-				`SELECT rowid, file_unique_id FROM media m
-				 WHERE kind = 'sticker' AND json_extract(vision, '$.text') IS NOT NULL AND short_id IS NULL
-				   AND EXISTS (
-				     SELECT 1 FROM media_file_ids f
-				      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
-				   )`,
-			)
-			.all(this.bot.id) as { rowid: number; file_unique_id: string }[];
-		for (const row of unassigned) {
-			this.db.query("UPDATE media SET short_id = ? WHERE file_unique_id = ?").run(`s${row.rowid}`, row.file_unique_id);
-		}
-		const rows =
-			this.bot.stickerSets.length > 0
-				? (this.db
-						.query(
-							`SELECT short_id, sticker_emoji, vision FROM media m
-							 WHERE kind = 'sticker' AND short_id IS NOT NULL AND json_extract(vision, '$.text') IS NOT NULL
-							   AND (sticker_set IS NULL OR sticker_set NOT IN (SELECT value FROM json_each(?)))
-							   AND EXISTS (
-							     SELECT 1 FROM media_file_ids f
-							      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
-							   )
-							 ORDER BY rowid DESC LIMIT 8`,
-						)
-						.all(JSON.stringify(this.bot.stickerSets), this.bot.id) as { short_id: string; sticker_emoji: string | null; vision: string }[])
-				: (this.db
-						.query(
-							`SELECT short_id, sticker_emoji, vision FROM media m
-							 WHERE kind = 'sticker' AND short_id IS NOT NULL AND json_extract(vision, '$.text') IS NOT NULL
-							   AND EXISTS (
-							     SELECT 1 FROM media_file_ids f
-							      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
-							   )
-							 ORDER BY rowid DESC LIMIT 8`,
-						)
-						.all(this.bot.id) as { short_id: string; sticker_emoji: string | null; vision: string }[]);
-		if (rows.length === 0) return "";
-		const lines = rows.map((r) => {
-			// catalog short_ids are assigned before vision completes (background pre-recognition);
-			// the query filters for vision text, and this parse is defensive on top of that
-			const parsed = JSON.parse(r.vision) as { text: string };
-			const desc = (parsed.text ?? "").replace(/\s+/g, " ").slice(0, 60);
-			return `${r.short_id} = ${r.sticker_emoji ?? ""} ${desc}`.trim();
-		});
-		return `Available stickers:\n${lines.join("\n")}`;
+	private markVisible(ids: readonly number[]): void {
+		for (const id of ids) this.visibleMessageIds.add(id);
+		const chatId = Number(`-100${this.config.groupPeerId}`);
+		addVisibleMessageIds(this.db, this.bot.id, chatId, this.epoch, ids);
 	}
 
-	private markExposed(ids: number[]): void {
-		for (const id of ids) this.exposed.add(id);
-		// persist; array grows within an epoch and resets on compaction (Phase 8)
-		setBotState(this.db, this.bot.id, EXPOSED_KEY, JSON.stringify([...this.exposed]));
+	private recordPublicSend(): void {
+		if (this.lastLlmRunId == null) return;
+		this.db.query("UPDATE llm_runs SET public_send_count = public_send_count + 1 WHERE id = ?").run(this.lastLlmRunId);
 	}
 
 	private recordEvent(kind: string, payload: unknown): void {
@@ -1074,13 +1316,26 @@ export class BotRuntime {
 		usage: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning?: number; cost: { total: number } },
 		now: number,
 	): void {
+		this.providerCallsInRun++;
 		const contextTokens = usage.input + usage.cacheRead + usage.cacheWrite;
 		const reasoningTokens = usage.reasoning ?? 0;
 		const latencyMs = this.runStartTs ? now - this.runStartTs : null;
+		const observation = this.pendingPayloadObservations.shift();
+		const metrics = this.pendingInputMetrics;
+		const sessionIdHash = this.session
+			? sha256(`${this.telemetryHmacKey}:${this.session.sessionId}`)
+			: null;
 		const res = this.db
 			.query(
-				`INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost, system_hash, tools_hash)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO llm_runs (
+					bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
+					output_tokens, reasoning_tokens, latency_ms, cost, compaction,
+					system_hash, tools_hash, messages_hash, provider, api, session_id_hash,
+					cache_retention, full_payload_hash, first_divergent_segment,
+					first_divergent_message_index, first_divergent_byte_offset, trigger_message_id,
+					public_send_count, vision_calls, tool_followup_rounds, input_events,
+					input_tokens_estimated, rows_scanned
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				this.bot.id,
@@ -1095,11 +1350,28 @@ export class BotRuntime {
 				reasoningTokens,
 				latencyMs,
 				usage.cost.total,
-				this.systemHash,
-				this.toolsHash,
+				observation?.systemHash ?? this.systemHash,
+				observation?.toolsHash ?? this.toolsHash,
+				observation ? JSON.stringify(observation.messageHashes) : null,
+				this.bot.provider,
+				this.model?.api ?? null,
+				sessionIdHash,
+				this.bot.cacheRetention ?? "short",
+				observation?.fullPayloadHash ?? null,
+				observation?.firstDivergentSegment ?? null,
+				observation?.firstDivergentMessageIndex ?? null,
+				observation?.firstDivergentByteOffset ?? null,
+				this.currentTriggerMessageId,
+				metrics.visionCalls,
+				this.providerCallsInRun > 1 ? 1 : 0,
+				metrics.inputEvents,
+				metrics.estimatedTokens,
+				metrics.rowsScanned,
 			);
+		this.lastLlmRunId = Number(res.lastInsertRowid);
+		this.pendingInputMetrics = { inputEvents: 0, estimatedTokens: 0, rowsScanned: 0, visionCalls: 0 };
 		this.usageSink?.({
-			id: Number(res.lastInsertRowid),
+			id: this.lastLlmRunId,
 			botId: this.bot.id,
 			ts: now,
 			model: this.bot.model,
@@ -1115,18 +1387,42 @@ export class BotRuntime {
 		});
 	}
 
-	/** Record a cache-schema bump (CACHE_SCHEMA_VERSION change) as a new context epoch. */
-	noteSchemaBump(epoch: number): void {
-		this.epoch = epoch;
+	private recordCompactionUsage(
+		usage: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning?: number; cost: { total: number } },
+		now: number,
+	): void {
+		if (!this.compactionModel) return;
+		this.db.query(`
+			INSERT INTO llm_runs (
+				bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
+				output_tokens, reasoning_tokens, latency_ms, cost, compaction,
+				system_hash, tools_hash, provider, api, cache_retention
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, ?, 'none')
+		`).run(
+			this.bot.id,
+			now,
+			this.compactionModel.id,
+			this.epoch,
+			usage.input + usage.cacheRead + usage.cacheWrite,
+			usage.cacheRead,
+			usage.cacheWrite,
+			usage.input,
+			usage.output,
+			usage.reasoning ?? 0,
+			usage.cost.total,
+			sha256Short(COMPACTION_SUMMARY_PROMPT),
+			sha256Short("[]"),
+			this.compactionModel.provider,
+			this.compactionModel.api,
+		);
 	}
 
 	async stop(): Promise<void> {
 		this.stopping = true;
 		this.typingLease.stop();
 		this.endAssistantStream();
-		// Bounded wait for an in-flight flush so exposure isn't left half-written;
-		// the timeout only guards a wedged run (markExposed follows sendUserMessage
-		// immediately, so the normal window is tiny).
+		// Bounded wait for an in-flight flush so the Pi/SQLite context commit can settle;
+		// the timeout only guards a wedged provider run.
 		if (this.flushPromise) {
 			await Promise.race([this.flushPromise.catch(() => {}), new Promise((r) => setTimeout(r, 30_000))]);
 		}

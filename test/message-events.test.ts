@@ -103,6 +103,8 @@ describe("durable Telegram context state", () => {
 	test("routing claims suppress a later enrichment after accepted dispatch", () => {
 		const decision = { chatId: CHAT, messageId: 8, target: "A", reason: "probability" as const };
 		expect(claimRoutingDecision(db, decision, 1)).toBe(true);
+		// A pending row means the previous process died before synchronous dispatch completed.
+		expect(claimRoutingDecision(db, decision, 1)).toBe(true);
 		finishRoutingClaim(db, decision, 1, "started");
 		expect(claimRoutingDecision(db, { ...decision, reason: "reply" }, 2)).toBe(false);
 	});

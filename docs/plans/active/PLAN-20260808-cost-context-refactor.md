@@ -27,8 +27,8 @@ Session 初始化先计算内容寻址 fingerprint，再决定打开 manifest �
 - [x] **T0** — 收录 review、建立 active PLAN，并把“大任务默认拆成多个小原子提交”写入根 agent 指南；validates: 可执行提交边界与追溯入口；预期涉及: `AGENTS.md`, `docs/requirements/`, `docs/plans/active/`
 - [x] **T1** — 建立 durable context state：immutable message event log、per-bot cursor/visible refs/session manifest、routing claims、migration/backfill 与索引；edit/enrichment/vision 只能追加 delta；validates: P0-1、P0-2、P2-1、P2-2；commit: `dbdc438`
 - [x] **T2** — 建立有界成本原语：token packer、deployment-wide vision scheduler/budget、retention helper、搜索输出上限、sticker top-K、本地配置与相关单测；validates: P0-3、P1-2、P1-3、P1-4、P1-5、P1-6、P2-3；commit: `15c82cc`
-- [x] **T3** — 定义固定顺序 Pi extension、结构化 Telegram context projection、完整 fingerprint、payload HMAC observer 与 assistant persistence policy，并用纯协议测试锁定；validates: 2.2 A–D、P0-4、P1-7；预期涉及: `src/agent/extensions/`, `src/agent/context-fingerprint.ts`, protocol tests
-- [ ] **T4** — 集成 runtime/daemon context generation：cursor commit/reconcile、compaction visibility、session 轮换、公共协议顺序、cache schema v8、routing claim、vision/retention maintenance 与真实 telemetry；validates: 2.2 A–E、P0-4、P1-1、P1-2、P1-3、P1-7；预期涉及: `src/agent/runtime.ts`, `src/daemon/`, runtime/cache tests
+- [x] **T3** — 定义固定顺序 Pi extension、结构化 Telegram context projection、完整 fingerprint、payload HMAC observer 与 assistant persistence policy，并用纯协议测试锁定；validates: 2.2 A–D、P0-4、P1-7；commit: `f50f10d`
+- [x] **T4** — 集成 runtime/daemon context generation：cursor commit/reconcile、compaction visibility、session 轮换、公共协议顺序、cache schema v8、routing claim、vision/retention maintenance 与真实 telemetry；validates: 2.2 A–E、P0-4、P1-1、P1-2、P1-3、P1-7；预期涉及: `src/agent/runtime.ts`, `src/daemon/`, runtime/cache tests
 - [ ] **T5** — 加入固定 Bun/Pi 的核心 CI，独立执行 cache golden、全量离线测试与 TypeScript check；validates: review 第一阶段、P2-4；预期涉及: `.github/workflows/ci.yml`
 - [ ] **T6** — 同步 architecture/cache/data-model/testing/config/user docs、devlog/handoff/REQ 状态，执行全量验证并审阅 diff；validates: 全部评审不变量与完成定义；预期涉及: `docs/`, `README*`, examples
 

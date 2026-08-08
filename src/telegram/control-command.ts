@@ -338,9 +338,9 @@ export class TelegramControlCommandService {
 			try {
 				runtime.consumeControlMessage(messageId);
 			} catch {
-				// The durable claim/reply marker remains the flush authority even if an
-				// in-memory exposure write races shutdown.
-				console.warn(`[telegram-control] exposure failed bot=${botId} msg=#${messageId}`);
+				// The durable claim/reply marker remains the flush authority even if local
+				// obligation cleanup races shutdown.
+				console.warn(`[telegram-control] context exclusion failed bot=${botId} msg=#${messageId}`);
 			}
 		}
 	}
@@ -385,7 +385,7 @@ export class TelegramControlCommandService {
 	}
 }
 
-/** IDs marked here stay out of provider suffixes even after an exposure epoch resets. */
+/** IDs marked here stay out of provider suffixes across every context generation. */
 export function consumedControlMessageIds(db: Database, chatId: number): Set<number> {
 	const rows = db
 		.query(`SELECT DISTINCT json_extract(payload, '$.message_id') message_id FROM agent_events WHERE kind IN (?, ?) AND json_extract(payload, '$.chat_id') = ?`)

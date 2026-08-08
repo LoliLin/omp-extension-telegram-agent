@@ -1,6 +1,6 @@
 // REQ-STICKER-0001 regression tests: catalog loading (media identity + short_ids + per-bot
-// file_id), deterministic serialization, send resolution from the catalog, dynamic candidate
-// exclusion of catalog stickers, and the R6 position invariant (candidates AFTER all messages).
+// file_id), deterministic local retrieval, send resolution from the catalog, and the R6
+// position invariant (turn candidates AFTER all messages, never in the stable prefix).
 
 process.env.TZ = "Asia/Singapore";
 
@@ -15,6 +15,7 @@ import { SEND_SUCCESS_ACK } from "../src/agent/tools.ts";
 import {
 	ensureStickerCatalog,
 	preRecognizeCatalogVision,
+	stickerCandidatesForTurn,
 	stickerCatalogBlock,
 	STICKER_CATALOG_MAX,
 } from "../src/media/sticker-catalog.ts";
@@ -132,7 +133,7 @@ describe("ensureStickerCatalog (R1)", () => {
 		expect(block).toContain("s2 = 🐱 [未识别]");
 	});
 
-	test("VISION AC4/AC8: background catalog vision is two-wide and cannot mutate the current prompt snapshot", async () => {
+	test("VISION AC4/AC8: background catalog vision is two-wide and never mutates the stable prompt", async () => {
 		const cacheDir = mkdtempSync(join(tmpdir(), "catalog-vision-test-"));
 		try {
 			const api = fakeApi({ cats: [sticker("c1", "😺"), sticker("c2", "🐱"), sticker("c3", "😸")] });
@@ -195,7 +196,8 @@ describe("ensureStickerCatalog (R1)", () => {
 			expect(peak).toBe(2);
 			expect(completed).toBe(false);
 			expect(sha256Short(promptSnapshot)).toBe(hashSnapshot);
-			expect(promptSnapshot).toContain("[未识别]");
+			expect(promptSnapshot).not.toContain("[未识别]");
+			expect(promptSnapshot).not.toContain("Sticker 目录");
 			releases.get(1)!();
 			releases.get(2)!();
 			for (let attempt = 0; attempt < 100 && started.length < 3; attempt++) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -205,8 +207,8 @@ describe("ensureStickerCatalog (R1)", () => {
 			await background;
 
 			const nextPrompt = buildSystemPrompt("fixture persona", stickerCatalogBlock(db, "A", ["cats"]));
-			expect(nextPrompt).toContain("catalog-1");
-			expect(sha256Short(nextPrompt)).not.toBe(hashSnapshot);
+			expect(nextPrompt).not.toContain("catalog-1");
+			expect(sha256Short(nextPrompt)).toBe(hashSnapshot);
 			expect(sha256Short(promptSnapshot)).toBe(hashSnapshot);
 		} finally {
 			rmSync(cacheDir, { recursive: true, force: true });
@@ -267,7 +269,6 @@ describe("send from catalog (R3)", () => {
 				return { chat: { id: CHAT }, message_id: 900, from: { id: 1, is_bot: true }, date: 1754600000 };
 			},
 		};
-		(rt as any).exposed = new Set();
 		(rt as any).typingLease.start();
 		const result = await (rt as any).executeSend({ sticker: "s7" });
 		expect(sentSticker as string | null).toBe("fid-c1");
@@ -297,7 +298,7 @@ describe("send from catalog (R3)", () => {
 				};
 			},
 		};
-		(rt as any).exposed = new Set([42]);
+		(rt as any).visibleMessageIds = new Set([42]);
 		(rt as any).typingLease.start();
 
 		const result = await (rt as any).executeSend({ message: "收到", sticker: "s8", reply_to: 42 });
@@ -417,20 +418,19 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 		expect(out.lastIndexOf("Available stickers:")).toBe(catIdx); // exactly one block, at the tail
 	});
 
-	test("regression: catalog short_ids assigned before vision completes must not crash the candidates block", () => {
+	test("regression: catalog short_ids assigned before vision completes do not crash turn retrieval", () => {
 		// catalog pre-recognition is background: short_id exists, vision is NULL
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-cat0', 'sticker', 'cats', '😺', 's9')").run();
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-ext0', 'sticker', '😺', ?, 's10')").run(
 			JSON.stringify({ model: "m", kind: "sticker", text: "上下文语义", at: 1 }),
 		);
 		mapSticker("A", "uq-ext0");
-		const rt = new BotRuntime(db, makeBot({ stickerSets: ["cats"] }), makeConfig(), null as never);
-		const block = (rt as any).stickerCandidatesBlock() as string;
+		const block = stickerCandidatesForTurn(db, "A", "上下文语义");
 		expect(block).toContain("s10");
 		expect(block).not.toContain("s9"); // no vision -> not a candidate, and no crash
 	});
 
-	test("R4: catalog stickers are excluded from the dynamic candidates block", async () => {
+	test("R4: relevant catalog and observed stickers share the bounded turn candidate block", async () => {
 		// catalog sticker (from set) + set-external sticker, both with vision
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, vision, short_id) VALUES ('uq-cat', 'sticker', 'cats', '😺', ?, 's1')").run(
 			JSON.stringify({ model: "m", kind: "sticker", text: "目录语义", at: 1 }),
@@ -440,15 +440,10 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 		);
 		mapSticker("A", "uq-cat");
 		mapSticker("A", "uq-ext");
-		const rt = new BotRuntime(db, makeBot({ stickerSets: ["cats"] }), makeConfig(), null as never);
-		const block = (rt as any).stickerCandidatesBlock() as string;
+		const block = stickerCandidatesForTurn(db, "A", "目录语义 上下文语义");
 		expect(block).toContain("s2 = 😺 上下文语义");
-		expect(block).not.toContain("s1");
-		// without sets, nothing is excluded
-		const rt2 = new BotRuntime(db, makeBot(), makeConfig(), null as never);
-		const block2 = (rt2 as any).stickerCandidatesBlock() as string;
-		expect(block2).toContain("s1");
-		expect(block2).toContain("s2");
+		expect(block).toContain("s1 = 😺 目录语义");
+		expect(stickerCandidatesForTurn(db, "A", "完全无关")).toBe("");
 	});
 
 	test("REQ-STICKER-0002: fixed catalogs and dynamic candidates never leak another bot's mappings", () => {
@@ -475,8 +470,9 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 		expect(stickerCatalogBlock(db, "B", ["setB"])).toContain("s241");
 		expect(stickerCatalogBlock(db, "B", ["setA"])).toBe("");
 
-		const aCandidates = (new BotRuntime(db, makeBot({ id: "A", stickerSets: ["setA"] }), makeConfig(), null as never) as any).stickerCandidatesBlock() as string;
-		const bCandidates = (new BotRuntime(db, makeBot({ id: "B", stickerSets: ["setB"] }), makeConfig(), null as never) as any).stickerCandidatesBlock() as string;
+		const turn = "A 目录 B 目录 双方可用 仅 A 可用 🐱 🤝 🅰️";
+		const aCandidates = stickerCandidatesForTurn(db, "A", turn);
+		const bCandidates = stickerCandidatesForTurn(db, "B", turn);
 		expect(aCandidates).toContain("s300");
 		expect(aCandidates).toContain("s301");
 		for (const id of [241, 242, 243, 244]) expect(aCandidates).not.toContain(`s${id}`);

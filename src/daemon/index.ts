@@ -2,7 +2,7 @@
 // Started by `src/main.ts start` (detached) or directly with `bun run src/daemon/index.ts`.
 
 import { loadConfig } from "../config.ts";
-import { openDb, setBotState, getBotState, getDaemonState, setDaemonState } from "../db/db.ts";
+import { openDb, getDaemonState, setDaemonState } from "../db/db.ts";
 import { BotApi } from "../telegram/api.ts";
 import { BotRuntime } from "../agent/runtime.ts";
 import { dispatchRoutingDecision, routeMessageDecision } from "../agent/router.ts";
@@ -20,8 +20,12 @@ import { publishTelegramControlMenus, TelegramControlCoordinator } from "../tele
 import { createSharedModelRuntime, piAuthSource } from "../agent/model-runtime.ts";
 import { parsePiModelReference } from "../agent/model-ref.ts";
 import { assertPiVisionExecutorReady, createPiVisionExecutor } from "../media/vision.ts";
+import { VisionScheduler } from "../media/vision-scheduler.ts";
 import { PhotoCacheQueue } from "../media/photo-cache.ts";
 import { composeDeployment, composePollers } from "./composition.ts";
+import type { IngestResult } from "../telegram/ingest.ts";
+import { claimRoutingDecision, finishRoutingClaim } from "../db/routing-claims.ts";
+import { applyRetention } from "../db/retention.ts";
 
 const rootDir = process.cwd();
 const config = loadConfig(rootDir);
@@ -29,19 +33,46 @@ const config = loadConfig(rootDir);
 // session creation): a second `start` while we're still initializing must not race us
 // (REQ-OPS-0001 R4). Released on shutdown; stale pid files are taken over.
 const pidFd = acquirePidLock(config.dataDir);
-const visualModel = parsePiModelReference(config.auxiliaryVisualModel)!;
+const visualModel = config.vision?.enabled ? parsePiModelReference(config.auxiliaryVisualModel)! : null;
+const compactionModels = config.bots.map((bot) => parsePiModelReference(bot.compactionModel ?? config.auxiliaryVisualModel)!);
 const { sharedModelRuntime, sharedVisionExecutor } = await (async () => {
 	try {
-		const runtime = await createSharedModelRuntime([...config.bots, visualModel]);
-		const executor = createPiVisionExecutor(runtime, visualModel.canonical);
-		assertPiVisionExecutorReady(executor);
+		const runtime = await createSharedModelRuntime([
+			...config.bots,
+			...compactionModels,
+			...(visualModel ? [visualModel] : []),
+		]);
+		const executor = visualModel ? createPiVisionExecutor(runtime, visualModel.canonical) : null;
+		if (executor) assertPiVisionExecutorReady(executor);
 		return { sharedModelRuntime: runtime, sharedVisionExecutor: executor };
 	} catch (error) {
 		releasePidLock(pidFd, config.dataDir);
 		throw error;
 	}
 })();
+const visionScheduler = config.vision?.enabled
+	? new VisionScheduler({
+			concurrency: config.vision.concurrency,
+			perChatHourlyLimit: config.vision.perChatHourlyLimit,
+			dailyLimit: config.vision.dailyLimit,
+		})
+	: null;
 const db = openDb(config.dbPath);
+const retentionConfig = config.retention ?? {
+	telemetryDays: 90,
+	rawUpdateDays: 30,
+	messageEventDays: 365,
+};
+function runRetentionMaintenance(): void {
+	const retention = applyRetention(db, retentionConfig);
+	if (Object.values(retention).some((count) => count > 0)) {
+		console.log(`[daemon] retention pruned agent=${retention.agentEvents} llm=${retention.llmRuns} raw=${retention.rawUpdates} message_events=${retention.messageEvents}`);
+	}
+	db.exec("PRAGMA optimize; PRAGMA wal_checkpoint(PASSIVE);");
+}
+runRetentionMaintenance();
+const retentionTimer = setInterval(runRetentionMaintenance, 24 * 60 * 60 * 1_000);
+retentionTimer.unref?.();
 // Restore effective overrides before BotRuntime captures the shared BotConfig objects.
 const telegramControlState = new TelegramControlState(db, config.bots);
 
@@ -65,7 +96,10 @@ console.log(
 const composition = await composeDeployment(db, config, {
 	createApi: (bot) => new BotApi(bot.token),
 	createRuntime: async (bot) => {
-		const runtime = new BotRuntime(db, bot, config, sharedModelRuntime, { visionExecutor: sharedVisionExecutor });
+		const runtime = new BotRuntime(db, bot, config, sharedModelRuntime, {
+			...(sharedVisionExecutor ? { visionExecutor: sharedVisionExecutor } : {}),
+			...(visionScheduler ? { visionScheduler } : {}),
+		});
 		await runtime.init();
 		return runtime;
 	},
@@ -75,16 +109,10 @@ const composition = await composeDeployment(db, config, {
 });
 const { botApis, runtimes, identities, botNames, botUserIds, replyBotTargets } = composition;
 
-// Cache schema change (e.g. REQ-STICKER-0001 catalog in the prefix): open a new context
-// epoch for every bot so telemetry marks the expected one-time cache reset (docs/cache.md).
+// The per-bot content fingerprint rotated incompatible sessions before they were opened.
 const storedSchema = getDaemonState(db, "cache_schema_version");
 if (storedSchema !== String(CACHE_SCHEMA_VERSION)) {
-	console.log(`[daemon] cache schema v${storedSchema ?? "none"} -> v${CACHE_SCHEMA_VERSION}: opening new context epoch`);
-	for (const bot of config.bots) {
-		const epoch = Number(getBotState(db, bot.id, "context_epoch") ?? "1") + 1;
-		setBotState(db, bot.id, "context_epoch", String(epoch));
-		runtimes.get(bot.id)?.noteSchemaBump(epoch);
-	}
+	console.log(`[daemon] cache schema v${storedSchema ?? "none"} -> v${CACHE_SCHEMA_VERSION}: fingerprints reconciled`);
 	setDaemonState(db, "cache_schema_version", String(CACHE_SCHEMA_VERSION));
 }
 const routeCounters = new Map<string, number>();
@@ -174,7 +202,7 @@ for (const [botId, rt] of runtimes) {
 }
 
 // route an ingested group message to a bot per routing rules
-function route(result: { chatId?: number; messageId?: number }): void {
+function route(result: IngestResult): void {
 	if (result.chatId == null || result.messageId == null) return;
 	const row = db
 		.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
@@ -184,8 +212,18 @@ function route(result: { chatId?: number; messageId?: number }): void {
 		secret: config.routerSecret ?? "",
 		probs: config.bots.map((b) => b.routingP),
 	});
-	const dispatched = dispatchRoutingDecision(decision, runtimes);
+	// The only enrichment performed by ingestion is reply-sender identity. Re-route only when
+	// that new fact actually changes the deterministic outcome into a direct reply.
+	if (result.kind === "enriched" && decision.reason !== "reply") return;
 	if (decision.target === "nobody") return;
+	const claimedDecision = decision as typeof decision & { target: string };
+	const routeVersion = result.routeVersion ?? 1;
+	if (!claimRoutingDecision(db, claimedDecision, routeVersion)) {
+		console.log(`[route] duplicate claim suppressed bot=${decision.target} msg=#${row.message_id} version=${routeVersion}`);
+		return;
+	}
+	const dispatched = dispatchRoutingDecision(decision, runtimes);
+	finishRoutingClaim(db, claimedDecision, routeVersion, dispatched.outcome === "nobody" ? "missing_runtime" : dispatched.outcome);
 	if (decision.reason === "probability") {
 		const metric =
 			dispatched.outcome === "started"
@@ -238,6 +276,7 @@ async function shutdown(signal: string) {
 	}, 35_000);
 	hardTimer.unref?.();
 	for (const p of pollers) p.stop();
+	clearInterval(retentionTimer);
 	const photoCacheStop = photoCache.stop();
 	for (const rt of runtimes.values()) await rt.stop();
 	await photoCacheStop;

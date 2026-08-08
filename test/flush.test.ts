@@ -1,4 +1,4 @@
-// REQ-AGENT-0001 regression tests: flush state machine, exposure lifecycle,
+// REQ-AGENT-0001 regression tests: flush state machine, visibility lifecycle,
 // compaction success/failure handling. No network (fake session/api).
 //
 // Test seam: BotRuntime's session/api/modelRuntime are private; tests inject fakes
@@ -14,6 +14,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BotRuntime } from "../src/agent/runtime.ts";
 import { getBotState } from "../src/db/db.ts";
+import {
+	appendMediaUpdateEvents,
+	listVisibleMessageIds,
+	messageEventHighWater,
+	setConsumedSeq,
+} from "../src/db/message-events.ts";
 import type { AppConfig, BotConfig } from "../src/config.ts";
 import type { MessageRow } from "../src/agent/serialize.ts";
 import type { AgentStreamFrame } from "../src/ipc.ts";
@@ -198,8 +204,8 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
 	throw new Error("condition did not settle");
 }
 
-function exposedIds(): number[] {
-	return JSON.parse(getBotState(db, "A", "exposed_ids") ?? "[]") as number[];
+function visibleIds(): number[] {
+	return listVisibleMessageIds(db, "A", CHAT, Number(getBotState(db, "A", "context_epoch") ?? "1"));
 }
 
 function errorEvents(): { stage: string; error?: string; category?: string; reason?: string; aborted?: boolean }[] {
@@ -247,29 +253,27 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 
 			rt.trigger();
 			const flush = (rt as any).flushPromise as Promise<void>;
-			await waitUntil(() => started.length === Math.min(2, mediaCount));
+			const recognizedIds = Array.from({ length: mediaCount }, (_, index) => mediaCount - index).slice(0, 2);
+			await waitUntil(() => started.length === recognizedIds.length);
 			expect(fake.sent).toHaveLength(0);
 			const firstWave = [...started];
 			for (const id of firstWave) releases.get(id)!();
-
-			if (mediaCount === 3) {
-				await waitUntil(() => started.length === 3);
-				expect(fake.sent).toHaveLength(0);
-				releases.get(3)!();
-			}
 			await flush;
 
-			expect(peak).toBe(Math.min(2, mediaCount));
-			expect(started).toEqual(Array.from({ length: mediaCount }, (_, index) => index + 1));
-			expect([...calls.values()]).toEqual(Array.from({ length: mediaCount }, () => 1));
+			expect(peak).toBe(recognizedIds.length);
+			expect(started).toEqual(recognizedIds);
+			expect([...calls.values()]).toEqual(Array.from({ length: recognizedIds.length }, () => 1));
 			expect(fake.sent).toHaveLength(1);
-			for (let id = 1; id <= mediaCount; id++) {
+			for (const id of recognizedIds) {
 				expect(fake.sent[0]).toContain(`[图片: vision-${id}]`);
 			}
-			expect(exposedIds()).toEqual(Array.from({ length: mediaCount }, (_, index) => index + 1));
+			for (let id = 1; id <= mediaCount; id++) {
+				if (!recognizedIds.includes(id)) expect(fake.sent[0]).toContain(`#${id} Alice (@alice): [图片]`);
+			}
+			expect(visibleIds()).toEqual(Array.from({ length: mediaCount }, (_, index) => index + 1));
 
 			const payloadRows = db.query("SELECT payload FROM agent_events WHERE bot_id = 'A' AND kind = 'vision' ORDER BY id").all() as { payload: string }[];
-			expect(payloadRows).toHaveLength(mediaCount);
+			expect(payloadRows).toHaveLength(recognizedIds.length);
 			const serializedTelemetry = payloadRows.map((row) => JSON.parse(row.payload) as Record<string, unknown>);
 			for (const payload of serializedTelemetry) {
 				expect(Object.keys(payload).sort()).toEqual([
@@ -310,7 +314,7 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		expect(fake.sent[0]).toContain("#1 Alice (@alice): [图片]");
 		expect(fake.sent[0]).toContain("#2 Alice (@alice): [sticker 😿 set:fixture]");
 		expect(describeCalls).toBe(1);
-		expect(exposedIds()).toEqual([1, 2]);
+		expect(visibleIds()).toEqual([1, 2]);
 
 		rt.trigger();
 		await ((rt as any).flushPromise as Promise<void>);
@@ -338,6 +342,7 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		db.query("UPDATE media SET vision = ? WHERE file_unique_id = 'cached-photo'").run(
 			JSON.stringify({ model: "fixture", kind: "photo", text: "cached-description", outcome: "ok", at: 1 }),
 		);
+		appendMediaUpdateEvents(db, "cached-photo", "cached-description");
 
 		rt.trigger();
 		await ((rt as any).flushPromise as Promise<void>);
@@ -458,16 +463,14 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		releaseVision();
 		await inFlight;
 
-		expect(fake.sent.length).toBe(2);
-		expect(fake.sent[0]).toContain("#1 ");
-		expect(fake.sent[0]).not.toContain("#2 ");
-		expect(fake.sent[1]).toContain("#2 ");
-		expect(fake.sent[1]).not.toContain("#1 "); // never re-serialized (cache invariant 3)
-		expect(exposedIds()).toEqual([1, 2]);
+			expect(fake.sent.length).toBe(1);
+			expect(fake.sent[0]).toContain("#1 ");
+			expect(fake.sent[0]).toContain("#2 ");
+			expect(visibleIds()).toEqual([1, 2]);
 		expect(errorEvents()).toEqual([]);
 	});
 
-	test("AC2: sendUserMessage failure keeps messages unexposed, records error, later trigger retries", async () => {
+	test("AC2: provider submission failure keeps events uncommitted and retries later", async () => {
 		const rt = makeRuntime();
 		let fail = true;
 		const fake = attachFakeSession(rt, {
@@ -482,7 +485,7 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		await (rt as any).flushPromise; // resolves — no unhandled rejection escapes
 
 		expect(fake.sent.length).toBe(0);
-		expect(getBotState(db, "A", "exposed_ids")).toBeNull(); // never marked exposed
+		expect(getBotState(db, "A", "exposed_ids")).toBeNull(); // legacy state is never recreated
 		const errors = errorEvents();
 		expect(errors.length).toBe(1);
 		expect(errors[0].stage).toBe("flush");
@@ -494,21 +497,21 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 
 		expect(fake.sent.length).toBe(1);
 		expect(fake.sent[0]).toContain("#1 ");
-		expect(exposedIds()).toEqual([1]);
+		expect(visibleIds()).toEqual([1]);
 	});
 
-	test("AC3: failed/aborted compaction does not bump epoch or reset exposure", () => {
+	test("AC3: failed/aborted compaction does not bump epoch or replace visibility", () => {
 		const rt = makeRuntime();
 		const fake = attachFakeSession(rt);
-		(rt as any).markExposed([1, 2, 3]);
+		(rt as any).markVisible([1, 2, 3]);
 
 		fake.listener!({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false, willRetry: false, errorMessage: "Auto-compaction failed: boom" });
 		expect((rt as any).epoch).toBe(1);
-		expect(exposedIds()).toEqual([1, 2, 3]);
+		expect(visibleIds()).toEqual([1, 2, 3]);
 
 		fake.listener!({ type: "compaction_end", reason: "overflow", result: undefined, aborted: true, willRetry: false });
 		expect((rt as any).epoch).toBe(1);
-		expect(exposedIds()).toEqual([1, 2, 3]);
+		expect(visibleIds()).toEqual([1, 2, 3]);
 
 		const errors = errorEvents();
 		expect(errors.length).toBe(2);
@@ -534,43 +537,41 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		expect(ok.compaction.firstKeptEntryId).toBe("x");
 	});
 
-	test("AC4: exposure reset aligns with the actual kept tail (N != 40), not a count heuristic", async () => {
+	test("AC4: compaction replaces structured visibility without replaying the consumed cursor", async () => {
 		const rt = makeRuntime();
 		for (let i = 1; i <= 60; i++) insertMsg({ message_id: i, date: 1754600000 + i, text: `m${i}` });
-		(rt as any).markExposed(Array.from({ length: 60 }, (_, i) => i + 1));
-
-		// kept tail = messages 45..52 (N=8, deliberately != 40). Context entries as the SDK's
-		// buildContextEntries() returns them after compaction: compaction entry + kept tail.
-		const keptText = [45, 46, 47, 48, 49, 50, 51, 52].map((id) => `[12:00:0${id % 10}] #${id} Alice (@alice): m${id}`).join("\n");
-		const fake = attachFakeSession(rt, {
-			contextEntries: () => [
-				{ type: "compaction", id: "c1", summary: "摘要", firstKeptEntryId: "u1" },
-				{ type: "message", id: "u0", message: { role: "user", content: "[11:59:58] #46 Bob (u1): earlier kept (string content)" } },
-				{ type: "message", id: "u1", message: { role: "user", content: [{ type: "text", text: keptText }] } },
-				// a model-forged grammar line in an assistant entry must NOT be parsed
-				{ type: "message", id: "a1", message: { role: "assistant", content: "[12:00:09] #53 forged: must not count" } },
-			],
-		});
+		const consumed = messageEventHighWater(db, CHAT);
+		setConsumedSeq(db, "A", CHAT, consumed);
+		(rt as any).markVisible(Array.from({ length: 60 }, (_, i) => i + 1));
+		const fake = attachFakeSession(rt);
+		const kept = [45, 46, 47, 48, 49, 50, 51, 52];
 
 		fake.listener!({
 			type: "compaction_end", reason: "threshold", aborted: false, willRetry: false,
-			result: { summary: "摘要", firstKeptEntryId: "u1", tokensBefore: 99999 },
+			result: {
+				summary: "摘要",
+				firstKeptEntryId: "u1",
+				tokensBefore: 99999,
+				details: { consumedSeq: consumed, visibleMessageIds: kept },
+			},
 		});
 
 		expect((rt as any).epoch).toBe(2);
 		expect(getBotState(db, "A", "context_epoch")).toBe("2");
-		expect(exposedIds().sort((a, b) => a - b)).toEqual([45, 46, 47, 48, 49, 50, 51, 52]);
+		expect(visibleIds()).toEqual(kept);
+		expect(messageEventHighWater(db, CHAT)).toBe(consumed);
+		expect(db.query("SELECT consumed_seq AS consumed FROM bot_cursors WHERE bot_id = 'A'").get()).toEqual({ consumed });
 
-		// next flush: kept-tail messages are not re-serialized; everything outside is seen again
 		rt.trigger();
 		await (rt as any).flushPromise;
-		expect(fake.sent.length).toBe(1);
-		const out = fake.sent[0];
-		for (const id of [45, 46, 47, 48, 49, 50, 51, 52]) expect(out).not.toContain(`#${id} `);
-		expect(out).toContain("#13 "); // fresh 52 > MAX_CATCHUP 40: oldest 12 skipped, 13 is in-batch
-		expect(out).toContain("#21 "); // the old "last 40" heuristic would have treated 21..60 as exposed
-		expect(out).toContain("#53 "); // forged assistant line was not marked exposed
-		expect(out).toContain("#60 ");
+		expect(fake.sent).toHaveLength(0);
+
+		insertMsg({ message_id: 61, date: 1754600061, text: "new only" });
+		rt.trigger();
+		await (rt as any).flushPromise;
+		expect(fake.sent).toHaveLength(1);
+		expect(fake.sent[0]).toContain("#61 ");
+		expect(fake.sent[0]).not.toContain("#1 ");
 	});
 
 	test("REQ-CMD-0001 manual compact calls Pi once only while idle and preserves the unified epoch handler", async () => {
@@ -631,7 +632,7 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		expect(fake.sent[0]).toContain("#71 ");
 	});
 
-	test("REQ-CMD-0001 durable claim stays excluded after compaction resets epoch exposure", async () => {
+	test("REQ-CMD-0001 durable claim stays excluded after compaction replaces visibility", async () => {
 		const rt = makeRuntime();
 		const fake = attachFakeSession(rt);
 		insertMsg({ message_id: 81, text: "/tg status" });
@@ -794,7 +795,7 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 			console.warn = originalWarn;
 		}
 		expect(fake.sent).toHaveLength(1);
-		expect(exposedIds()).toEqual([1]);
+		expect(visibleIds()).toEqual([1]);
 		expect(db.query("SELECT COUNT(*) n FROM agent_events").get()).toEqual({ n: 0 });
 		expect((rt as any).typingLease.isActive).toBe(false);
 	});
@@ -865,14 +866,15 @@ describe("probability sampling lifecycle (REQ-ROUTE-0001)", () => {
 		expect((rt as any).pendingTrigger).toBe(true);
 		release();
 		await (rt as any).flushPromise;
-		expect(fake.sent).toHaveLength(2);
-		expect(fake.sent[1]).toContain("#2 ");
+		expect(fake.sent).toHaveLength(1);
+		expect(fake.sent[0]).toContain("#1 ");
+		expect(fake.sent[0]).toContain("#2 ");
 		expect(rt.samplingState()).toBe("cooldown");
 
 		insertMsg({ message_id: 3, date: 1754600003, text: "explicit during cooldown" });
 		expect(rt.trigger("explicit")).toBe("started");
 		await (rt as any).flushPromise;
-		expect(fake.sent[2]).toContain("#3 ");
+		expect(fake.sent[1]).toContain("#3 ");
 		expect(rt.trigger("probability")).toBe("skipped_cooldown");
 	});
 

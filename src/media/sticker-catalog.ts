@@ -191,10 +191,9 @@ export function preRecognizeCatalogVision(
 }
 
 /**
- * Deterministic catalog block for the system prompt (stable prefix, REQ-STICKER-0001 R2).
- * Order = configured set order, then rowid. Only entries with a file_id for this bot are
- * exposed. Stickers without vision text are marked [未识别] (tgs/webm or vision failure).
- * Empty string when the bot has no sendable catalog entries.
+ * Legacy deterministic catalog projection retained for compatibility and migration tests.
+ * Production context uses `stickerCandidatesForTurn`; this block never enters schema-v8 system
+ * prompts. Order = configured set order, then rowid, filtered by this bot's file_id mapping.
  */
 export function stickerCatalogBlock(db: Database, botId: string, sets: string[]): string {
 	const lines: string[] = [];

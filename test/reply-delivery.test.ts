@@ -6,6 +6,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BotRuntime } from "../src/agent/runtime.ts";
+import { listVisibleMessageIds } from "../src/db/message-events.ts";
 import { createReplyObligation, replyObligationCount } from "../src/db/reply-obligations.ts";
 import type { AppConfig, BotConfig } from "../src/config.ts";
 import { openDb } from "../src/db/db.ts";
@@ -83,6 +84,10 @@ function anchors(suffix: string): number[] {
 	return [...suffix.matchAll(/\] #(\d+) /g)].map((match) => Number(match[1]));
 }
 
+function visibleIds(database: Database, botId = "A"): number[] {
+	return listVisibleMessageIds(database, botId, CHAT, 1);
+}
+
 describe("durable direct reply delivery (REQ-REPLY-0001)", () => {
 	test("an idle reply enters the provider suffix once and clears only after submission", async () => {
 		insertMessage(db, 10, "模型必须看到这句");
@@ -121,14 +126,14 @@ describe("durable direct reply delivery (REQ-REPLY-0001)", () => {
 		rt.trigger("explicit", replyTrigger(11));
 		await (rt as any).flushPromise;
 		expect(replyObligationCount(db, "A", CHAT)).toBe(1);
-		expect((rt as any).exposed.has(11)).toBe(false);
+		expect(visibleIds(db)).not.toContain(11);
 
 		rt.trigger("explicit");
 		await (rt as any).flushPromise;
 		expect(attempts).toHaveLength(2);
 		expect(attempts[1]).toBe(attempts[0]);
 		expect(replyObligationCount(db, "A", CHAT)).toBe(0);
-		expect((rt as any).exposed.has(11)).toBe(true);
+		expect(visibleIds(db)).toContain(11);
 	});
 
 	test("a reply arriving while busy coalesces into the next bounded suffix", async () => {
@@ -182,7 +187,7 @@ describe("durable direct reply delivery (REQ-REPLY-0001)", () => {
 		expect(replyObligationCount(db, "A", CHAT)).toBe(0);
 	});
 
-	test("45 normal messages cannot crowd the direct reply out of the first 40-message batch", async () => {
+	test("normal traffic cannot crowd a direct reply out of the token-bounded suffix", async () => {
 		for (let id = 1; id <= 45; id++) insertMessage(db, id, `normal-${id}`);
 		insertMessage(db, 46, "mandatory reply");
 		const rt = runtime(db);
@@ -193,13 +198,13 @@ describe("durable direct reply delivery (REQ-REPLY-0001)", () => {
 		await (rt as any).flushPromise;
 
 		expect(suffixes).toHaveLength(1);
-		expect(anchors(suffixes[0]!)).toHaveLength(40);
+		expect(anchors(suffixes[0]!)).toHaveLength(46);
 		expect(anchors(suffixes[0]!)).toContain(46);
-		expect((rt as any).exposed.size).toBe(46);
+		expect(visibleIds(db)).toHaveLength(46);
 		expect(replyObligationCount(db, "A", CHAT)).toBe(0);
 	});
 
-	test("more than 40 replies drain chronologically in bounded normal provider calls", async () => {
+	test("many replies drain chronologically in token-bounded provider calls", async () => {
 		for (let id = 1; id <= 45; id++) {
 			insertMessage(db, id, `reply-${id}`);
 			createReplyObligation(db, "A", CHAT, id);
@@ -211,15 +216,14 @@ describe("durable direct reply delivery (REQ-REPLY-0001)", () => {
 		expect(rt.recoverReplyObligations()).toBe("started");
 		await (rt as any).flushPromise;
 
-		expect(suffixes).toHaveLength(2);
-		expect(anchors(suffixes[0]!)).toHaveLength(40);
-		expect(anchors(suffixes[1]!)).toHaveLength(5);
+		expect(suffixes).toHaveLength(1);
+		expect(anchors(suffixes[0]!)).toHaveLength(45);
 		expect(suffixes.flatMap(anchors)).toEqual(Array.from({ length: 45 }, (_, index) => index + 1));
 		expect(replyObligationCount(db, "A", CHAT)).toBe(0);
 		expect(db.query("SELECT COUNT(*) AS count FROM agent_events WHERE kind = 'reply_obligation_delivered'").get()).toEqual({ count: 45 });
 	});
 
-	test("file DB recovery is per-bot, idempotent, and ignores already exposed rows", async () => {
+	test("file DB recovery is per-bot and idempotent after a committed delivery", async () => {
 		const path = join(tmpdir(), `reply-recovery-${process.pid}-${Date.now()}.db`);
 		let fileDb: Database | null = null;
 		try {
@@ -246,8 +250,6 @@ describe("durable direct reply delivery (REQ-REPLY-0001)", () => {
 				{ botId: "A", payload: JSON.stringify({ message_id: 100 }) },
 				{ botId: "B", payload: JSON.stringify({ message_id: 101 }) },
 			]);
-			// Simulate a crash after exposure persisted but before a pending row was removed.
-			createReplyObligation(fileDb, "A", CHAT, 100);
 			fileDb.close();
 
 			fileDb = openDb(path);

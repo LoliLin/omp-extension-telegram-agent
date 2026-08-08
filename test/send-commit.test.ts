@@ -347,7 +347,7 @@ describe("Telegram create commit boundary (REQ-SEND-0002)", () => {
 		}
 	});
 
-	test("post-commit exposure, broadcast, event, and typing failures cannot overturn the terminal result", async () => {
+	test("post-commit visibility, broadcast, event, and typing failures cannot overturn the terminal result", async () => {
 		const db = makeDb();
 		const runtime = makeRuntime(db);
 		let createCalls = 0;
@@ -355,7 +355,7 @@ describe("Telegram create commit boundary (REQ-SEND-0002)", () => {
 			sendMessageWithEntities: async () => { createCalls++; return textMessage(19619); },
 			sendMessage: async () => { throw new Error("plain fallback must not run"); },
 		};
-		(runtime as any).markExposed = () => { throw new Error("exposure secret-text-must-not-leak"); };
+		(runtime as any).markVisible = () => { throw new Error("visibility secret-text-must-not-leak"); };
 		runtime.sentMessageSink = () => { throw new Error("broadcast secret-text-must-not-leak"); };
 		runtime.eventSink = () => { throw new Error("event secret-text-must-not-leak"); };
 		(runtime as any).typingLease.stop = () => { throw new Error("typing secret-text-must-not-leak"); };
@@ -370,7 +370,7 @@ describe("Telegram create commit boundary (REQ-SEND-0002)", () => {
 			failed_component: "message",
 			failed_outcome: "committed",
 			stage: "local_effect",
-			category: "exposure_failed",
+			category: "visibility_failed",
 		});
 		expect(db.query("SELECT COUNT(*) AS count FROM messages WHERE message_id = 19619").get()).toEqual({ count: 1 });
 		expect(db.query("SELECT COUNT(*) AS count FROM agent_events WHERE kind = 'send_degraded'").get()).toEqual({ count: 1 });
