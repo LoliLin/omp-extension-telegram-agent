@@ -1,6 +1,6 @@
 # REQ-SEND-0002: Telegram 远端提交后的重复发送防护
 
-- **Status:** Approved（2026-08-08 已复现并定位，未实现）
+- **Status:** Done（2026-08-08；implementation `bd4be62`，真实群组合 smoke 汇总到 T14）
 - **Priority:** P0
 - **Source:** 用户新增 `REQ-LIST`：「bot会重复发」
 - **依赖:** REQ-SEND-0001、REQ-TG-0003、REQ-OPS-0002
@@ -79,5 +79,5 @@
 
 ## 追溯
 
-- Plans: `PLAN-20260808-complete-new-reqs#T10v/T10x`
-- Commits: 从 `Requirement: REQ-SEND-0002` git trailer 查
+- Plans: `PLAN-20260808-complete-new-reqs#T10v/T10x/T10y`
+- Commits: implementation `bd4be62`；其余从 `Requirement: REQ-SEND-0002` git trailer 查
