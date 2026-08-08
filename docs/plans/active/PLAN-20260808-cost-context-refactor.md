@@ -25,20 +25,21 @@ Session 初始化先计算内容寻址 fingerprint，再决定打开 manifest �
 ## 任务
 
 - [x] **T0** — 收录 review、建立 active PLAN，并把“大任务默认拆成多个小原子提交”写入根 agent 指南；validates: 可执行提交边界与追溯入口；预期涉及: `AGENTS.md`, `docs/requirements/`, `docs/plans/active/`
-- [ ] **T1** — 建立 durable context state：immutable message event log、per-bot cursor/visible refs/session manifest、routing claims、migration/backfill 与索引；edit/enrichment/vision 只能追加 delta；validates: P0-1、P0-2、P2-1、P2-2；预期涉及: `src/db/`, `src/telegram/`, DB contract tests
-- [ ] **T2** — 建立有界成本原语：token packer、deployment-wide vision scheduler/budget、retention helper、搜索输出上限、sticker top-K、本地配置与相关单测；validates: P0-3、P1-2、P1-3、P1-4、P1-5、P1-6、P2-3；预期涉及: `src/config*`, `src/agent/token-packer.ts`, `src/media/`, `src/tools/`, focused tests
-- [ ] **T3** — 集成 runtime context generation：固定 Pi extensions、cursor commit/reconcile、compaction visibility、完整 fingerprint、payload HMAC telemetry、assistant persistence 与 cache schema v8；validates: 2.2 A–E、P0-4、P1-1、P1-7；预期涉及: `src/agent/`, `src/daemon/`, runtime/cache tests
-- [ ] **T4** — 加入固定 Bun/Pi 的核心 CI，独立执行 cache golden、全量离线测试与 TypeScript check；validates: review 第一阶段、P2-4；预期涉及: `.github/workflows/ci.yml`
-- [ ] **T5** — 同步 architecture/cache/data-model/testing/config/user docs、devlog/handoff/REQ 状态，执行全量验证并审阅 diff；validates: 全部评审不变量与完成定义；预期涉及: `docs/`, `README*`, examples
+- [x] **T1** — 建立 durable context state：immutable message event log、per-bot cursor/visible refs/session manifest、routing claims、migration/backfill 与索引；edit/enrichment/vision 只能追加 delta；validates: P0-1、P0-2、P2-1、P2-2；commit: `dbdc438`
+- [x] **T2** — 建立有界成本原语：token packer、deployment-wide vision scheduler/budget、retention helper、搜索输出上限、sticker top-K、本地配置与相关单测；validates: P0-3、P1-2、P1-3、P1-4、P1-5、P1-6、P2-3；commit: `15c82cc`
+- [x] **T3** — 定义固定顺序 Pi extension、结构化 Telegram context projection、完整 fingerprint、payload HMAC observer 与 assistant persistence policy，并用纯协议测试锁定；validates: 2.2 A–D、P0-4、P1-7；预期涉及: `src/agent/extensions/`, `src/agent/context-fingerprint.ts`, protocol tests
+- [ ] **T4** — 集成 runtime/daemon context generation：cursor commit/reconcile、compaction visibility、session 轮换、公共协议顺序、cache schema v8、routing claim、vision/retention maintenance 与真实 telemetry；validates: 2.2 A–E、P0-4、P1-1、P1-2、P1-3、P1-7；预期涉及: `src/agent/runtime.ts`, `src/daemon/`, runtime/cache tests
+- [ ] **T5** — 加入固定 Bun/Pi 的核心 CI，独立执行 cache golden、全量离线测试与 TypeScript check；validates: review 第一阶段、P2-4；预期涉及: `.github/workflows/ci.yml`
+- [ ] **T6** — 同步 architecture/cache/data-model/testing/config/user docs、devlog/handoff/REQ 状态，执行全量验证并审阅 diff；validates: 全部评审不变量与完成定义；预期涉及: `docs/`, `README*`, examples
 
 ## 验证计划
 
 | 范围 | 命令 / 检查 | 覆盖 |
 |---|---|---|
 | 状态与 DB | `bun test test/db.test.ts test/ingest.test.ts test/flush.test.ts test/reply-delivery.test.ts test/router.test.ts` | T1 / cursor、delta、claim、bounded query |
-| Agent/cache | `bun test test/agent.test.ts test/cache.test.ts test/config.test.ts test/vision.test.ts test/sticker.test.ts` | T2、T3 / hooks、fingerprint、packing、budget、golden |
-| 全量 unit | `bun test` + `bun run check` | T1–T5 |
-| 文档 | `bun run docs:check` | T5 |
+| Agent/cache | `bun test test/agent.test.ts test/cache.test.ts test/config.test.ts test/vision.test.ts test/sticker.test.ts` | T2–T4 / hooks、fingerprint、packing、budget、golden |
+| 全量 unit | `bun test` + `bun run check` | T1–T6 |
+| 文档 | `bun run docs:check` | T6 |
 | 查询计划 | `EXPLAIN QUERY PLAN` fixture + 大历史 replay | `(chat_id, ingest_seq)` 索引与历史量无关 |
 | e2e | 不自动执行；真实 provider/Telegram 需用户另行明确授权 | session rotation、真实成本/延迟 |
 
