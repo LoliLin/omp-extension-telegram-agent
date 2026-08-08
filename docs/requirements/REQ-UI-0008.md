@@ -1,6 +1,6 @@
 # REQ-UI-0008: 为 `/tg` 提供原生分级命令补全
 
-- **Status:** Proposed（2026-08-08 已调查，未实现）
+- **Status:** Implemented（2026-08-08；真实 Pi TTY completion smoke 留 T14）
 - **Priority:** P2
 - **Source:** 用户新增 REQ-LIST：「Pi 支持命令二级/多级菜单；tg 现在没有自动补全，很难用」
 - **依赖:** REQ-UI-0004；与 REQ-UI-0005/0007 的新子命令协同
@@ -71,5 +71,11 @@ extension 只注册一个 `/tg`，handler 手工解析 `args.split()`；descript
 
 ## 追溯
 
-- Plans: 实现前建立
+- Plans: `PLAN-20260808-complete-new-reqs` T10
 - Commits: 从 `Requirement:` git trailer 查
+
+## 完成证据
+
+- `TG_COMMAND_TREE` 的递归 node/children 同时生成 description/help、completion path 与 handler dispatch；生产只注册一个 `/tg` 和它的 `getArgumentCompletions`。
+- A/B/C fixture 覆盖一级/二级、bot name label、`off`、partial/空白/连续空格、叶子无伪参数及 future third-level；每个建议都通过同一 parser。
+- config load 失败只返回静态一级项且不抛错；targeted extension/cache 28 tests 与 typecheck 通过，真实 Pi 菜单留最终验收。

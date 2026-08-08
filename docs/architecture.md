@@ -77,6 +77,7 @@
 - `src/plugin/timeline.ts` 是无展示逻辑的 IPC client，只负责连接、snapshot/live/history、复合游标、去重、stats 合并与有界媒体读取。
 - public extension API 没有 transcript scroll-top 事件，因此更早历史由 `/tg more` 显式加载；`/tg detach` 只断开 live socket，已显示内容保留。session restore 的旧锚点以 detached 状态呈现，不自动重连。
 - stats 通过官方 `ctx.ui.setFooter` mount point 直接返回 Pi 导出的 `FooterComponent`。插件只提供只读内存 telemetry session view；不复制 footer renderer、不写真实 Pi session。active feed 复用同一份 IPC stats，独立 panel 只拥有一个可清理的订阅。
+- `/tg` 只注册一个 Pi slash command；声明式递归 command tree 是 syntax/help/dispatch/completion 的共同来源。`getArgumentCompletions` 返回 replace-entire-argument value，动态节点只从启动期已验证 config 缓存 bot `id/name`，不读 DB、网络或 secret。
 - IPC：Unix socket JSONL，daemon 为 server；协议 = hello（可带 bot filter）/ history 分页拉取 / event 订阅 / usage 增量推送（REQ-UI-0003）/ additive `send_message`→`send_result`（REQ-UI-0005）。
 - **manual send（UI-0005 daemon contract）**：extension 只提交 request id、bot id 与纯文本；daemon 校验身份/空文本/4096 字符上限，在有界 256-entry request cache 中合并并发重复，再调用 Telegram。API 成功后先写 canonical DB、再 broadcast、最后 ACK；ACK 丢失不触发 daemon retry。相同 id 不同内容返回 conflict；API/DB 边界给出 explicit failure/unknown outcome，token 不出 daemon。
 - **原生 editor compose（UI-0005）**：`/tg compose <bot-id>` 显式打开发送身份，当前 Pi footer 持续显示 `TELEGRAM · SEND AS ...`；attach 本身永远只读。extension 只拦截 interactive `input` 并返回 `handled`，不写 Pi session/provider context；RPC/extension source 继续交给 Pi。发送期间拒绝第二次提交；明确失败恢复 editor 原文，ACK 超时/断线恢复原文并关闭 compose、提示先查群且不自动重试。附件被拦截且不降级为只发文字。attach 切换、detach、daemon 断线与 session shutdown 均清除身份。

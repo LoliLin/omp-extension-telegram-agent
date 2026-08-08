@@ -28,7 +28,7 @@ REQ-LIST 当前新增的 7 项全部实现、验证并以 commit 标注勾选；
 - [x] **T8** — timeline/feed 合并 vision update并在 native media card 下实时显示理解；validates: UI-0006 AC1–AC6；commit: vision presentation
 - [x] **T9a** — 吸收用户重新打开的 UI-0003，核对 Pi FooterComponent 源码并重写 UI-0003/UI-0007；validates: 用户给出的原生 footer 样例；commit: docs/research only
 - [x] **T9b** — 删除自定义 stats panel，用 `setFooter` 直接挂 Pi `FooterComponent` + IPC telemetry read view，保留完整 `/tg status`；validates: UI-0003/UI-0007 AC1–AC6；commit: native footer behavior
-- [ ] **T10** — 建共享 `/tg` command tree + `getArgumentCompletions`，覆盖动态 bot 与多级 prefix；validates: UI-0008 AC1–AC6；commit: command UX
+- [x] **T10** — 建共享 `/tg` command tree + `getArgumentCompletions`，覆盖动态 bot 与多级 prefix；validates: UI-0008 AC1–AC6；commit: command UX
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
 - [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification
 - [ ] **T13** — 将 package/project/runbook/example 文案收口为平台 + example deployment，明确单 deployment 单群边界；validates: PLAT-0001 AC6；commit: docs/metadata only

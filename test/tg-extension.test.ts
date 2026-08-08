@@ -7,10 +7,15 @@ import { join } from "node:path";
 import { FooterComponent, initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import * as Tui from "@earendil-works/pi-tui";
 import {
+	completeTgArguments,
+	formatTgHelp,
 	itemComponent,
+	parseTgArguments,
 	registerTelegramExtension,
 	supportsPiVersion,
+	TG_COMMAND_TREE,
 	TelegramFeed,
+	type TgCommandNode,
 	type TelegramExtensionOptions,
 } from "../.pi/extensions/tg-extension.ts";
 import type { BotStats, SendMessageResult, TimelineItem } from "../src/ipc.ts";
@@ -70,6 +75,7 @@ class FakeTimeline implements TimelinePort {
 
 interface FakeHost {
 	command: (args: string) => Promise<void>;
+	complete: (prefix: string) => Promise<{ value: string; label: string; description?: string }[] | null>;
 	clients: FakeTimeline[];
 	entries: { data: unknown; component: Tui.Component }[];
 	notifies: { text: string; level: string }[];
@@ -101,7 +107,10 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 	const footerStatuses = new Map<string, string>();
 	let currentFooter: Tui.Component | undefined;
 	const editorTexts: string[] = [];
-	const commands = new Map<string, { handler(args: string, ctx: unknown): Promise<void> }>();
+	const commands = new Map<string, {
+		handler(args: string, ctx: unknown): Promise<void>;
+		getArgumentCompletions?: (prefix: string) => { value: string; label: string; description?: string }[] | null | Promise<{ value: string; label: string; description?: string }[] | null>;
+	}>();
 	const renderers = new Map<string, (entry: { data?: unknown }, options: unknown, theme: Theme) => Tui.Component | undefined>();
 	const shutdownHandlers: (() => void)[] = [];
 	let inputHandler: ((event: unknown, ctx: unknown) => Promise<{ action: string } | undefined> | { action: string } | undefined) | undefined;
@@ -159,7 +168,10 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 		},
 	};
 	const api = {
-		registerCommand: (name: string, definition: { handler(args: string, ctx: unknown): Promise<void> }) => commands.set(name, definition),
+		registerCommand: (name: string, definition: {
+			handler(args: string, ctx: unknown): Promise<void>;
+			getArgumentCompletions?: (prefix: string) => { value: string; label: string; description?: string }[] | null | Promise<{ value: string; label: string; description?: string }[] | null>;
+		}) => commands.set(name, definition),
 		registerEntryRenderer: (type: string, renderer: (entry: { data?: unknown }, options: unknown, theme: Theme) => Tui.Component | undefined) => renderers.set(type, renderer),
 		appendEntry: (type: string, data: unknown) => {
 			const component = renderers.get(type)?.({ data }, {}, theme);
@@ -186,6 +198,7 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 	});
 	return {
 		command: (args) => commands.get("tg")!.handler(args, ctx),
+		complete: async (prefix) => await commands.get("tg")!.getArgumentCompletions?.(prefix) ?? null,
 		clients,
 		entries,
 		notifies,
@@ -221,6 +234,70 @@ const message: TimelineItem = {
 };
 
 describe("native Pi Telegram extension", () => {
+	test("command tree drives native multi-level completion and help", () => {
+		const bots = [
+			{ id: "A", name: "小雪" },
+			{ id: "B", name: "小雨" },
+			{ id: "C", name: "Cloud" },
+		];
+		const values = (prefix: string) => completeTgArguments(prefix, bots)?.map((item) => item.value) ?? [];
+
+		expect(values("")).toEqual(TG_COMMAND_TREE.map((node) => node.token));
+		expect(values("att")).toEqual(["attach"]);
+		expect(values("attach ")).toEqual(["attach A", "attach B", "attach C"]);
+		expect(values("  attach   c")).toEqual(["attach C"]);
+		expect(values("panel o")).toEqual(["panel off"]);
+		expect(values("compose ")).toEqual(["compose A", "compose B", "compose C", "compose off"]);
+		expect(values("status ")).toEqual(["status A", "status B", "status C"]);
+		expect(values("more ")).toEqual([]);
+		expect(values("start ")).toEqual([]);
+		expect(completeTgArguments("attach ", bots)?.[0]).toEqual({
+			value: "attach A",
+			label: "A (小雪)",
+			description: "Telegram bot 小雪",
+		});
+		expect(formatTgHelp()).toBe("usage: /tg attach [bot] | compose <bot|off> | more | detach | panel [bot|off] | status [bot] | start | stop | status-daemon");
+		for (const root of completeTgArguments("", bots) ?? []) {
+			expect(parseTgArguments(root.value, bots).ok).toBe(true);
+			for (const child of completeTgArguments(`${root.value} `, bots) ?? []) {
+				expect(parseTgArguments(child.value, bots).ok).toBe(true);
+			}
+		}
+	});
+
+	test("command traversal supports future depth and parser rejects syntax drift", () => {
+		const bots = [{ id: "C", name: "Cloud" }];
+		const futureTree: readonly TgCommandNode[] = [{
+			token: "config",
+			description: "Configure Telegram",
+			children: {
+				hint: "scope",
+				optional: false,
+				resolve: () => [{
+					token: "bot",
+					description: "Configure a bot",
+					children: {
+						hint: "bot",
+						optional: false,
+						resolve: (choices) => choices.map((bot) => ({ token: bot.id, label: bot.name, description: "Bot", dispatch: "status" })),
+					},
+				}],
+			},
+		}];
+		expect(completeTgArguments("config bot ", bots, futureTree)?.map((item) => item.value)).toEqual(["config bot C"]);
+		expect(parseTgArguments(" attach   nobody ", bots)).toEqual({ ok: true, dispatch: "attach", arguments: ["nobody"] });
+		expect(parseTgArguments("more unexpected", bots)).toEqual({ ok: false, reason: "extra" });
+		expect(parseTgArguments("unknown", bots)).toEqual({ ok: false, reason: "unknown" });
+	});
+
+	test("native completer keeps static commands when config loading fails", async () => {
+		const host = makeHost({ rootDir: join(tmpdir(), `missing-tg-config-${process.pid}-${Date.now()}`) });
+		expect((await host.complete("att"))?.map((item) => item.value)).toEqual(["attach"]);
+		expect(await host.complete("attach ")).toBeNull();
+		await host.command("");
+		expect(host.notifies.at(-1)).toEqual({ text: formatTgHelp(), level: "info" });
+	});
+
 	test("package manifest exposes the extension and pins the local fullscreen launcher", () => {
 		const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8")) as { keywords: string[]; pi: { extensions: string[] }; scripts: { pi: string } };
 		const settings = JSON.parse(readFileSync(join(import.meta.dir, "../.pi/settings.json"), "utf8")) as { tuiMode: string };

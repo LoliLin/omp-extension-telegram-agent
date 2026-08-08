@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：Pi 原生 telemetry footer 已实现并通过 targeted tests；下一项 T10 是共享 `/tg` command tree 与原生分级补全。
+2026-08-08：共享 `/tg` command tree 与 Pi 原生分级补全已实现；下一项 T11 是 per-bot provider/model/auth 泛型化。
 
 ## 已完成
 
@@ -21,7 +21,7 @@
 3. **已实现 `REQ-UI-0005`**：daemon request-id send→DB→broadcast + Pi interactive `handled` compose 全链完成；footer 唯一身份、附件/失败恢复、ACK unknown/no-retry 与 lifecycle cleanup 共 39 个 plugin/IPC targeted tests 通过。真实发送 smoke 留 T14。
 4. **已实现 `REQ-UI-0006`**：T7/T8 完成 identity update、256-entry/10-minute 乱序缓存、多引用/older page/重复幂等合并，以及 `视觉理解` native card 原位刷新与 sanitize；真实 media smoke 留 T14。
 5. **已实现 `REQ-UI-0003/0007`**：删除 stats widget；`setFooter` 直接返回 Pi `FooterComponent`，IPC stats 只做内存 read view，完整明细保留 `/tg status`。targeted 53 tests/typecheck/cache golden 通过，真实 TTY footer 留 T14。
-6. **P2 `REQ-UI-0008`**：用 `registerCommand.getArgumentCompletions` + 共享命令树实现 `/tg` 任意层原生补全。
+6. **已实现 `REQ-UI-0008`**：递归 command tree 同时驱动 help/parser/dispatch/completion；A/B/C、config error 与 future third-level targeted tests 通过，真实 Pi 菜单留 T14。
 7. **P1 `REQ-PLAT-0001`**：N-bot daemon 已通用；剩余 DeepSeek provider hardcode、e2e `bots[0]`、双 bot 产品文案与第三 bot 全链验证。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。

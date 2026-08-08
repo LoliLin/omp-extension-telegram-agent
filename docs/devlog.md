@@ -303,3 +303,10 @@
 - active feed 复用 stats；不同 panel 范围最多一个 standalone client。off/detach/feed 或 stats disconnect/session shutdown 都幂等清理并恢复 default footer；compose identity 继续通过同一原生 footer 显示。
 - targeted plugin/timeline/IPC/cache 53 tests + typecheck 通过，覆盖用户样例、global aggregation、24/80 列、socket ownership 与 session isolation；真实 Pi TTY smoke 留 T14。
 - Cache impact: **NONE**——纯 IPC→TUI read model，不改 provider prefix/suffix、tool/message grammar，token/cost 增量 0。
+
+## 2026-08-08 (31) — `/tg` 使用 Pi 原生分级命令补全
+
+- 单一递归 `TG_COMMAND_TREE` 现在同时生成 slash description、空命令 help、parser dispatch 与 `getArgumentCompletions`；选择值始终是 Pi 所需的完整 argument replacement，不注册额外顶级命令或自绘菜单。
+- `attach/status/compose/panel` 从已验证配置缓存 bot `id/name`，compose/panel 加 `off`；config 失败安全退回静态一级候选，不接触 token value、DB、网络或 LLM。
+- tests 覆盖 A/B/C、空/partial/trailing/连续空格、unknown/extra、无参数 leaf、所有 suggestion parser round-trip 与 future third-level，targeted extension/cache 28 pass，typecheck 通过；真实 Pi 菜单留 T14。
+- Cache impact: **NONE**——deterministic TUI autocomplete/help，不进入 provider context，token/cost 增量 0。

@@ -50,7 +50,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - RPC/extension source 不受 compose 影响。attach 切换、detach、daemon 断线或 Pi 退出都会关闭 compose；bot token 始终只在 daemon 内。
 - photo/sticker 被现有 lazy vision 流程识别后，同一 native media card 会在下方原位出现 `视觉理解 · ...`；无需重新 attach。它不为 UI 主动调用模型，未触发 bot 的媒体仍保持图片/fallback。
 - attach 自动让 Pi 自己的 `FooterComponent` 显示对应 Telegram `↑/↓/R/CH/$/context/model`；`/tg panel` 可单独切换范围，`panel off` 恢复 operator Pi session usage。完整 epoch/累计明细仍用 `/tg status [bot]`。
-- 当前 `/tg` 子命令没有参数补全；原生分级 completion 方案见 `REQ-UI-0008`，尚未实现。
+- 在 editor 输入 `/tg ` 后按 Tab/选择使用 Pi 原生分级菜单；`attach/status/compose/panel` 的下一层会从配置动态列出 bot id/name，`compose/panel` 另有 `off`。
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。
 
 ## 新增一个 bot
