@@ -16,7 +16,6 @@ import {
 	ensureStickerCatalog,
 	preRecognizeCatalogVision,
 	stickerCandidatesForTurn,
-	stickerCatalogBlock,
 	STICKER_CATALOG_MAX,
 } from "../src/media/sticker-catalog.ts";
 import { TelegramApiError } from "../src/telegram/api.ts";
@@ -112,25 +111,20 @@ describe("ensureStickerCatalog (R1)", () => {
 			{ bot_id: "A", file_id: "fid-c2" },
 		]);
 
-		const block = stickerCatalogBlock(db, "A", ["cats"]);
-		expect(block).toContain("s1 = 😺 [未识别]");
-		expect(block).toContain("s2 = 🐱 [未识别]");
-		expect(stickerCatalogBlock(db, "A", ["cats"])).toBe(block); // deterministic
-
 		// idempotent reload: same ids, no duplicates
 		await ensureStickerCatalog(db, api as never, "A", ["cats"]);
 		expect(db.query("SELECT COUNT(*) c FROM media WHERE kind='sticker'").get()).toEqual({ c: 2 });
 	});
 
-	test("existing vision rows are reused (no re-download) and serialized with their text", async () => {
+	test("existing vision rows are reused (no re-download)", async () => {
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, vision) VALUES ('uq-c1', 'sticker', 'cats', '😺', ?)").run(
 			JSON.stringify({ model: "m", kind: "sticker", text: "得意的赞同", at: 1 }),
 		);
 		const api = fakeApi({ cats: [sticker("c1", "😺"), sticker("c2", "🐱")] });
 		await ensureStickerCatalog(db, api as never, "A", ["cats"]);
-		const block = stickerCatalogBlock(db, "A", ["cats"]);
-		expect(block).toContain("s1 = 😺 得意的赞同");
-		expect(block).toContain("s2 = 🐱 [未识别]");
+		const rows = db.query("SELECT file_unique_id, vision FROM media WHERE kind='sticker' ORDER BY rowid").all() as { file_unique_id: string; vision: string | null }[];
+		expect(rows[0]!.vision).toContain("得意的赞同");
+		expect(rows[1]!.vision).toBeNull();
 	});
 
 	test("VISION AC4/AC8: background catalog vision is two-wide and never mutates the stable prompt", async () => {
@@ -138,7 +132,7 @@ describe("ensureStickerCatalog (R1)", () => {
 		try {
 			const api = fakeApi({ cats: [sticker("c1", "😺"), sticker("c2", "🐱"), sticker("c3", "😸")] });
 			await ensureStickerCatalog(db, api as never, "A", ["cats"]);
-			const promptSnapshot = buildSystemPrompt("fixture persona", stickerCatalogBlock(db, "A", ["cats"]));
+			const promptSnapshot = buildSystemPrompt("fixture persona");
 			const hashSnapshot = sha256Short(promptSnapshot);
 			let active = 0;
 			let peak = 0;
@@ -206,7 +200,7 @@ describe("ensureStickerCatalog (R1)", () => {
 			releases.get(3)!();
 			await background;
 
-			const nextPrompt = buildSystemPrompt("fixture persona", stickerCatalogBlock(db, "A", ["cats"]));
+			const nextPrompt = buildSystemPrompt("fixture persona");
 			expect(nextPrompt).not.toContain("catalog-1");
 			expect(sha256Short(nextPrompt)).toBe(hashSnapshot);
 			expect(sha256Short(promptSnapshot)).toBe(hashSnapshot);
@@ -236,23 +230,10 @@ describe("ensureStickerCatalog (R1)", () => {
 			expect(res.total).toBe(1);
 			expect(res.sendable).toBe(1);
 			expect(res.missingMapping).toBe(1);
-			expect(stickerCatalogBlock(db, "A", ["missing-set", "good"])).not.toContain("s99");
 		} finally {
 			console.error = originalError;
 			console.warn = originalWarn;
 		}
-	});
-});
-
-describe("catalog serialization (R2)", () => {
-	test("order follows configured set order, then rowid; empty for no sets", () => {
-		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-a1', 'sticker', 'setA', '😺', 's1')").run();
-		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-b1', 'sticker', 'setB', '🐱', 's2')").run();
-		mapSticker("A", "uq-a1");
-		mapSticker("A", "uq-b1");
-		const block = stickerCatalogBlock(db, "A", ["setB", "setA"]);
-		expect(block.indexOf("s2")).toBeLessThan(block.indexOf("s1")); // setB before setA
-		expect(stickerCatalogBlock(db, "A", [])).toBe("");
 	});
 });
 
@@ -464,11 +445,6 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 		mapSticker("A", "uq-shared");
 		mapSticker("B", "uq-shared");
 		mapSticker("A", "uq-a-only");
-
-		expect(stickerCatalogBlock(db, "A", ["setA"])).toContain("s144");
-		expect(stickerCatalogBlock(db, "A", ["setB"])).toBe("");
-		expect(stickerCatalogBlock(db, "B", ["setB"])).toContain("s241");
-		expect(stickerCatalogBlock(db, "B", ["setA"])).toBe("");
 
 		const turn = "A 目录 B 目录 双方可用 仅 A 可用 🐱 🤝 🅰️";
 		const aCandidates = stickerCandidatesForTurn(db, "A", turn);

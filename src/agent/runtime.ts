@@ -19,7 +19,7 @@ import {
 	type SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { BotConfig, AppConfig } from "../config.ts";
-import { deleteBotState, getBotState, setBotState } from "../db/db.ts";
+import { getBotState, setBotState } from "../db/db.ts";
 import { BotApi, TelegramApiError } from "../telegram/api.ts";
 import { TelegramTypingLease, type ActivityScheduler } from "../telegram/activity.ts";
 import {
@@ -106,7 +106,6 @@ import { log } from "../observability/log.ts";
 
 const MAX_EVENT_SCAN = 256;
 const MAX_OBLIGATION_SCAN = 64;
-const LEGACY_EXPOSED_KEY = "exposed_ids";
 const TELEGRAM_CONTEXT_COMMIT_TYPE = "telegram_context_commit_v2";
 const EPOCH_KEY = "context_epoch";
 const STREAM_TEXT_MAX = 4096;
@@ -406,7 +405,6 @@ export class BotRuntime {
 			replaceVisibleMessageIds(this.db, this.bot.id, chatId, this.epoch, []);
 			this.visibleMessageIds.clear();
 		}
-		deleteBotState(this.db, this.bot.id, LEGACY_EXPOSED_KEY);
 
 		const payloadKey = sha256(
 			`telegram-payload-observer:${this.config.routerSecret ?? this.config.dataDir}:${this.bot.id}`,

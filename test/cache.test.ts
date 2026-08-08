@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { serializeMessageEvents, serializeMessages, type MessageRow } from "../src/agent/serialize.ts";
 import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT } from "../src/agent/prompt.ts";
 import { toolsHash } from "../src/agent/tools.ts";
-import { stickerCandidatesForTurn, stickerCatalogBlock } from "../src/media/sticker-catalog.ts";
+import { stickerCandidatesForTurn } from "../src/media/sticker-catalog.ts";
 import {
 	NO_SEND_MARKER,
 	TELEGRAM_CONTEXT_TYPE,
@@ -105,14 +105,5 @@ test("sticker inventory is retrieved per turn and never enters the stable prefix
 	ins.run("uq-cat-b-only", "Mikufufu", "🅱️", JSON.stringify({ model: "m", kind: "sticker", text: "另一个 bot 的映射", at: 1 }), "s3");
 	db.query("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', 'fid-1', 'uq-cat-1'), ('A', 'fid-2', 'uq-cat-2')").run();
 	db.query("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('B', 'fid-3', 'uq-cat-b-only')").run();
-	const block = stickerCatalogBlock(db, "A", ["Mikufufu"]);
-	expect(block).toContain("s1 = 😺 得意的赞同，smug/amused");
-	expect(block).toContain("s2 = 🐱 [未识别]");
-	expect(block).not.toContain("s3");
-	const persona = readFileSync("personas/template.zh.md", "utf8");
-	expect(buildSystemPrompt(persona, block)).toBe(buildSystemPrompt(persona));
-	expect(sha256Short(buildSystemPrompt(persona, block))).toBe(GOLDEN.systemZhTemplate);
 	expect(stickerCandidatesForTurn(db, "A", "得意 smug 😺")).toContain("s1 = 😺 得意的赞同，smug/amused");
-	// determinism: same DB state -> byte-identical block
-	expect(stickerCatalogBlock(db, "A", ["Mikufufu"])).toBe(block);
 });

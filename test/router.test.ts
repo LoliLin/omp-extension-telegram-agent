@@ -6,16 +6,17 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	dispatchRoutingDecision,
-	routeMessage,
 	routeMessageDecision,
 	routingValue,
 	nameKeywordTrigger,
 	type BotIdentity,
+	type RoutingConfig,
 	type RoutingDecision,
 	type RoutingRuntime,
 	type RoutingTrigger,
 	type TriggerResult,
 	type TriggerSource,
+	type TriggerTarget,
 } from "../src/agent/router.ts";
 import type { MessageRow } from "../src/agent/serialize.ts";
 
@@ -46,6 +47,11 @@ function row(overrides: Partial<MessageRow>): MessageRow {
 
 function decision(target: string | "nobody", reason: RoutingDecision["reason"], messageId = 1): RoutingDecision {
 	return { target, reason, chatId: CHAT, messageId };
+}
+
+/** Target-only view for the probability-property tests; production uses routeMessageDecision. */
+function routeMessage(db: Database, row: MessageRow, bots: BotIdentity[], config: RoutingConfig): TriggerTarget {
+	return routeMessageDecision(db, row, bots, config).target;
 }
 
 describe("routingValue", () => {

@@ -25,7 +25,7 @@ export const SHARED_PROTOCOL = `# 群聊协议
 - 群里还有另一个 AI bot（你的姐妹），她的消息你能看到，但不要替她说话，也不要回复她的消息
 `;
 
-export function buildSystemPrompt(personaText: string, _legacyStickerCatalog = ""): string {
+export function buildSystemPrompt(personaText: string): string {
 	return `${SHARED_PROTOCOL}\n---\n\n# 人格与回应策略\n\n${personaText.trim()}`;
 }
 

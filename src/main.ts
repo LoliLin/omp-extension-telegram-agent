@@ -1,4 +1,4 @@
-// CLI: start | restart | status | stop | attach.
+// CLI: start | restart | status | stop.
 
 import { DaemonController, createNodeDaemonControlPort, type DaemonControlResult } from "./daemon/control.ts";
 
@@ -34,12 +34,7 @@ switch (cmd) {
 		report(controller.stop());
 		break;
 	}
-	case "attach": {
-		console.error("观察者已迁移为 pi 插件：在项目目录运行 `bun run pi`，然后输入 /tg attach [bot-id]（或 /tg panel / /tg status）。daemon 起停使用 start/restart/status/stop。");
-		process.exitCode = 1;
-		break;
-	}
 	default:
-		console.error("usage: bun run src/main.ts <start [--foreground] | restart | status | stop | attach>");
+		console.error("usage: bun run src/main.ts <start [--foreground] | restart | status | stop>");
 		process.exitCode = 1;
 }

@@ -191,38 +191,6 @@ export function preRecognizeCatalogVision(
 	})();
 }
 
-/**
- * Legacy deterministic catalog projection retained for compatibility and migration tests.
- * Production context uses `stickerCandidatesForTurn`; this block never enters schema-v8 system
- * prompts. Order = configured set order, then rowid, filtered by this bot's file_id mapping.
- */
-export function stickerCatalogBlock(db: Database, botId: string, sets: string[]): string {
-	const lines: string[] = [];
-	for (const setName of sets) {
-		const rows = db
-			.query(
-				`SELECT short_id, sticker_emoji, vision FROM media m
-				 WHERE kind = 'sticker' AND sticker_set = ? AND short_id IS NOT NULL
-				   AND EXISTS (
-				     SELECT 1 FROM media_file_ids f
-				      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
-				   )
-				 ORDER BY rowid`,
-			)
-			.all(setName, botId) as { short_id: string; sticker_emoji: string | null; vision: string | null }[];
-		for (const r of rows) {
-			let semantic = "[未识别]";
-			if (r.vision) {
-				const parsed = JSON.parse(r.vision) as { text: string | null };
-				if (parsed.text) semantic = parsed.text.replace(/\s+/g, " ").slice(0, 60);
-			}
-			lines.push(`${r.short_id} = ${r.sticker_emoji ?? ""} ${semantic}`.trim());
-		}
-	}
-	if (lines.length === 0) return "";
-	return `\n---\n\n# Sticker 目录\n\n可用 sticker（short_id = 语义，可直接发送）：\n${lines.join("\n")}`;
-}
-
 interface StickerCandidateRow {
 	rowid: number;
 	short_id: string;

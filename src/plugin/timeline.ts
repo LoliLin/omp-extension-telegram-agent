@@ -206,7 +206,7 @@ export class TimelineClient implements TimelinePort {
 		this.loadingOlder = true;
 		this.hooks.onEvent({ type: "status", text: "loading older Telegram history..." });
 		const before = this.oldestCursor ?? { ts: this.oldestTs, id: Number.MAX_SAFE_INTEGER, rank: 1 };
-		this.socket.write(encodeFrame({ type: "history", beforeTs: this.oldestTs, before, limit: 100 }));
+		this.socket.write(encodeFrame({ type: "history", before, limit: 100 }));
 		return true;
 	}
 

@@ -248,11 +248,7 @@ export class IpcServer {
 		} else if (req.type === "history") {
 			// R4: clamp the limit server-side; a crafted 1e9 must not read the whole table.
 			const limit = Math.min(Math.max(1, Math.floor(req.limit) || HISTORY_LIMIT), HISTORY_LIMIT_MAX);
-			// Composite cursor when provided; legacy beforeTs keeps strict ts< semantics (id=0/rank=0
-			// makes both per-table queries strict), so old clients page exactly as before (R3 compat).
-			const cursor: TimelineCursor | null =
-				req.before ??
-				(req.beforeTs != null ? { ts: req.beforeTs, id: 0, rank: 0 } : null);
+			const cursor: TimelineCursor | null = req.before ?? null;
 			const items = this.loadTimeline(cursor, limit, this.filters.get(socket) ?? null);
 			this.writeFrame(
 				socket,

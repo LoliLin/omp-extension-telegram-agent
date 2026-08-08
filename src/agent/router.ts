@@ -69,11 +69,6 @@ export function explicitTriggerReason(db: Database, row: MessageRow, bot: BotIde
 	return null;
 }
 
-/** Backward-compatible boolean predicate used by focused router tests/callers. */
-export function explicitTrigger(db: Database, row: MessageRow, bot: BotIdentity): boolean {
-	return explicitTriggerReason(db, row, bot) !== null;
-}
-
 /** Bot's configured name appears in the message text (e.g. "小雪你怎么看"). */
 export function nameKeywordTrigger(row: MessageRow, bot: BotIdentity): boolean {
 	const text = row.text ?? row.caption;
@@ -119,11 +114,6 @@ export function routeMessageDecision(db: Database, row: MessageRow, bots: BotIde
 		if (u < cumulative) return makeDecision(bots[i]!.id, "probability");
 	}
 	return makeDecision("nobody", "nobody");
-}
-
-/** Target-only compatibility wrapper; deterministic bucket assignment is unchanged. */
-export function routeMessage(db: Database, row: MessageRow, bots: BotIdentity[], config: RoutingConfig): TriggerTarget {
-	return routeMessageDecision(db, row, bots, config).target;
 }
 
 /** Apply lifecycle policy without reparsing the message or redistributing probability. */

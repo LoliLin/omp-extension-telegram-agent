@@ -11,7 +11,6 @@
 // Pagination uses a composite cursor (ts, rank, id): rank 0 = agent event (id = agent_events.id),
 // rank 1 = chat message (id = message_id). Merged timeline order is by (ts, rank, id), so
 // same-second messages/events are never dropped or duplicated across pages (REQ-IPC-0001 R3).
-// Legacy clients sending only `beforeTs` keep the old strict `ts < beforeTs` semantics.
 
 export interface MsgItem {
 	kind: "msg";
@@ -168,7 +167,7 @@ export interface SendMessageRequest {
 
 export type ClientRequest =
 	| { type: "hello"; filter?: string } // filter = bot id; absent = global view (REQ-UI-0002)
-	| { type: "history"; beforeTs?: number; before?: TimelineCursor; limit: number }
+	| { type: "history"; before?: TimelineCursor; limit: number }
 	| SendMessageRequest;
 
 export type ServerMessage =

@@ -91,12 +91,6 @@ export function listOurDaemons(rootDir: string = process.cwd()): number[] {
 	}
 }
 
-/** True when a daemon is actually running (pid present, alive and ours). */
-export function isDaemonRunning(pidPath: string = PID_PATH): boolean {
-	const pid = readPid(pidPath);
-	return pid != null && pidAlive(pid) && isOurDaemon(pid);
-}
-
 /**
  * Acquire the exclusive pid lock. Exits the process when another daemon holds it.
  * Stale pid files (dead or foreign process) are removed and retried once.

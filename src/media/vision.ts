@@ -154,10 +154,6 @@ function usageTelemetry(
 	};
 }
 
-function providerOutcome(category: ReturnType<typeof classifyPiProviderFailure>): VisionOutcome {
-	return category;
-}
-
 /** Create a lightweight vision adapter over the already-owned Pi runtime/auth snapshot. */
 export function createPiVisionExecutor(
 	runtime: VisionModelRuntime,
@@ -264,7 +260,7 @@ export function createPiVisionExecutor(
 						sourceBytes,
 						convertedBytes,
 						monotonicNow() - startedAt,
-						providerOutcome(classifyPiProviderFailure(error)),
+						classifyPiProviderFailure(error),
 					),
 				};
 			} finally {
@@ -274,7 +270,7 @@ export function createPiVisionExecutor(
 			if (message.stopReason === "error" || message.stopReason === "aborted") {
 				const category = message.stopReason === "aborted" && controller.signal.aborted
 					? "provider_timeout"
-					: providerOutcome(classifyPiProviderFailure(new Error(message.errorMessage ?? message.stopReason)));
+					: classifyPiProviderFailure(new Error(message.errorMessage ?? message.stopReason));
 				return {
 					text: null,
 					telemetry: usageTelemetry(input.kind, sourceBytes, convertedBytes, monotonicNow() - startedAt, category, message),

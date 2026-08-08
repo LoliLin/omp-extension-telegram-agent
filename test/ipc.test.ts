@@ -111,8 +111,8 @@ describe("pagination (R3)", () => {
 			(server as any).handleRequest(
 				socket,
 				cursor
-					? { type: "history", before: cursor, beforeTs: cursor.ts, limit: 3 }
-					: { type: "history", before: { ts: Number.MAX_SAFE_INTEGER, id: Number.MAX_SAFE_INTEGER, rank: 1 }, beforeTs: Number.MAX_SAFE_INTEGER, limit: 3 },
+					? { type: "history", before: cursor, limit: 3 }
+					: { type: "history", before: { ts: Number.MAX_SAFE_INTEGER, id: Number.MAX_SAFE_INTEGER, rank: 1 }, limit: 3 },
 			);
 			const resp = frames[0] as { type: string; items: { ts: number; kind: string; messageId?: number; evtId?: number }[]; hasMore: boolean };
 			expect(resp.type).toBe("history");
@@ -151,20 +151,6 @@ describe("pagination (R3)", () => {
 		expect(pages.every((p) => p.items.length <= 3)).toBe(true);
 	});
 
-	test("legacy beforeTs request keeps strict ts< semantics (old client compat)", () => {
-		const chatId = -1004402809405;
-		insertMsg(chatId, 100, 1754600000, "a");
-		insertMsg(chatId, 101, 1754600000, "b"); // same second as 100
-		insertMsg(chatId, 102, 1754590000, "older");
-		const server = makeServer();
-		const frames: unknown[] = [];
-		const socket = fakeSocket(() => 1 << 20, (f) => frames.push(f));
-		attach(server, socket);
-		(server as any).handleRequest(socket, { type: "history", beforeTs: 1754600000 * 1000, limit: 10 });
-		const resp = frames[0] as { items: { messageId?: number }[] };
-		// strict <: neither same-second message is returned
-		expect(resp.items.map((i) => i.messageId)).toEqual([102]);
-	});
 });
 
 describe("outbound queue bounds (R2)", () => {
@@ -232,7 +218,7 @@ describe("socket hardening (R4)", () => {
 		const frames: unknown[] = [];
 		const socket = fakeSocket(() => 1 << 20, (f) => frames.push(f));
 		attach(server, socket);
-		(server as any).handleRequest(socket, { type: "history", beforeTs: Number.MAX_SAFE_INTEGER, limit: 1e9 });
+		(server as any).handleRequest(socket, { type: "history", before: { ts: Number.MAX_SAFE_INTEGER, id: Number.MAX_SAFE_INTEGER, rank: 1 }, limit: 1e9 });
 		const resp = frames[0] as { items: unknown[]; hasMore: boolean };
 		expect(resp.items.length).toBeLessThanOrEqual(500);
 		expect(resp.items.length).toBe(50);

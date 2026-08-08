@@ -5,11 +5,14 @@ import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { serializeMessages, getOrCreateAlias, type MessageRow } from "../src/agent/serialize.ts";
-import { explicitTrigger, type BotIdentity } from "../src/agent/router.ts";
+import { explicitTriggerReason, type BotIdentity } from "../src/agent/router.ts";
 import { ingestUpdate, insertSentMessage } from "../src/telegram/ingest.ts";
 
 const GROUP = 4402809405;
 const CHAT = Number(`-100${GROUP}`);
+
+const explicitTrigger = (db: Database, row: MessageRow, bot: BotIdentity): boolean =>
+	explicitTriggerReason(db, row, bot) !== null;
 
 let db: Database;
 beforeEach(() => {
