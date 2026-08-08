@@ -19,6 +19,18 @@ export interface BotToolsConfig {
 	runJs: boolean;
 }
 
+export type TelegramAdmin = number | `@${string}`;
+
+/** Normalize the only two trusted Telegram admin identities accepted by deployment config. */
+export function normalizeTelegramAdmin(value: unknown): TelegramAdmin | null {
+	if (typeof value === "number") {
+		return Number.isSafeInteger(value) && value > 0 ? value : null;
+	}
+	if (typeof value !== "string") return null;
+	const username = value.trim().toLowerCase();
+	return /^@[a-z0-9_]{5,32}$/.test(username) ? username as `@${string}` : null;
+}
+
 export interface BotConfig {
 	id: string;
 	name: string; // display name + name-keyword trigger; defaults to id
@@ -44,6 +56,7 @@ export interface AppConfig {
 	tinyfishApiKey: string;
 	auxiliaryVisualModel: string;
 	routerSecret: string | null; // generated+persisted by daemon if absent
+	telegramAdmins: TelegramAdmin[]; // deny-by-default deterministic control allowlist
 }
 
 export class ConfigError extends Error {
@@ -105,6 +118,7 @@ export interface RawConfig {
 	compaction_threshold?: unknown;
 	compaction_keep_recent?: unknown;
 	sampling_cooldown_ms?: unknown;
+	telegram_admins?: unknown;
 	bots?: unknown;
 }
 
@@ -220,6 +234,22 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 	) {
 		errors.push(`[config] sampling_cooldown_ms: expected finite number >= 0, got ${JSON.stringify(raw.sampling_cooldown_ms)}`);
 	}
+	if (raw.telegram_admins !== undefined) {
+		if (!Array.isArray(raw.telegram_admins)) {
+			errors.push(`[config] telegram_admins: expected an array of positive user ids or @usernames`);
+		} else {
+			const seenAdmins = new Set<TelegramAdmin>();
+			for (let index = 0; index < raw.telegram_admins.length; index++) {
+				const admin = normalizeTelegramAdmin(raw.telegram_admins[index]);
+				if (admin == null) {
+					errors.push(`[config] telegram_admins[${index}]: expected a positive integer user id or @username`);
+					continue;
+				}
+				if (seenAdmins.has(admin)) errors.push(`[config] telegram_admins[${index}]: duplicate identity ${admin}`);
+				seenAdmins.add(admin);
+			}
+		}
+	}
 	if (raw.group_peer_id !== undefined) {
 		const n = normalizePeerId(String(raw.group_peer_id));
 		if (!Number.isFinite(n)) {
@@ -281,6 +311,9 @@ export function loadConfig(rootDir: string): AppConfig {
 	const defaultKeepRecent = num("compaction_keep_recent", 20000, 1, Number.MAX_SAFE_INTEGER);
 	const defaultSamplingCooldown = num("sampling_cooldown_ms", 2000, 0, Number.MAX_SAFE_INTEGER);
 	const botList = raw.bots as RawBotConfig[];
+	const telegramAdmins = Array.isArray(raw.telegram_admins)
+		? raw.telegram_admins.map((value) => normalizeTelegramAdmin(value)!)
+		: [];
 
 	const bots: BotConfig[] = botList.map((b) => {
 		const tokenEnv = b.token_env as string;
@@ -314,5 +347,6 @@ export function loadConfig(rootDir: string): AppConfig {
 		tinyfishApiKey,
 		auxiliaryVisualModel: typeof raw.auxiliary_visual_model === "string" ? raw.auxiliary_visual_model : "",
 		routerSecret: env[routerSecretEnv] || null,
+		telegramAdmins,
 	};
 }

@@ -55,7 +55,10 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10y** — 用T10x真实commit hash记录SEND-0002完成并在REQ-LIST勾选；validates: SEND-0002 traceability；commit: completion record
 - [x] **T10z** — 复用Pi公开`convertToPng`做Kitty异步去重转换、有界LRU与原卡片重绘；validates: UI-0012 AC1–AC7；commit: native media compatibility
 - [x] **T10aa** — 用T10z真实commit hash记录UI-0012完成并在REQ-LIST勾选；validates: UI-0012 traceability；commit: completion record
-- [ ] **T10m** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane
+- [x] **T10m1** — 校验/规范化Telegram admin allowlist，并用`bot_state`实现routing/cooldown effective override、原子概率校验与重启恢复；validates: CMD-0001 AC2/AC3/AC7；commit: control configuration state
+- [ ] **T10m2** — 实现entity-driven `/tg` parser、权限/输出/串行mutation服务及BotRuntime安全manual compact/consume接口；validates: CMD-0001 AC1/AC2/AC4/AC6；commit: deterministic command service
+- [ ] **T10m3** — 接入poller/daemon、canonical reply/broadcast/exposure与best-effort菜单，锁一次执行和零provider context；validates: CMD-0001 AC5/AC8；commit: Telegram control integration
+- [ ] **T10m4** — 用行为commit hash记录CMD-0001完成并在REQ-LIST勾选；validates: CMD-0001 traceability；commit: completion record
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
 - [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification
 - [ ] **T13a** — 将 Pi dependencies/lock 改为可获取版本并增加 `bun run pi` 幂等 bootstrap/fresh-clone fixture；validates: ONBOARD-0001 AC1；commit: portable launcher
@@ -69,7 +72,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 ## 每个 commit 的固定流程
 
 1. 只实现当前 task；先跑目标测试与 `bun run check`。
-2. 更新该行为必需的 REQ/architecture/testing/cache docs；devlog 可在 T14 汇总，但行为 contract 必须同 commit。
+2. 更新该行为必需的 REQ/architecture/testing/cache docs，并为每个行为commit追加devlog；T14只汇总总验收。
 3. 用显式路径或 patch 暂存，检查 `git diff --cached --check`、`git diff --cached`、`git status --short`。
 4. `git commit -S`，subject 遵循 AGENTS.md；有 REQ 写 `Requirement:`，所有本计划 task 写 `Task:`；纯机械且无 REQ 时再写 `Work-Type: mechanical`。
 5. 用 `git log -1 --show-signature` 验证 good signature；失败不降级。
@@ -83,6 +86,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 | IPC/editor | `bun test test/ipc.test.ts test/tg-engine.test.ts test/tg-extension.test.ts` | T5–T10 |
 | Send commit | `bun test test/rich-send.test.ts test/sticker.test.ts test/flush.test.ts test/daemon-control.test.ts` | T10x |
 | Native media | `bun test test/tg-extension.test.ts test/tg-engine.test.ts` + Pi real converter fixture | T10z |
+| Telegram control | `bun test test/config.test.ts test/control-state.test.ts test/control-command.test.ts test/poller.test.ts` | T10m1–T10m3 |
 | Config/platform | `bun test test/config.test.ts` + 新 composition tests | T11–T13 |
 | 全量 | `bun test` + `bun run check` + `git diff --check` | T14 |
 | Real Pi | `bun run pi`: attach/compose/send/more/footer/completion/vision | T14 |
@@ -104,7 +108,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - T10p: **NONE**；restart不改provider/session协议或epoch，不新增LLM call/token。
 - T10v/T10x: **NONE**；不改send schema/provider grammar；异常路径在Telegram调用后只终止并重试本地幂等副作用，减少重复provider turn/token。
 - T10w/T10z: **NONE**；只在本地TUI按Pi capability异步准备PNG并交给原生Image，不改IPC/DB/provider bytes或vision调用。
-- T10m: **NONE**；Telegram control command 与回复均由 deterministic control plane 消费，不进入 provider context；只有显式 compact 使用既有 summary 调用。
+- T10m1–T10m4: **NONE**；Telegram control command 与回复均由 deterministic control plane 消费，不进入 provider context；只有显式 compact 使用既有 summary 调用。
 - T11–T13f: 现有 deployment **NONE**；provider/persona choice 是显式配置边界，bootstrap/wizard/docs 不进入 provider context，现有 golden 必须不变。
 
 ## 风险

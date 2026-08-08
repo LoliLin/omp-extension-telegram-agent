@@ -29,6 +29,7 @@ function config(dbPath = ":memory:"): AppConfig {
 		tinyfishApiKey: "",
 		auxiliaryVisualModel: "",
 		routerSecret: null,
+		telegramAdmins: [],
 	};
 }
 

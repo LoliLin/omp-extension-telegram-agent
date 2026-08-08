@@ -44,6 +44,7 @@ function makeRuntime(options: {
 		tinyfishApiKey: "",
 		auxiliaryVisualModel: "",
 		routerSecret: null,
+		telegramAdmins: [],
 	};
 	const bot: BotConfig = {
 		id: "A",

@@ -7,7 +7,7 @@ import { describe, expect, test, afterAll } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, parseEnvFile, normalizePeerId, ConfigError } from "../src/config.ts";
+import { loadConfig, parseEnvFile, normalizePeerId, normalizeTelegramAdmin, ConfigError } from "../src/config.ts";
 import { acquirePidLock, releasePidLock, readPid, pidAlive, isOurDaemon, listOurDaemons } from "../src/daemon/pid.ts";
 import { buildSystemPrompt, sha256Short } from "../src/agent/prompt.ts";
 
@@ -218,6 +218,25 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 		}
 	});
 
+	test("Telegram admin allowlist is normalized, deduplicated, and deny-by-default", () => {
+		const emptyDir = makeEnvDir();
+		const validDir = makeEnvDir(VALID_BOTS, {}, { telegram_admins: [123456789, " @Alice_1 "] });
+		const invalidDir = makeEnvDir(VALID_BOTS, {}, {
+			telegram_admins: [0, -1, 1.5, "alice", "@x", "@Alice_1", "@alice_1", null],
+		});
+		try {
+			expect(loadConfig(emptyDir).telegramAdmins).toEqual([]);
+			expect(loadConfig(validDir).telegramAdmins).toEqual([123456789, "@alice_1"]);
+			expect(() => loadConfig(invalidDir)).toThrow(/telegram_admins\[0\][\s\S]*telegram_admins\[7\]/);
+			expect(() => loadConfig(invalidDir)).toThrow(/duplicate identity @alice_1/);
+			expect(normalizeTelegramAdmin(Number.MAX_SAFE_INTEGER + 1)).toBeNull();
+		} finally {
+			rmSync(emptyDir, { recursive: true, force: true });
+			rmSync(validDir, { recursive: true, force: true });
+			rmSync(invalidDir, { recursive: true, force: true });
+		}
+	});
+
 	test("AC1: the real project config (example replica) loads against the real .env", () => {
 		// project root has bots.config.json + .env + personas/ — the migration replica must
 		// parse cleanly end to end (persona files exist, env keys present)
@@ -227,6 +246,7 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 			expect(existsSync(b.personaPath)).toBe(true);
 			expect(b.token.length).toBeGreaterThan(0);
 		}
+		expect(config.telegramAdmins).toEqual(["@aac6fef"]);
 	});
 });
 
@@ -247,6 +267,14 @@ describe("repo hygiene (REQ-OPS-0001 R3)", () => {
 		const out = r.stdout.toString();
 		expect(out).toContain("data/agent.db");
 		expect(out).toContain("bots.config.json");
+	});
+
+	test("tracked config example uses only a non-private numeric admin placeholder", () => {
+		const example = JSON.parse(readFileSync(join(process.cwd(), "bots.config.example.json"), "utf8")) as {
+			telegram_admins?: unknown[];
+		};
+		expect(example.telegram_admins).toEqual([123456789]);
+		expect(readFileSync(join(process.cwd(), "bots.config.example.json"), "utf8")).not.toContain("aac6fef");
 	});
 });
 

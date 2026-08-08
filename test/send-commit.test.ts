@@ -49,6 +49,7 @@ function makeConfig(dbPath = ":memory:"): AppConfig {
 		tinyfishApiKey: "",
 		auxiliaryVisualModel: "gpt-5.6-luna-low",
 		routerSecret: null,
+		telegramAdmins: [],
 	};
 }
 

@@ -487,3 +487,11 @@
 - feed detach/restart/session shutdown会移除旧listener并推进generation；迟到completion不能触碰旧TUI，新feed和restart后的保留卡片可复用已完成PNG。WebM保持文字占位，iTerm2/null完全服从Pi原始Image/fallback路径。
 - forced Kitty wire回归验证payload为PNG signature，覆盖JPEG/GIF/WebP/PNG、duplicate/vision/history/width、Ghostty/tmux/iTerm2/null、失败/file change/LRU/pending/lifecycle；Pi真实converter将仓库2×2 WebP转为PNG。targeted extension/engine 50 tests / 469 assertions，全量279 / 4041、typecheck、cache v5 golden与diff check通过；真实Kitty/Ghostty终端smoke留T14。
 - Cache impact: **NONE**——只改变extension本地显示payload准备；IPC/SQLite/session/provider grammar与bytes、vision/LLM调用、context epoch及每turn token均不变。
+
+## 2026-08-08 (54) — 建立 Telegram control 配置与持久参数状态
+
+- deployment config新增`telegram_admins`：只接受正整数user id或5–32字符规范化小写`@username`，重复/坏值随其他config错误一次列出；缺省空数组deny all。tracked example只有非私人numeric placeholder并推荐生产使用固定numeric id；当前ignored deployment单独配置唯一`@aac6fef`。
+- `TelegramControlState`在BotRuntime构造前从既有`bot_state`恢复`telegram_override:routing_p`/`cooldown_ms`，文件值保持reset基线。set/reset先校验再写SQLite，成功后才更新共享BotConfig；router与runtime下一次读取立即生效，重启后source仍可区分config/override。
+- routing变更按全部effective bot原子锁Σp≤1；cooldown只接受0..3600000安全整数。unknown bot/parameter、NaN/越界/概率溢出不写DB或内存，坏持久值在应用前fail-fast；未改schema。
+- config/control-state targeted 24 tests / 91 assertions、全量286 / 4078、typecheck、cache v5 golden与diff check通过；parser、权限、compact与daemon收发留T10m2–T10m3。
+- Cache impact: **NONE**——控制配置/override不改provider grammar或已存在context bytes；正常聊天新增0 token/call，显式命令将在确定性side channel消费。
