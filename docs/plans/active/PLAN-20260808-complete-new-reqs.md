@@ -70,8 +70,9 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13d** — 用 Pi 原生 dialogs 实现 `/tg config`，成功后复用受控 readiness 并建立 live feed；validates: ONBOARD-0001 AC2/AC5；commit: native setup wizard
 - [x] **T13e** — 将双语 README/package/project/runbook/example 重写为用户旅程，加入双语用户指南、成本设计概览与机器维护指南；validates: PLAT-0001 AC6 + DOC-0001 AC1–AC6 + ONBOARD-0001 AC7/AC9/AC11；commit: docs/metadata only
 - [x] **T13f** — 配置双 mdBook build/link check 与最小权限 GitHub Pages CI/deploy；validates: ONBOARD-0001 AC8/AC10；commit: docs publishing
-- [ ] **T13g** — 把用户新增的TinyFish、photo、routing、vision、Pi auth与项目哲学notes改写为有证据的REQ/AC；validates: six new requirements documented；commit: docs/research only
-- [ ] **T13h** — 强化单目录单群、极简/省token的用户与Agent权威说明及文档gate；validates: DOC-0002 AC1–AC6；commit: project philosophy docs
+- [x] **T13g** — 把用户新增的TinyFish、photo、routing、vision、Pi auth与项目哲学notes改写为有证据的REQ/AC；validates: six new requirements documented；commit: `453034d`
+- [ ] **T13h1** — 强化单目录单群、极简/省token的用户与Agent权威说明及文档gate；validates: DOC-0002 AC1–AC6；commit: project philosophy docs
+- [ ] **T13h2** — 用T13h1真实commit hash记录DOC-0002完成并在REQ-LIST勾选；validates: DOC-0002 traceability；commit: completion record
 - [ ] **T13i** — 增加脱敏routing审计脚本、0.66/0.34 property fixture与双语口径；validates: ROUTE-0002 AC1–AC6；commit: routing observability
 - [ ] **T13j** — 以Pi settings/auth/catalog替代项目provider secret，shared runtime并移除向导key流程；validates: PLAT-0002 AC1–AC7；commit: Pi configuration reuse
 - [ ] **T13k** — 用Pi Luna low执行同步动态media gate、两路有界并发与匿名基准；validates: VISION-0001 AC1–AC9；commit: synchronous vision boundary

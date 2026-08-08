@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：ONBOARD-0001 T13a–T13f 已完成；六条新增note已调查并正式化为SEARCH-0001/UI-0014/ROUTE-0002/VISION-0001/PLAT-0002/DOC-0002，下一步按T13h–T13m逐项实现，最后T14总验收。
+2026-08-08：六条新增REQ已正式化；T13h1正在强化单目录单群与极简省token原则，随后实现routing审计、Pi auth/vision、photo readiness与TinyFish fetch，最后T14总验收。
 
 ## 已完成
 
@@ -39,6 +39,7 @@
 21. **已实现 `REQ-CMD-0001`（`fa311ea` + `f22ed0c` + `c0e5f26`）**：config/override、strict parser/auth/queue/runtime compact、poller前置分流、suffix目标plain reply→canonical→IPC、全runtime consume与best-effort菜单均完成。fake全链锁一次执行/create/broadcast，command+reply跨epoch不进provider；command/cache 45/374、全量302/4298通过。真实群权限/set-reset/compact留T14。
 22. **已实现 `REQ-UI-0013`（`533c9ec`）**：sticker改用Pi `Image`公开24×12上限，photo保持56×16；forced Kitty锁24×12/32×16实际placement，WebP转换后仍紧凑，40/80/120列、label/vision与逐行宽度均覆盖。不改转换、vision、协议或数据；targeted 51/586、全量287/4196通过，真实视觉smoke留T14。
 23. **新增实施队列 T13h–T13m**：先写单目录单群/极简成本原则和routing审计，再以Pi全局settings/auth共享runtime替代项目provider key；动态群media继续在provider前同步并改用Luna low，photo另做零LLM后台precache，最后给既有search tool增加有界TinyFish fetch。调查实证：概率bucket约67/33正常；photo缺path是下载时机；Luna low真实photo/static sticker各1次约3.87s/$0.000282与2.69s/$0.000124，样本不外推。
+24. **T13h1文档实现**：project拥有“最少机制、完整边界”六原则与无namespace资源清单；中英operations解释history/session/offset/PID/socket隔离和第二群安全做法；AGENTS/development/maintainer加入可执行减法检查，docs test锁双语与六项成本机制。待目标验证和签名提交后用T13h2勾选。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 

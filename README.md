@@ -24,7 +24,7 @@
 - Pi 原生 transcript、图片组件、footer telemetry、分级命令补全和 editor compose；插件不自绘 viewport 或终端协议。
 - append-only provider context、stable prefix cache、bounded suffix 与 compaction，避免无意义调用和重复 token。
 
-当前边界：一份工作目录只能安全运行一个群 deployment；多群必须隔离工作目录、data、DB、session、pid 与 socket。本项目不是 SaaS、多租户平台，也没有配置热重载。
+当前边界：一份工作目录只能安全运行一个群 deployment；多群必须隔离工作目录、data、DB、session、pid 与 socket。本项目不是 SaaS、多租户平台，也没有配置热重载。配置文件不同不会给共享history、offset或进程资源增加namespace；原因与第二个群的安全做法见[日常运维：多群](docs/user-guide/zh/src/operations.md#为什么必须隔离工作目录)。
 
 ## 日常使用
 

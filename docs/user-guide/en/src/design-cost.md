@@ -2,6 +2,8 @@
 
 The project promises no fixed savings percentage. Provider pricing, group activity, persona length, and model cache behavior all vary. Measure your deployment through Pi's footer, `/tg status`, and retained SQLite telemetry.
 
+“Minimal” means fewer mechanisms, not fewer safeguards: minimize state, interfaces, network requests, and provider-visible bytes while preserving transactions, timeouts, redaction, tests, and observability. The six mechanisms below are the current expression of that philosophy, not a roadmap for a general platform.
+
 ## 1. Deterministic routing decides whether to call a model
 
 Local code handles mentions, replies, configured names, and HMAC probability buckets. An unmatched ordinary message creates no provider run. A probability target that is busy or cooling down is not reassigned or sampled again.
@@ -44,3 +46,4 @@ Opening Pi, scrolling history, changing a panel, or viewing usage therefore does
 2. Compare similar activity periods; do not mix providers, personas, or group sizes in one conclusion.
 3. Replay threshold candidates with `scripts/analyze-context-window.ts`; do not tune compaction by intuition.
 4. Before changing prompts, tools, or serialization, follow the cache process in the [development guide](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/engineering/development-guide.md).
+5. Before adding a capability, try to remove one layer, tool, model call, or dynamic field. Do not expand a one-group deployment into a multi-tenant system without an explicit requirement.

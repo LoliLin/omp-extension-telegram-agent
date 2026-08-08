@@ -24,7 +24,7 @@ Read [Installation and first setup](docs/user-guide/en/src/getting-started.md) f
 - Pi-native transcript, image components, footer telemetry, hierarchical command completion, and editor compose; the plugin does not implement its own viewport or terminal protocol.
 - Append-only provider context, a stable cached prefix, bounded suffixes, and compaction to avoid unnecessary calls and repeated tokens.
 
-Current boundary: one working directory safely hosts one group deployment. Multiple groups require isolated working directories, data, databases, sessions, PID files, and sockets. This is not a SaaS or multi-tenant service, and configuration is not hot-reloaded.
+Current boundary: one working directory safely hosts one group deployment. Multiple groups require isolated working directories, data, databases, sessions, PID files, and sockets. This is not a SaaS or multi-tenant service, and configuration is not hot-reloaded. Different config files do not namespace shared history, offsets, or process resources; read [Daily operations: multiple groups](docs/user-guide/en/src/operations.md#why-working-directories-must-be-isolated) for the reason and safe setup.
 
 ## Daily use
 

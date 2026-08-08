@@ -66,15 +66,19 @@ bun run scripts/e2e-compaction-manual.ts --bot friend
 
 These commands may incur cost or post group messages. Read the [daemon runbook](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/runbooks/daemon.md) first and record the selected bot, expected side effects, and rollback.
 
-## Multiple groups
+## Why working directories must be isolated
 
-One working directory currently hosts one group deployment. A second group must isolate:
+One working directory currently hosts one group deployment. This is not merely a UI limitation: the following resources belong to the working directory and have no deployment namespace:
 
-- config and `.env`;
-- `data/agent.db`, PID, control lock, and socket;
-- agent session directories;
-- daemon working directory.
+- the single `group_peer_id` and canonical SQLite history, including each bot's exposure and reply obligations;
+- agent sessions and context epochs;
+- each poller's Telegram update offset and the shared router secret;
+- the daemon PID, control lock, and Unix socket.
 
-Do not run different `bots_config` values concurrently against shared data.
+Running different `bots_config` values concurrently in one checkout therefore does not create two deployments. It can feed one group's history into another group's model context, skip updates through the wrong offset, or make daemons compete for one PID/socket.
+
+Use a separate clone or worktree for a second group. Give it independent `.env`, config, personas, and Telegram bot tokens, plus a separate `data`/database, sessions, PID/lock/socket, and daemon working directory. Do not merely copy the database or point both directories back to shared data.
+
+This boundary follows the project's minimal-design principle: reuse an existing, inspectable filesystem isolation boundary instead of adding namespaces, hot reload, and another control plane for an unrequested multi-tenant product. Read the [cost design overview](design-cost.md) for the philosophy and the [project description](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/project.md) for the authoritative boundary.
 
 Next: [Troubleshooting](troubleshooting.md).

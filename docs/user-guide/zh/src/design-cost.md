@@ -2,6 +2,8 @@
 
 本项目不承诺固定节省百分比。provider价格、群活跃度、persona长度与模型cache行为都会变化；实际效果以Pi footer、`/tg status`和SQLite lifetime telemetry为准。
 
+项目的“极简”是最少机制而不是最少保障：优先少一个状态、接口、网络请求和provider-visible byte，同时保留transaction、timeout、脱敏、测试与可观察性。下面六项就是这一哲学在现有系统里的具体实现，不是未来平台功能清单。
+
 ## 1. 确定性 routing 先决定是否调用模型
 
 mention、reply、配置名称和HMAC概率桶都由本地代码判断。普通消息没有命中时不会创建provider run；目标bot busy或处于probability cooldown时也不会改投另一个bot或补抽。
@@ -44,3 +46,4 @@ Pi native feed、assistant partial、footer、`/tg status`和Telegram control使
 2. 比较同类活跃期，不把不同provider/persona/群规模混为一组。
 3. 用`scripts/analyze-context-window.ts`回放阈值候选；不要凭感觉改compaction。
 4. 任何prompt/tool/serialization改动先按[开发指南的cache流程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/engineering/development-guide.md)验证golden和epoch。
+5. 设计新能力时先尝试删除一层、一个tool、一次模型调用或一个动态字段；未经明确需求，不把单群deployment扩成多租户系统。

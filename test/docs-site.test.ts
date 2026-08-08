@@ -76,3 +76,47 @@ describe("bilingual documentation publishing (REQ-ONBOARD-0001 T13f)", () => {
 		]) expect(workflow).toContain(pin);
 	});
 });
+
+describe("minimal design and one-directory deployment boundary (REQ-DOC-0002)", () => {
+	test("keeps the authoritative philosophy and agent checklist linked", () => {
+		const agents = readFileSync(resolve("AGENTS.md"), "utf8");
+		const project = readFileSync(resolve("docs/project.md"), "utf8");
+		const development = readFileSync(resolve("docs/engineering/development-guide.md"), "utf8");
+		const maintainer = readFileSync(resolve("docs/maintainers/guide.md"), "utf8");
+
+		expect(agents).toContain("最少机制");
+		expect(agents).toContain("docs/project.md");
+		expect(agents).toContain("docs/engineering/development-guide.md");
+		expect(project).toContain("## 项目哲学：最少机制，完整边界");
+		for (const phrase of ["确定性代码", "cached prefix", "有界", "Pi runtime", "同目录多群"]) {
+			expect(project).toContain(phrase);
+		}
+		expect(development).toContain("### 方案最小化检查");
+		for (const phrase of ["少一层抽象", "复用 Pi 原生", "一次模型调用", "一个动态字段", "不得扩成同目录多群"]) {
+			expect(development).toContain(phrase);
+		}
+		expect(maintainer).toContain("方案最小化检查");
+	});
+
+	test("explains the same four isolation classes in both user guides", () => {
+		const zh = readFileSync(resolve("docs/user-guide/zh/src/operations.md"), "utf8");
+		const en = readFileSync(resolve("docs/user-guide/en/src/operations.md"), "utf8");
+		for (const phrase of ["group_peer_id", "canonical history", "agent session", "update offset", "control lock", "Unix socket", "模型context"]) {
+			expect(zh).toContain(phrase);
+		}
+		for (const phrase of ["group_peer_id", "canonical SQLite history", "agent sessions", "update offset", "control lock", "Unix socket", "model context"]) {
+			expect(en).toContain(phrase);
+		}
+		expect(readFileSync(resolve("README.md"), "utf8")).toContain("operations.md#为什么必须隔离工作目录");
+		expect(readFileSync(resolve("README.en.md"), "utf8")).toContain("operations.md#why-working-directories-must-be-isolated");
+	});
+
+	test("retains all six bounded cost mechanisms in both languages", () => {
+		for (const language of ["zh", "en"]) {
+			const cost = readFileSync(resolve(`docs/user-guide/${language}/src/design-cost.md`), "utf8");
+			expect(cost.match(/^## [1-6]\. /gm)).toHaveLength(6);
+			expect(cost).toMatch(/不承诺固定节省百分比|promises no fixed savings percentage/);
+			expect(cost).toMatch(/一个动态字段|dynamic field/);
+		}
+	});
+});

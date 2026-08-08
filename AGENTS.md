@@ -61,6 +61,7 @@
 ## 6. 实现规则
 
 - 满足验收标准的最小改动；复用现有抽象，不过早泛化。
+- **最少机制**：新增抽象、工具、模型调用或动态字段前，先尝试删除一层、复用职责拥有层或 Pi 原生能力、改用确定性代码。未经明确 REQ 不得把单群需求扩成同目录多群/多租户，也不得另建平行框架；权威原则与检查表见 `docs/project.md`、`docs/engineering/development-guide.md`。
 - **任何功能必须评估 cache hit 率与 token 成本影响**：确定性内容进稳定 prefix 而非动态 suffix；能用确定性代码解决的不花 LLM token；每 turn 新增 token 有界（细则见 `docs/engineering/development-guide.md` 第三节）。
 - Provider-facing 工具的参数、调用方法、错误/终止语义只在 `src/agent/tools.ts` 的 tool description / parameter schema 维护；persona 与共享 system protocol 只描述环境和行为，不复制工具参数表或调用示例。改 tool description 也属于 cache-visible protocol，必须 bump schema 并更新 golden。
 - 行为变化与机械重构尽量分开提交。

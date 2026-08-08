@@ -66,15 +66,19 @@ bun run scripts/e2e-compaction-manual.ts --bot friend
 
 这些操作可能产生费用或群消息。运行前先读[daemon runbook](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/runbooks/daemon.md)，记录bot、预期副作用与回滚步骤。
 
-## 多群
+## 为什么必须隔离工作目录
 
-当前一个工作目录只支持一个群 deployment。第二个群必须隔离：
+当前一个工作目录只支持一个群 deployment。这不是临时的UI限制：以下资源都由工作目录拥有，并没有deployment namespace：
 
-- config 与 `.env`；
-- `data/agent.db`、pid、control lock与socket；
-- agent session目录；
-- daemon工作目录。
+- 单一`group_peer_id`和SQLite canonical history，包括每只bot的exposure与reply obligation；
+- agent session与context epoch；
+- 每只poller的Telegram update offset，以及共享router secret；
+- daemon PID、control lock与Unix socket。
 
-不要在共享data目录里并行设置不同 `bots_config`。
+所以，在同一checkout中并行设置不同`bots_config`不会形成两个deployment。它可能把一个群的history送入另一个群的模型context、用错误offset跳过update，或让两个daemon争抢同一PID/socket。
+
+第二个群应使用独立clone或worktree，并分别保存`.env`、config、persona和Telegram bot tokens；同时隔离整个`data`/DB、session、PID/lock/socket与daemon工作目录。不要只复制DB，也不要让两个目录指回同一data路径。
+
+这种边界符合项目的极简原则：用文件系统隔离这个已有、可检查的安全边界，而不是为尚未要求的多租户场景增加namespace、热加载和第二套控制面。完整原则见[成本设计概览](design-cost.md)；技术权威见[项目说明](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/project.md)。
 
 下一步：[故障排查](troubleshooting.md)。

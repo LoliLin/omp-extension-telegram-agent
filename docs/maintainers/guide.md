@@ -6,7 +6,7 @@
 
 1. 读 [handoff](../handoff.md) 与相关 [REQ-LIST](../requirements/REQ-LIST.md) 项。
 2. 按 [architecture](../architecture.md) 确认归属层；涉及持久化时读 [data model](../data-model.md)，涉及provider-visible bytes时读 [cache](../cache.md)。
-3. 先搜现有模式。多文件、跨边界或行为变化先在 `docs/plans/active/` 建 commit-sized task。
+3. 先搜现有模式，并过一遍 [development guide 的方案最小化检查](../engineering/development-guide.md#方案最小化检查)：能否少一层、一个tool、一次模型调用或一个动态字段。多文件、跨边界或行为变化再在 `docs/plans/active/` 建 commit-sized task。
 4. 按 [development guide](../engineering/development-guide.md) 一次完成一个内聚结果：实现、测试、必需文档、自审、提交。
 
 需求、架构、计划、runbook和过程日志的生命周期见 [documentation guide](../engineering/documentation-guide.md)。一个事实只有一个权威来源，其余位置使用链接。

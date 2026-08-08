@@ -22,6 +22,19 @@
 
 **核心原则：Never rewrite an existing cached prefix when appending new information can solve the same problem.**
 
+## 项目哲学：最少机制，完整边界
+
+这里的“极简”不是少做错误处理、测试或数据保护，而是用尽可能少的状态、接口、网络请求与 provider-visible bytes 完成可验证结果：
+
+1. 一个职责只有一个拥有层；先复用 Telegram data plane、SQLite、Pi runtime/组件和现有 IPC，不建第二套平行实现。
+2. routing、去重、权限、投影和统计能由确定性代码完成，就不发起模型调用。
+3. provider 只接收当前回答需要的有界内容；完整历史留在 SQLite，UI 与运维信息走 side channel。
+4. 稳定内容留在 append-only cached prefix；变化内容追加 suffix，不能因本地展示更新改写旧 provider history。
+5. 昂贵工作按真实需求惰性执行并按 identity 复用；队列、并发、历史页、工具结果和错误都必须有界。
+6. 新功能先问能否少一个抽象、tool、模型调用或动态字段。没有明确需求，不把单群 deployment 扩成多群、多租户、热加载或通用平台。
+
+这六条的用户侧成本机制见双语 cost guide；cache 与 provider byte 的技术权威仍是 `docs/cache.md`，日常方案检查见 `docs/engineering/development-guide.md`。
+
 ## 用户体验
 
 - 新 clone 运行 `bun run pi` 即可安装 lockfile 对应的项目 Pi；配置不存在时 `/tg config` 仍可用，并用 Pi 原生 dialogs 建立 typed config、private `.env` 与 persona。
@@ -59,7 +72,9 @@
 
 - 一份 deployment 对应一个 Telegram supergroup 与 1..N bots。
 - 每个 bot 的 token、persona、provider/model/auth、routing 与 tools 都来自配置；生产代码不依赖固定 id 或名字。
-- 多群需要隔离 checkout/worktree 与 data/session/pid/socket/DB；当前不支持在同一工作目录只切 `bots_config` 并行运行。
+- 一个工作目录只有一个`group_peer_id`，而SQLite history/exposure、agent sessions、poller offsets/router secret、PID/control lock/Unix socket都没有第二层deployment namespace。
+- 因此在同一目录并行切换`bots_config`可能混入跨群history/context、推进错误offset或争抢同一进程资源。配置文件不同不构成隔离。
+- 第二个群必须使用独立checkout/worktree，并隔离`.env`、config/persona、Telegram bot tokens、data/DB、sessions、PID/lock/socket。当前不支持同目录多群。
 
 ## Scope
 

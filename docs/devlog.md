@@ -597,3 +597,11 @@
 - 本地Pi 0.84.1源码和非敏感metadata确认`ModelRuntime.create()`原生拥有settings/catalog/auth，当前项目`setRuntimeApiKey()`属于重复配置；现有Pi已配置DeepSeek与Codex，credential值从未读取或输出。
 - 用Pi OAuth + Luna low对现有本地photo/static sticker各做一次匿名真实基准：成功延迟约3.87s/2.69s、reasoning token均0、成本约$0.000282/$0.000124；样本只用于设定秒级同步与两路并发边界，不宣称分布。
 - Cache impact: **NONE（本提交）**——仅REQ/PLAN/handoff/devlog；未来SEARCH-0001工具schema实施会INTENTIONAL bump v6，其余五项不改变provider grammar或新增LLM调用。
+
+## 2026-08-08 (68) — 固化单目录单群与最少机制原则
+
+- `docs/project.md`成为项目哲学与deployment边界权威：用六条现有机制定义“极简=更少状态/接口/调用/provider bytes但不减保障”，并明确history/exposure、sessions、offset/router secret、PID/lock/socket均无第二层namespace。
+- 中英README一跳进入operations；两本guide对等说明同目录切不同config会造成cross-group context、offset与进程冲突，第二群必须隔离worktree、secret、Telegram token、data/DB/session/PID/socket。
+- AGENTS只增加一条高信号最少机制规则；development/maintainer把“少一层、一个tool、一次模型调用、一个动态字段”变成动手前检查，同时明确不能借极简削弱transaction、timeout、安全、可观察性或测试。
+- docs test机械检查权威链接、双语四类隔离资源、README入口与六项成本机制；双mdBook/link check和typecheck按目标验证执行。
+- Cache impact: **NONE**——只改开发/用户文档与文档测试，runtime、provider/session/IPC/DB bytes、context epoch、模型调用与每turn token不变。
