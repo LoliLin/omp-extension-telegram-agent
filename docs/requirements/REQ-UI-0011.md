@@ -1,6 +1,6 @@
 # REQ-UI-0011: Pi 原生聊天卡片的信息层级与自适应排版
 
-- **Status:** Implemented（2026-08-08；确定性与真实 Pi TTY 验证完成，REQ-LIST completion record 待实现 commit hash）
+- **Status:** Done（2026-08-08；implementation `614d6d3`）
 - **Priority:** P2
 - **Source:** 用户新增 REQ-LIST：「Pi 聊天界面 UI 优化；确保复用 Pi、做成 Pi 插件、不要过度设计；信息右对齐并适量补充信息；不增加代码量地改善聊天卡片展示体验」
 - **依赖:** REQ-UI-0004、REQ-UI-0001、REQ-UI-0006、REQ-UI-0010
@@ -85,7 +85,7 @@
 ## 追溯
 
 - Plans: `PLAN-20260808-complete-new-reqs#T10r/T10s`
-- Commits: 从 `Requirement: REQ-UI-0011` git trailer 查
+- Commits: implementation `614d6d3`；其余从 `Requirement: REQ-UI-0011` git trailer 查
 
 ## 实现证据
 

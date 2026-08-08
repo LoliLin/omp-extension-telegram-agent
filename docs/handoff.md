@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：Pi native card polish UI-0011 已实现并通过多宽度/明暗 TTY 验证；下一步记录commit并勾选REQ-LIST，再做deployment-wide一键restart。
+2026-08-08：Pi native card polish UI-0011 已实现、签名提交并在REQ-LIST勾选；下一步实现deployment-wide一键受控restart。
 
 ## 已完成
 
