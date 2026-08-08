@@ -24,7 +24,7 @@ REQ-LIST 当前新增的 7 项全部实现、验证并以 commit 标注勾选；
 - [x] **T4** — 为 probability routing 增加 runtime availability + 2s deadline cooldown（explicit trigger 保留），用 fake clock/burst replay验证；validates: ROUTE-0001 AC1–AC7；commit: routing scheduler
 - [x] **T5** — 抽取 daemon manual-send service并新增 additive request-id IPC send_message/ack/error；validates: UI-0005 R3–R5；commit: daemon write contract
 - [x] **T6** — Pi `input` event + explicit compose identity 接入原生 editor，处理附件/失败/unknown outcome/cleanup；validates: UI-0005 AC1–AC6；commit: editor behavior
-- [ ] **T7** — vision 成功持久化后发布 additive media identity/update IPC，保证无新增 vision calls；validates: UI-0006 R1/R2/R4；commit: vision transport
+- [x] **T7** — vision 成功持久化后发布 additive media identity/update IPC，保证无新增 vision calls；validates: UI-0006 R1/R2/R4；commit: vision transport
 - [ ] **T8** — timeline/feed 合并 vision update并在 native media card 下实时显示理解；validates: UI-0006 AC1–AC6；commit: vision presentation
 - [ ] **T9** — 删除自定义 stats panel，改用 Pi default footer `setStatus`，保留完整 `/tg status`；validates: UI-0007 AC1–AC6；commit: native footer
 - [ ] **T10** — 建共享 `/tg` command tree + `getArgumentCompletions`，覆盖动态 bot 与多级 prefix；validates: UI-0008 AC1–AC6；commit: command UX

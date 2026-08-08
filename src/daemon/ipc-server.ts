@@ -11,6 +11,7 @@ import type {
 	TimelineCursor,
 	StatsSnapshot,
 	UsageRun,
+	VisionUpdate,
 	SendMessageRequest,
 	SendMessageResult,
 } from "../ipc.ts";
@@ -194,6 +195,13 @@ export class IpcServer {
 		}
 	}
 
+	/** Push one shared media description to every live transcript (REQ-UI-0006). */
+	broadcastVision(update: VisionUpdate): void {
+		if (this.listeners.size === 0 || !update.fileUniqueId || !update.text.trim()) return;
+		const frame = encodeFrame({ type: "vision_update", ...update } satisfies ServerMessage);
+		for (const socket of this.listeners) this.writeFrame(socket, frame);
+	}
+
 	private handleRequest(socket: SocketLike, req: ClientRequest): void {
 		if (req.type === "hello") {
 			const filter =
@@ -306,11 +314,13 @@ export class IpcServer {
 		let stickerEmoji: string | null = null;
 		let mediaPath: string | null = null;
 		let mediaDesc: string | null = null;
+		let fileUniqueId: string | null = null;
 		if (m.media) {
 			const media = JSON.parse(m.media) as { kind: string; sticker_emoji?: string; file_unique_id?: string };
 			mediaKind = media.kind;
 			stickerEmoji = media.sticker_emoji ?? null;
 			if (media.file_unique_id) {
+				fileUniqueId = media.file_unique_id;
 				const row = this.db.query("SELECT local_path, vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as
 					| { local_path: string | null; vision: string | null }
 					| null;
@@ -318,7 +328,7 @@ export class IpcServer {
 					mediaPath = row.local_path ?? null;
 					if (row.vision) {
 						const v = JSON.parse(row.vision) as { text: string | null };
-						mediaDesc = v.text ?? null;
+						mediaDesc = v.text?.trim() || null;
 					}
 				}
 			}
@@ -337,6 +347,7 @@ export class IpcServer {
 			stickerEmoji,
 			mediaPath,
 			mediaDesc,
+			fileUniqueId,
 			replyTo: m.reply_to_message_id,
 			edited: m.edit_date != null,
 		};

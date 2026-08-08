@@ -7,7 +7,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { BotApi } from "../telegram/api.ts";
-import { ensureVision } from "./vision.ts";
+import { ensureVision, type VisionUpdateSink } from "./vision.ts";
 
 export const STICKER_CATALOG_MAX = 120; // R5: bounded catalog keeps the prefix cheap
 
@@ -139,6 +139,7 @@ export function preRecognizeCatalogVision(
 	botId: string,
 	sets: string[],
 	envModel: string,
+	onVision?: VisionUpdateSink,
 ): void {
 	const pending = db
 		.query(
@@ -162,7 +163,7 @@ export function preRecognizeCatalogVision(
 				while (next < pending.length) {
 					const fid = pending[next++]!.file_unique_id;
 					try {
-						await ensureVision(db, api, botId, envModel, fid);
+						await ensureVision(db, api, botId, envModel, fid, { onPersist: onVision });
 					} catch (err) {
 						console.error(`[sticker-catalog] ${botId}: vision failed for ${fid}: ${err}`);
 					}

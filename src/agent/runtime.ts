@@ -28,7 +28,7 @@ import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMAR
 import { TOOL_DEFS, toolsHash, type SendParams } from "./tools.ts";
 import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
-import { ensureVision, fileIdForBot } from "../media/vision.ts";
+import { ensureVision, fileIdForBot, type VisionUpdateSink } from "../media/vision.ts";
 import { ensureStickerCatalog, stickerCatalogBlock, preRecognizeCatalogVision } from "../media/sticker-catalog.ts";
 import type { TriggerResult, TriggerSource } from "./router.ts";
 
@@ -77,6 +77,8 @@ export class BotRuntime {
 		outputTokens: number;
 		cost: number;
 	}) => void) | null = null;
+	/** Optional sink for newly persisted media descriptions (REQ-UI-0006). */
+	visionSink: VisionUpdateSink | null = null;
 
 	constructor(
 		db: Database,
@@ -113,7 +115,14 @@ export class BotRuntime {
 			// fetch + persist + short_ids block startup (seconds); vision pre-recognition runs in
 			// the background so the poller is never held offline for minutes (REQ-STICKER-0001 R1)
 			await ensureStickerCatalog(this.db, this.api, this.bot.id, this.bot.stickerSets);
-			preRecognizeCatalogVision(this.db, this.api, this.bot.id, this.bot.stickerSets, this.config.auxiliaryVisualModel);
+			preRecognizeCatalogVision(
+				this.db,
+				this.api,
+				this.bot.id,
+				this.bot.stickerSets,
+				this.config.auxiliaryVisualModel,
+				(fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
+			);
 			stickerCatalog = stickerCatalogBlock(this.db, this.bot.id, this.bot.stickerSets);
 		}
 		const systemPrompt = buildSystemPrompt(persona, stickerCatalog);
@@ -519,7 +528,9 @@ export class BotRuntime {
 			if (existing?.vision) continue; // persistent cache hit, shared by both bots
 			try {
 				this.recordEvent("vision", { file_unique_id: media.file_unique_id, kind: media.kind });
-				await ensureVision(this.db, this.api, this.bot.id, this.config.auxiliaryVisualModel, media.file_unique_id);
+				await ensureVision(this.db, this.api, this.bot.id, this.config.auxiliaryVisualModel, media.file_unique_id, {
+					onPersist: (fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
+				});
 			} catch (err) {
 				this.recordEvent("error", { stage: "vision", error: String(err) });
 			}

@@ -112,6 +112,7 @@ for (const [botId, rt] of runtimes) {
 		if (row) ipc.broadcast(ipc.msgToItem(row));
 	};
 	rt.usageSink = (run) => ipc.broadcastUsage(run);
+	rt.visionSink = (fileUniqueId, text) => ipc.broadcastVision({ fileUniqueId, text });
 }
 ipc.start();
 

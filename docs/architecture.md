@@ -94,6 +94,8 @@
 - lazy：图片落库即显示，只有 bot 被唤醒且图片需进上下文时才识别
 - 识别结果按 media identity 持久化，所有配置 bot 共享（vision cache）
 - photo 与 sticker 用不同 prompt 语义
+- 新的非空描述成功写入 DB 后，`ensureVision` 只发布一次 `(fileUniqueId,text)`；cache hit、unsupported、空结果与失败不发布。background catalog 与 lazy batch 共用同一 in-flight promise，因此 UI transport 不增加 vision provider call。
+- `MsgItem.fileUniqueId` 与 additive `vision_update` 经 daemon IPC 广播给所有 live transcript；旧 client 可忽略新字段/帧。snapshot/history 仍从同一 `media.vision` 读取，provider serialization 不变。
 
 ## Sticker 可发送性（REQ-STICKER-0002）
 

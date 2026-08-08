@@ -20,6 +20,17 @@ const STICKER_PROMPT = `你在帮一个群聊 bot 理解一张 sticker（聊天�
 
 const VISION_TIMEOUT_MS = 90_000;
 
+export type VisionUpdateSink = (fileUniqueId: string, text: string) => void;
+
+export interface EnsureVisionOptions {
+	/** Called exactly after a new non-empty description is persisted; cache hits do not emit. */
+	onPersist?: VisionUpdateSink;
+	/** Deterministic test seam; production uses describeImage. */
+	describe?: typeof describeImage;
+	/** Deterministic test seam; production uses data/media under cwd. */
+	cacheDir?: string;
+}
+
 export async function describeImage(envModel: string, imagePath: string, kind: "photo" | "sticker"): Promise<string> {
 	const { model, effort } = parseModelEffort(envModel);
 	const dir = mkdtempSync(join(tmpdir(), "vision-"));
@@ -75,17 +86,31 @@ export function fileIdForBot(db: Database, botId: string, fileUniqueId: string):
  */
 const inFlight = new Map<string, Promise<string | null>>();
 
-export function ensureVision(db: Database, api: BotApi, botId: string, envModel: string, fileUniqueId: string): Promise<string | null> {
+export function ensureVision(
+	db: Database,
+	api: BotApi,
+	botId: string,
+	envModel: string,
+	fileUniqueId: string,
+	options: EnsureVisionOptions = {},
+): Promise<string | null> {
 	const existing = inFlight.get(fileUniqueId);
 	if (existing) return existing;
-	const promise = ensureVisionInner(db, api, botId, envModel, fileUniqueId).finally(() => {
+	const promise = ensureVisionInner(db, api, botId, envModel, fileUniqueId, options).finally(() => {
 		inFlight.delete(fileUniqueId);
 	});
 	inFlight.set(fileUniqueId, promise);
 	return promise;
 }
 
-async function ensureVisionInner(db: Database, api: BotApi, botId: string, envModel: string, fileUniqueId: string): Promise<string | null> {
+async function ensureVisionInner(
+	db: Database,
+	api: BotApi,
+	botId: string,
+	envModel: string,
+	fileUniqueId: string,
+	options: EnsureVisionOptions,
+): Promise<string | null> {
 	const media = db.query("SELECT kind, vision FROM media WHERE file_unique_id = ?").get(fileUniqueId) as
 		| { kind: string; vision: string | null }
 		| null;
@@ -97,7 +122,7 @@ async function ensureVisionInner(db: Database, api: BotApi, botId: string, envMo
 	}
 	const fileId = fileIdForBot(db, botId, fileUniqueId);
 	if (!fileId) return null;
-	const cacheDir = join(process.cwd(), "data", "media");
+	const cacheDir = options.cacheDir ?? join(process.cwd(), "data", "media");
 	mkdirSync(cacheDir, { recursive: true });
 	const file = await api.getFile(fileId);
 	if (!file.file_path) return null;
@@ -113,11 +138,20 @@ async function ensureVisionInner(db: Database, api: BotApi, botId: string, envMo
 	const bytes = await api.downloadFile(file.file_path);
 	const localPath = join(cacheDir, `${fileUniqueId}.${ext}`);
 	writeFileSync(localPath, bytes);
-	const text = await describeImage(envModel, localPath, media.kind as "photo" | "sticker");
+	const text = (await (options.describe ?? describeImage)(envModel, localPath, media.kind as "photo" | "sticker")).trim();
 	db.query("UPDATE media SET vision = ?, local_path = ? WHERE file_unique_id = ?").run(
 		JSON.stringify({ model: envModel, kind: media.kind, text, at: Date.now() }),
 		localPath,
 		fileUniqueId,
 	);
+	if (text.trim() && options.onPersist) {
+		try {
+			options.onPersist(fileUniqueId, text);
+		} catch (error) {
+			// Persistence is authoritative; an observer failure must not turn a completed
+			// vision request into a provider/agent failure or trigger another model call.
+			console.error(`[vision] update sink failed media=${fileUniqueId}: ${String(error)}`);
+		}
+	}
 	return text;
 }

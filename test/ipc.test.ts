@@ -343,6 +343,41 @@ describe("per-bot filter + stats (REQ-UI-0002/0003)", () => {
 	});
 });
 
+describe("vision update transport (REQ-UI-0006)", () => {
+	test("message snapshots expose stable media identity and normalized cached text", () => {
+		insertMsg(-1001, 77, 1754600000, "photo");
+		db.query("UPDATE messages SET media = ? WHERE chat_id = -1001 AND message_id = 77").run(
+			JSON.stringify({ kind: "photo", file_unique_id: "photo-77" }),
+		);
+		db.query("INSERT INTO media (file_unique_id, kind, vision) VALUES ('photo-77', 'photo', ?)").run(
+			JSON.stringify({ model: "m", kind: "photo", text: "  画面描述  ", at: 1 }),
+		);
+		const row = db.query("SELECT * FROM messages WHERE chat_id = -1001 AND message_id = 77").get();
+
+		const item = makeServer().msgToItem(row as never);
+
+		expect(item.fileUniqueId).toBe("photo-77");
+		expect(item.mediaDesc).toBe("画面描述");
+	});
+
+	test("new non-empty descriptions broadcast additively to every listener", () => {
+		const server = makeServer();
+		const first: unknown[] = [];
+		const second: unknown[] = [];
+		const firstSocket = fakeSocket(() => 1 << 20, (frame) => first.push(frame));
+		const secondSocket = fakeSocket(() => 1 << 20, (frame) => second.push(frame));
+		attach(server, firstSocket);
+		attach(server, secondSocket);
+
+		server.broadcastVision({ fileUniqueId: "shared-photo", text: "两个人在挥手" });
+		server.broadcastVision({ fileUniqueId: "shared-photo", text: "   " });
+
+		const expected = [{ type: "vision_update", fileUniqueId: "shared-photo", text: "两个人在挥手" }];
+		expect(first).toEqual(expected);
+		expect(second).toEqual(expected);
+	});
+});
+
 describe("sanitization (R5)", () => {
 	test("AC5: ANSI clear-screen and colors are removed, text survives", () => {
 		const dirty = "hello \x1b[2J\x1b[31mred\x1b[0m world";

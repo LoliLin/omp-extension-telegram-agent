@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：STICKER-0002、ROUTE-0001、UI-0005 daemon 与 Pi editor compose 均已完成；下一项 T7 是 vision update IPC。
+2026-08-08：T7 vision identity/persist notification/additive IPC 已完成；下一项 T8 是 native media card 的有界乱序合并与原位刷新。
 
 ## 已完成
 
@@ -19,10 +19,12 @@
 1. **已实现 `REQ-STICKER-0002`**：fixed/dynamic catalog 只暴露当前 bot 有 file_id mapping 的 short id；A `s241–s244` / B `s144` 回归已锁，cache schema 2→3。真实群各 bot 发送 smoke 留到总验收。
 2. **已实现 `REQ-ROUTE-0001`**：probability 命中 busy/cooldown target 时 fast-skip 且不改投；默认 2 秒 monotonic deadline；explicit trigger 保留 pending/bypass。44 个 routing/flush/config/cache 测试通过。
 3. **已实现 `REQ-UI-0005`**：daemon request-id send→DB→broadcast + Pi interactive `handled` compose 全链完成；footer 唯一身份、附件/失败恢复、ACK unknown/no-retry 与 lifecycle cleanup 共 39 个 plugin/IPC targeted tests 通过。真实发送 smoke 留 T14。
-4. **P1 `REQ-UI-0006`**：vision 持久化完成后广播 additive update，更新同一 TUI-only media card；复用 lazy vision，不新增模型调用。
+4. **进行中 `REQ-UI-0006`**：T7 已让新 vision 持久化发布 identity-only additive IPC，concurrent/cache 仍只有一次 describe call；待 T8 处理 update-before-message、多引用、older page、幂等更新与 native card 刷新。
 5. **P2 `REQ-UI-0007`**：删除自定义 stats widget，改用 Pi default footer 的 `setStatus` 原生状态行；完整明细留 `/tg status`。
 6. **P2 `REQ-UI-0008`**：用 `registerCommand.getArgumentCompletions` + 共享命令树实现 `/tg` 任意层原生补全。
 7. **P1 `REQ-PLAT-0001`**：N-bot daemon 已通用；剩余 DeepSeek provider hardcode、e2e `bots[0]`、双 bot 产品文案与第三 bot 全链验证。
+
+用户在工作树重新打开 `REQ-UI-0003` 并给出 Pi default footer 预期；保留这两处未提交改动，T9 先重写 UI-0003/UI-0007 验收后共同实现，不夹入 T7/T8。
 
 建议顺序：STICKER-0002 → ROUTE-0001 → UI-0005 / UI-0006 / UI-0007 / UI-0008 → PLAT-0001。
 

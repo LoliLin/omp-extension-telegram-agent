@@ -273,3 +273,10 @@
 - timeline client 以 request id 匹配 ACK，pending 上限 32、15 秒超时；ACK 前断线/IPC 错误/超时统一为 unknown outcome，恢复原文、关闭 compose、提示先查群且不自动重试。发送中第二次提交不会进入 socket。
 - attach 切换、detach、daemon disconnected 与 session shutdown 都清除 compose identity。真实 Unix socket ACK/timeout 和 fake Pi lifecycle 共 39 targeted tests 通过，`bun run check` 通过；真实 Pi/Telegram smoke 留 T14。
 - Cache impact: **NONE**——operator input 被 extension handled；不调用 LLM，不改 provider prefix/suffix、tool schema 或序列化 grammar，新增 token 为 0。
+
+## 2026-08-08 (27) — vision 持久化完成通知与 additive IPC
+
+- `MsgItem` 新增可选 `fileUniqueId`，snapshot/history 与 live message 暴露同一非敏感媒体身份；daemon 新增 additive `vision_update {fileUniqueId,text}`，旧 client 可直接忽略。
+- `ensureVision` 只在新非空描述成功写库后调用 observer；cache hit、空文本、unsupported 与失败不发布。lazy batch 与 background catalog 都接同一动态 sink，已有 per-media in-flight promise 继续保证 concurrent 只做一次 provider call。
+- observer 异常不反转已完成持久化、不触发重试；IPC 只广播 identity/text，不含本地路径、model metadata 或 token。测试锁定 concurrent+cached describeCalls=1、空/unsupported 无帧、snapshot identity/trim 与全 listener additive push；50 targeted tests + typecheck 通过。
+- Cache impact: **NONE**——没有新增 vision 调用，也不改 vision prompt、agent serialization、system/tool/message grammar 或 context epoch；provider token/cost 增量 0。

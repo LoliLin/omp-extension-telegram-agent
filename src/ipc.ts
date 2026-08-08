@@ -4,6 +4,7 @@
 //   C->S {type:"history", before, limit}      S->C {type:"history", items, hasMore}
 //   C->S {type:"send_message", requestId,...} S->C {type:"send_result", requestId, ok,...}
 //   (push)                                    S->C {type:"append", item: TimelineItem}
+//   (push)                                    S->C {type:"vision_update", fileUniqueId, text}
 //
 // Pagination uses a composite cursor (ts, rank, id): rank 0 = agent event (id = agent_events.id),
 // rank 1 = chat message (id = message_id). Merged timeline order is by (ts, rank, id), so
@@ -26,6 +27,8 @@ export interface MsgItem {
 	mediaPath?: string | null;
 	/** vision description text for the media, if recognized (REQ-UI-0001 R3). */
 	mediaDesc?: string | null;
+	/** stable Telegram media identity used to merge live vision updates (REQ-UI-0006 R1). */
+	fileUniqueId?: string | null;
 	replyTo: number | null;
 	edited: boolean;
 }
@@ -82,6 +85,12 @@ export interface StatsSnapshot {
 	bots: Record<string, BotStats>;
 }
 
+/** A newly persisted, non-empty vision description (REQ-UI-0006). */
+export interface VisionUpdate {
+	fileUniqueId: string;
+	text: string;
+}
+
 export type SendMessageErrorCode =
 	| "invalid_request"
 	| "unknown_bot"
@@ -128,6 +137,7 @@ export type ServerMessage =
 	| { type: "history"; items: TimelineItem[]; hasMore: boolean }
 	| { type: "append"; item: TimelineItem }
 	| { type: "usage"; run: UsageRun }
+	| ({ type: "vision_update" } & VisionUpdate)
 	| ({ type: "send_result" } & SendMessageResult);
 
 export function encodeFrame(msg: unknown): string {
