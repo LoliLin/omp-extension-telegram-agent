@@ -155,7 +155,8 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 			expect(config.bots.map((bot) => [bot.id, bot.name, bot.apiKeyEnv])).toEqual([
 				["friend", "Mochi", "llm_api_key"],
 			]);
-			expect(config.telegramAdmins).toEqual([123456789]);
+			expect(config.telegramAdmins).toEqual([]);
+			expect(config.bots[0]!.tools.search).toBe(false);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -410,10 +411,18 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 describe(".env.example (REQ-OPS-0001 R1)", () => {
 	test("example file is colon format and parses to expected keys", () => {
 		const env = parseEnvFile(join(process.cwd(), ".env.example"));
-		expect(env.telegram_bot_token).toBe("123456:AAA...");
-		expect(env.llm_api_key).toBe("sk-...");
-		expect(env.router_secret).toBe("...");
-		expect(Object.keys(env).length).toBeGreaterThanOrEqual(6);
+		expect(env.telegram_bot_token).toBe("123456:REPLACE_WITH_BOTFATHER_TOKEN");
+		expect(env.llm_api_key).toBe("REPLACE_WITH_PROVIDER_KEY");
+		expect(env.tinyfish_api_key).toBe("REPLACE_WITH_TINYFISH_KEY");
+		expect(env.router_secret).toBe("REPLACE_WITH_RANDOM_LOCAL_SECRET");
+		expect(env.auxiliary_visual_model).toBeUndefined();
+		expect(Object.keys(env).sort()).toEqual([
+			"gpg_key_passphrase",
+			"llm_api_key",
+			"router_secret",
+			"telegram_bot_token",
+			"tinyfish_api_key",
+		]);
 	});
 });
 
@@ -435,7 +444,7 @@ describe("repo hygiene (REQ-OPS-0001 R3)", () => {
 		const example = JSON.parse(readFileSync(join(process.cwd(), "bots.config.example.json"), "utf8")) as {
 			telegram_admins?: unknown[];
 		};
-		expect(example.telegram_admins).toEqual([123456789]);
+		expect(example.telegram_admins).toEqual([]);
 		const tracked = Bun.spawnSync([
 			"git", "ls-files", "--cached", "--others", "--exclude-standard", "personas",
 		], { cwd: process.cwd() });

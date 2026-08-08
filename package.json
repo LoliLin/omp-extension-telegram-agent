@@ -3,7 +3,7 @@
 	"private": true,
 	"version": "0.1.0",
 	"type": "module",
-	"description": "Two persona Telegram group-chat bots living in a group, powered by Pi coding agent",
+	"description": "Configurable Telegram group companions with a Pi-native chat interface",
 	"keywords": ["pi-package"],
 	"pi": {
 		"extensions": ["./.pi/extensions/tg-extension.ts"]

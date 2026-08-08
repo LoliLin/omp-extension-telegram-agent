@@ -1,6 +1,6 @@
 # REQ-DOC-0001: README 从用户视角解释并引导配置平台
 
-- **Status:** Approved（2026-08-08 已调查，未实现）
+- **Status:** Implemented（2026-08-08 T13e；待 T14 总验收记录）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「README 不应只是机械文档列表；应从用户视角解释平台、配置方法，并加强用户文档与通用可配置性」
 - **依赖:** REQ-PLAT-0001
@@ -68,3 +68,10 @@ README 成为平台用户的首要入口：读者从“它是什么”一路完�
 
 - Plans: `PLAN-20260808-complete-new-reqs#T13`
 - Commits: 从 `Requirement:` git trailer 查
+
+## 实施结果（2026-08-08）
+
+- 中英README均把三步首配、真实能力、单群边界、compose unknown/no-retry与排障放在内部文档索引之前；用户无需知道任何私人deployment身份。
+- `/tg config`是首选路径；manual typed config、`.env`冒号格式、单bot/N-bot/provider/routing/tools/admin配置由双语guide和tracked examples覆盖。
+- package/project/runbook/example metadata已泛型化；public example默认deny admin mutation并关闭可选search，避免复制后误授权或被额外credential阻塞。
+- 内部architecture/requirements/plans集中到末尾maintainer入口；runtime/provider bytes未变化，cache impact NONE。

@@ -1,0 +1,94 @@
+# Configuration and additional bots
+
+`/tg config` is the recommended entry point. To add bots or tune advanced fields, edit the ignored `telegram.config.ts`, then run `bun run restart` or `/tg restart` in Pi.
+
+## File boundaries
+
+| File | Contents | Commit it? |
+| --- | --- | --- |
+| `telegram.config.ts` | Group, bots, provider/model, environment keys, routing, tools | No |
+| `.env` | Telegram/provider/TinyFish tokens and router secret | No |
+| `personas/*.local.md` | Real deployment personas | No |
+| `telegram.config.example.ts` | Public typed schema example | Yes |
+| `personas/template.*.md` | Public generic persona templates | Yes |
+
+`.env` uses the project's colon format, not dotenv equals syntax:
+
+```text
+telegram_bot_token: 123456:REPLACE_WITH_BOTFATHER_TOKEN
+llm_api_key: REPLACE_WITH_PROVIDER_KEY
+router_secret: REPLACE_WITH_RANDOM_LOCAL_SECRET
+```
+
+## Minimal one-bot configuration
+
+```ts
+import { defineConfig } from "./src/config-schema.ts";
+
+export default defineConfig({
+  group_peer_id: 1234567890,
+  provider: "deepseek",
+  model: "deepseek-v4-flash",
+  api_key_env: "llm_api_key",
+  bots: [{
+    id: "friend",
+    name: "Mochi",
+    token_env: "telegram_bot_token",
+    persona_path: "personas/friend.local.md",
+    routing_p: 0.1,
+    sticker_sets: [],
+    tools: { send: true, search: false, run_js: true },
+  }],
+});
+```
+
+See the repository's `telegram.config.example.ts` for annotated advanced defaults. TypeScript config is trusted local code. Edit only configuration you maintain; do not execute unreviewed snippets.
+
+## Add a second or third bot
+
+1. Add a distinct token key to `.env`.
+2. Copy a public template to a new ignored persona.
+3. Append an object to `bots`; `id` must be unique and contain only letters, numbers, `_`, or `-`.
+4. Perform a controlled restart, then verify with `/tg attach <id>` and `/tg status <id>`.
+
+```ts
+{
+  id: "helper",
+  name: "Nori",
+  token_env: "helper_bot_token",
+  persona_path: "personas/helper.local.md",
+  routing_p: 0,
+  tools: { send: true, search: false, run_js: true },
+}
+```
+
+`routing_p: 0` disables only probability sampling. Mentions, direct replies, and the configured name remain explicit triggers. The sum of every bot's `routing_p` must be `<= 1`, and configuration order defines deterministic probability-bucket order.
+
+Each bot has an isolated Telegram poller, agent session, state, provider runtime, and telemetry. Bots share only the target group and canonical SQLite history.
+
+## Provider and tool overrides
+
+Top-level `provider`, `model`, and `api_key_env` are deployment defaults. A bot may override them. Switching to a different provider requires all three fields explicitly, preventing credential crossover. A bot using the same provider may override only `api_key_env`.
+
+`tools` controls:
+
+- `send`: Telegram Rich Message and sticker delivery;
+- `search`: requires the TinyFish key selected by `tinyfish_key_env` in `.env`;
+- `run_js`: constrained deterministic computation.
+
+The first-run wizard disables search. Add the credential before enabling it, and never put the API key directly in TypeScript.
+
+## Routing and administrative commands
+
+- Mention > reply > configured name > probability. Bot messages never trigger bot-to-bot runs.
+- `sampling_cooldown_ms` applies only to probability routing; it defaults to 2000, and 0 disables cooldown.
+- Empty `telegram_admins` denies Telegram `compact/set/reset`. When needed, prefer your own positive numeric user ID; never copy a placeholder ID.
+- Telegram `set/reset` stores an SQLite override without rewriting TypeScript; `reset` returns to the file baseline.
+
+## Legacy format and multiple groups
+
+`bots.config.json` remains loadable, but new deployments should prefer TypeScript. Both default TS and legacy JSON together fail fast; `bots_config` accepts only explicit `.ts` / `.json` sources.
+
+One deployment has one `group_peer_id`. Multiple groups require isolated working directories and data/session/database/PID/socket resources. Do not switch `bots_config` concurrently inside one checkout.
+
+Next: [Chat and observe in Pi](using-pi.md).

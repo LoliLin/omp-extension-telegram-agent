@@ -1,6 +1,6 @@
 # REQ-ONBOARD-0001: clone 到 `/tg config` 的开箱体验与双语用户文档
 
-- **Status:** Approved（2026-08-08 已调查，未实现）
+- **Status:** In Progress（T13a–T13e 已实现；待 T13f mdBook/Pages 与 T14 总验收）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：clone 后运行 `bun run pi`、完成 `/tg config` 即可使用；优先写有类型和注释的本机 config.ts 而非 JSON；README / 用户指南 / 机器维护指南分层；提供公开提示词模板但不提交实际部署提示词；中文与 English 文档用 mdBook + GitHub Actions 发布；用户指南增加以成本优势为重点的设计概览
 - **依赖:** REQ-PLAT-0001、REQ-DOC-0001、REQ-OPS-0002

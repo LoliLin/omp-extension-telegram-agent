@@ -24,6 +24,8 @@
 
 ## 用户体验
 
+- 新 clone 运行 `bun run pi` 即可安装 lockfile 对应的项目 Pi；配置不存在时 `/tg config` 仍可用，并用 Pi 原生 dialogs 建立 typed config、private `.env` 与 persona。
+- 向导只有在受控 daemon restart 明确 ready 后才自动打开 all-bots feed；credential/network 失败会保留已验证配置并给出 status/retry，不伪报连接成功。
 - 启动 daemon → 配置的 bots 长期在线 → 消息落库 → Agent 按规则运行
 - 用户随时在项目目录运行 `bun run pi`，用 `/tg attach [bot-id]` 在 Pi 原生 transcript 查看完整群聊、LOCAL 事件与数据库 telemetry 保留期的 lifetime usage；关闭 Pi 不影响 daemon，累计值不归零
 - `/tg more` 加载更早历史，`/tg detach` 断开实时订阅，`/tg panel [bot|off]` 选择或恢复 Pi 原生 stats footer
@@ -32,7 +34,7 @@
 
 ## 主要约束
 
-- 模型是实现细节：当前 DeepSeek deepseek-v4-flash（thinking medium），架构不得依赖具体模型/context window/价格
+- 模型是部署配置：每 bot 可选择Pi catalog中的provider/model/auth；架构不得依赖具体模型、context window或价格
 - 当前 compaction threshold = 128K tokens（provisional default，靠 telemetry 验证，不做在线 optimizer）
 - Telegram 不承担历史恢复职责，SQLite 是事实来源
 - Bot-to-Bot：彼此消息进共同 transcript 可被看到，但**不互相触发**（trigger 只来自满足 routing 条件的 human 消息）
@@ -52,6 +54,12 @@
 - 仓库只跟踪 `personas/template.zh.md`、`personas/template.en.md` 与说明；其他 `personas/*.md` 默认忽略。
 - persona 只保留人格与回应策略；send 的参数、调用和终止语义以 `src/agent/tools.ts` 为唯一权威。
 - 旧 Git 历史仍可能包含已从当前 HEAD 移除的 deployment persona；未经明确授权不改写历史。
+
+## 部署边界
+
+- 一份 deployment 对应一个 Telegram supergroup 与 1..N bots。
+- 每个 bot 的 token、persona、provider/model/auth、routing 与 tools 都来自配置；生产代码不依赖固定 id 或名字。
+- 多群需要隔离 checkout/worktree 与 data/session/pid/socket/DB；当前不支持在同一工作目录只切 `bots_config` 并行运行。
 
 ## Scope
 

@@ -20,7 +20,7 @@ export default defineConfig({
 	auxiliary_visual_model: "gpt-5.6-luna-low",
 
 	// Empty means all state-changing Telegram /tg commands are denied.
-	telegram_admins: [123456789],
+	telegram_admins: [],
 
 	bots: [
 		{
@@ -36,7 +36,8 @@ export default defineConfig({
 			sticker_sets: [],
 			tools: {
 				send: true,
-				search: true,
+				// Enable only after adding tinyfish_api_key to .env.
+				search: false,
 				run_js: true,
 			},
 		},

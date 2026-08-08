@@ -4,7 +4,7 @@
 	"router_secret_env": "router_secret",
 	"provider": "deepseek",
 	"api_key_env": "llm_api_key",
-	"tinyfish_key_env": "tiny_fish_api_key",
+	"tinyfish_key_env": "tinyfish_api_key",
 	"auxiliary_visual_model": "gpt-5.6-luna-low",
 	"db_path": "data/agent.db",
 	"model": "deepseek-v4-flash",
@@ -12,8 +12,8 @@
 	"compaction_threshold": 128000,
 	"compaction_keep_recent": 20000,
 	"sampling_cooldown_ms": 2000,
-	"// telegram_admins": "Replace with your own positive numeric Telegram user id (recommended); an empty array denies all mutations.",
-	"telegram_admins": [123456789],
+	"// telegram_admins": "Add your own positive numeric Telegram user id when you need mutations; an empty array denies all mutations.",
+	"telegram_admins": [],
 	"bots": [
 		{
 			"id": "friend",
@@ -21,7 +21,12 @@
 			"token_env": "telegram_bot_token",
 			"persona_path": "personas/template.en.md",
 			"routing_p": 0.1,
-			"sticker_sets": []
+			"sticker_sets": [],
+			"tools": {
+				"send": true,
+				"search": false,
+				"run_js": true
+			}
 		}
 	]
 }

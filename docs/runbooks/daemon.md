@@ -2,27 +2,30 @@
 
 ## 配置
 
+- **首选路径**：运行 `bun run pi`，在 Pi 中执行 `/tg config`。向导使用 Pi 原生 dialogs 收集一个 bot 的最小配置，写入 ignored `telegram.config.ts`、`.env` 与 `personas/<id>.local.md`，再走本 runbook 的受控 restart。Pi 当前没有密码输入控件，provider key 与 Telegram token 输入时可见；只在私密终端操作，不要录屏或共享屏幕。
+- 已有配置重跑 `/tg config` 时可验证、用 Pi editor 编辑项目根 source，或在明确确认后备份并替换默认 source。自定义 `bots_config` source 不会被旁路覆盖；先修复缺失/坏 override。
+- **手工路径**：复制 `telegram.config.example.ts`、`.env.example` 与一个 public persona template，再按下列字段编辑。legacy JSON 只用于兼容。
 - `telegram.config.ts`（项目根，首选）：复制 `telegram.config.example.ts` 后编辑，`defineConfig()` 提供类型与逐字段注释。它会作为受信本机代码执行，不要粘贴来源不明的配置。legacy `bots.config.json` 继续支持；两份默认文件同时存在会拒绝启动。env `bots_config` 可显式指向 `.ts` / `.json`。
   - `group_peer_id`：群的裸正数 peer id（`-100...` 形式会被自动归一化）
   - deployment 默认模型：`provider` + `model` + `api_key_env`；缺省为 `deepseek` + `deepseek-v4-flash` + `deepseek_api_key`。`api_key_env`只是指向`.env`的key名，不放secret值。
   - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1），可选覆盖 `provider` / `model` / `api_key_env` / `reasoning_effort` / compaction / cooldown / `tools`（`{send, search, run_js}` 开关）/ `sticker_sets`（Telegram sticker set 名数组）。切换provider时必须同时给model和api_key_env；同provider可只换key。
   - `sampling_cooldown_ms` 默认 2000，可全局设置并由单 bot 覆盖；必须有限且 `>=0`，0 关闭概率冷却。它只影响 probability routing，mention/reply/name 不会被静默吞掉。
   - `telegram_admins`：Telegram群内控制白名单，接受正整数user id或规范化`@username`；推荐固定numeric id。缺省/空数组会拒绝所有`compact/set/reset`，但不影响公开`help/bots/status`。
-- `.env`（`key: value` 冒号格式）：只放 secret——bot tokens、配置引用的provider API keys、`tiny_fish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）。只有至少一个bot启用`tools.search`时才强制要求对应TinyFish key；首配默认关闭search，可在补key后编辑配置开启。
+- `.env`（`key: value` 冒号格式）：只放 secret——bot tokens、配置引用的provider API keys、`tinyfish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）。只有至少一个bot启用`tools.search`时才强制要求对应TinyFish key；首配默认关闭search，可在补key后编辑配置开启。
 - 改配置后重启 daemon 生效（无热重载）；本机 persona 除公开模板外默认被 Git 忽略。
 - 一份配置/daemon只对应一个`group_peer_id`。同一checkout的`data/`、pid、socket与DB是共享deployment资源，不能只换`bots_config`并行跑第二个群；多群当前必须使用彼此隔离的工作目录与data目录，不能共享DB/session/socket/pid。
 
 ## 启动
 
 ```bash
-bun run src/main.ts start          # 后台运行，日志 data/daemon.log
+bun run start                      # 后台运行，日志 data/daemon.log
 bun run src/main.ts start --foreground   # 前台（调试用）
-bun run src/main.ts restart        # deployment-wide 优雅重启全部配置 bot
-bun run src/main.ts status         # 状态（pid 校验：cmdline 必须是本项目 daemon）
-bun run src/main.ts stop           # SIGTERM 优雅停止
+bun run restart                    # deployment-wide 优雅重启全部配置 bot
+bun run status                     # 状态（pid 校验：cmdline 必须是本项目 daemon）
+bun run stop                       # SIGTERM 优雅停止
 ```
 
-- 首启可能较慢：sticker set 下载 + vision 预识别（114 个 sticker 约 10–15 分钟，一次性；之后秒起）。`start` 会在 60s 内等 socket；没等到会提示用 `status` / `daemon.log` 确认，不会误报失败。
+- 配置了 sticker sets 时，首次下载与vision预识别可能延长启动；以后复用本地catalog。`start` 会在60秒内等socket；超时但child仍存活时只报告starting，并提示用`status` / `daemon.log`确认。
 - 每 bot 启动日志的 `sticker-catalog` 行会报告 `catalog/sendable/missing_file_id`；`missing_file_id>0` 的条目不会暴露给该 bot。检查 set 名/token 权限或 Telegram `getStickerSet` 失败，不要复制另一个 bot 的 file_id。
 - 配置错误会在启动期逐条列出（stderr / daemon.log），不会静默跑坏配置。
 - 双 start 竞态由排他pid锁挡住；并发restart由`data/daemon.control.lock`串行，第二个立即报`restart already in progress`。
@@ -38,15 +41,16 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 进入 Pi 后：
 
 ```text
+/tg config              # 首配、验证或安全编辑本机配置
 /tg attach              # 全局视角：群消息 + 全部 bot LOCAL 事件
-/tg attach A            # 单 bot 视角：群消息 + 仅 A 的 LOCAL/usage
-/tg compose A           # 显式让原生 editor 以 A 身份发送纯文本
+/tg attach friend       # 单 bot 视角：群消息 + 仅 friend 的 LOCAL/usage
+/tg compose friend      # 显式让原生 editor 以 friend 身份发送纯文本
 /tg compose off         # 关闭发送模式，editor 恢复提交给 Pi agent
 /tg more                # 显式加载一页更早历史
 /tg detach              # 断开实时订阅，已显示内容保留
-/tg panel A             # 将 Pi 原生 footer 切到 A 的 Telegram usage
+/tg panel friend        # 将 Pi 原生 footer 切到 friend 的 Telegram usage
 /tg panel off           # 恢复当前 Pi session 的默认 footer
-/tg status A            # lifetime + latest usage/latency 详细通知
+/tg status friend       # lifetime + latest usage/latency 详细通知
 /tg restart             # 优雅重启deployment并恢复当前feed filter/footer
 /tg status-daemon       # daemon 进程状态
 ```
@@ -60,7 +64,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - `/tg panel` 可单独切换范围，`panel off` 恢复 operator Pi session usage。`/tg status [bot]` 另列 runs/since/epoch、latest cache/output/reasoning/latency/cost 与 lifetime totals/平均 latency。
 - 在 editor 输入 `/tg ` 后按 Tab/选择使用 Pi 原生分级菜单；`attach/status/compose/panel` 的下一层会从配置动态列出 bot id/name，`compose/panel` 另有 `off`。
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。
-- `/tg restart`先关闭compose并中止旧IPC；在途manual send按unknown outcome处理且绝不自动重发。ready后保留原transcript，自动以原A/all filter重连并恢复此前的原生footer scope；失败时保留已显示内容与可执行诊断。
+- `/tg restart`先关闭compose并中止旧IPC；在途manual send按unknown outcome处理且绝不自动重发。ready后保留原transcript，自动以原bot/all filter重连并恢复此前的原生footer scope；失败时保留已显示内容与可执行诊断。
 
 ## Telegram 群内控制
 
@@ -83,8 +87,8 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 
 ## 新增一个 bot
 
-1. `.env` 加一行 token：`my_bot_token: 123:...`
-2. `bots.config.json` 的 `bots` 数组加一项（id 唯一、`token_env` 指向新 key、persona 文件存在）
+1. `.env` 加一行 token：`my_bot_token: REPLACE_WITH_BOTFATHER_TOKEN`
+2. `telegram.config.ts` 的 `bots` 数组加一项（id 唯一、`token_env` 指向新 key、persona 文件存在）
 3. 重启 daemon → 启动日志会列出新 bot；Pi 中 `/tg attach <id>` 可单独观察
 4. 需要固定 sticker 目录就加 `sticker_sets`；不需要就不写（无目录 bot 的 system prompt 与 v1 逐字节一致）
 
@@ -103,6 +107,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 
 ## 故障排查
 
+- `/tg config` 报daemon not ready：已通过production loader的文件会保留。先执行`/tg status-daemon`，查看`data/daemon.log`中的脱敏诊断，修正credential/network后执行`/tg restart`；不要反复覆盖配置。
 - `status` 报duplicate/orphan project daemon：运行`restart`；它只处理同仓库真实daemon entry并等待全部退出，避免Telegram long poll 409。
 - malformed pid file与socket同时存在：controller会拒绝猜测；先检查`data/daemon.pid`、`data/daemon.sock`与`ps`，不要手工signal未经身份确认的PID。
 - 面板无数据：尚无 llm_runs（bot 从未被触发）

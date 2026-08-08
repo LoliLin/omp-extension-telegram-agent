@@ -1,5 +1,12 @@
 # 文档索引
 
+## 用户文档
+
+- `../README.md` / `../README.en.md` — 中文 / English 产品入口与三步启动
+- `user-guide/zh/src/README.md` — 中文用户指南
+- `user-guide/en/src/README.md` — English user guide
+- `maintainers/guide.md` — agent / maintainer 开发、验证、提交与发布入口
+
 ## 规范性文档
 
 - `../AGENTS.md` — agent 路由、安全、验证入口（常载）

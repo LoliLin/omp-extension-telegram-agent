@@ -1,6 +1,6 @@
 # REQ-PLAT-0001: 收口为通用、快速、简洁的可配置 bot 平台
 
-- **Status:** In Progress（T11/T12 runtime、scripts、composition 已实现；最终用户文档待 T13e）
+- **Status:** Implemented（T11/T12 runtime/composition + T13e public docs；真实第三bot smoke仍为opt-in未执行项）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「当前平台想做通用快速简洁的 bot 聊天机器人；全面 review 基于固定两个机器人的设计，提高通用可配置性」
 - **依赖:** REQ-CONF-0001
@@ -97,3 +97,4 @@ REQ-CONF-0001 已把核心 daemon 从 A/B 数组重构为任意 bot 配置，但
 - T12：daemon的identity/runtime/poller map已收口到通用composition边界；1/2/3-bot fixture从真实config loader走到独立state/runtime、真实Poller构造、router name dispatch与IPC global/per-bot stats。
 - `smoke-pi`与三个e2e脚本现在强制`--bot <id>`，C fixture可选中；缺失/未知/重复id在网络前失败并列出有效id。runbook记录单群deployment隔离边界与opt-in真实第三bot清单。
 - T12新增6 tests / 61 assertions；全量314 / 4371与typecheck/cache v5通过。当前deployment没有第三个真实token，故未执行真实C smoke；操作与回滚步骤已明确记录，最终用户文档仍留T13e。
+- T13e：package/project/runbook、双语README与双语用户guide均先描述任意1..N bot平台；单bot最小配置、N-bot追加、per-bot provider、单群deployment隔离与显式`--bot`真实验证路径已成为public用户旅程。私人A/B身份不再出现在产品主体。

@@ -572,3 +572,12 @@
 - writer经production loader验证后只委托既有`bun run src/main.ts restart`；仅exit 0且明确`daemon ready`才清completion cache并复用attach路径建立all-bots native feed。失败保留有效配置、不建立socket/feed、不声称connected，诊断经credential redaction且给出`/tg status-daemon`与`/tg restart`。
 - extension+core targeted 52 tests / 627 assertions、全量333 / 4576与typecheck通过，覆盖loader failure、完整ready、每步取消、existing/override保护动作、readiness failure及token/key脱敏。真实Telegram credential smoke留T14。
 - Cache impact: **NONE**——向导、process control与TUI feed attach均在本地/operator side channel；不改IPC/DB/provider grammar、context epoch、模型调用或每turn token。
+
+## 2026-08-08 (65) — 建立双语用户与机器维护旅程
+
+- 中英README首屏现在对等提供语言/guide入口、三步`bun run pi`→`/tg config`→ready feed路径、credential可见警告与单群deployment边界；能力、Pi命令、manual typed config、unknown/no-retry、排障和cost overview均按用户任务渐进披露，内部目录树退居maintainer入口。
+- 两本用户guide各7个source文件，按installation→Telegram/provider→native config→Pi chat→operations→troubleshooting组织；两篇cost overview都覆盖deterministic routing、stable prefix/cache、bounded context、compaction、lazy media vision、side-channel UI/telemetry，并只链接architecture/cache/data-model/testing权威细节，不承诺百分比。
+- AGENTS一跳到机器维护指南；指南再一跳到development、traceability、testing、cache、documentation和Pages发布约束，并固化小task、显式暂存、`git commit -S`、英文祈使subject、连续REQ/PLAN trailer与Good signature检查。
+- package/project/runbook/example不再把固定双bot当产品。`.env.example`、typed/legacy examples统一`tinyfish_api_key`，默认search=false、`telegram_admins: []`，避免最小首配多要credential或复制占位admin产生授权。
+- 77个Markdown本地link target、产品身份审计均通过；config+extension 70 tests / 652 assertions、全量333 / 4579与typecheck通过。mdBook build/generated-link/Pages留T13f。
+- Cache impact: **NONE**——只改public文档、metadata与不进入production deployment的examples；provider/session/IPC/DB bytes、context epoch和每turn调用/token不变。
