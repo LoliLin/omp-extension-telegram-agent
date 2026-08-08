@@ -54,7 +54,7 @@ bun run restart
 
 ## 真实验证
 
-默认 `bun test` 不调用 Telegram/provider（明确env-gated测试除外）。需要真实网络时，脚本强制选择bot：
+默认 `bun test` 不调用 Telegram/provider；test preload 会机械拒绝一切非 loopback 网络访问。需要真实网络时，脚本强制选择bot：
 
 ```bash
 bun run scripts/smoke-pi.ts --bot friend
@@ -73,7 +73,7 @@ bun run scripts/e2e-compaction-manual.ts --bot friend
 - 每只poller的Telegram update offset，以及共享router secret；
 - daemon PID、control lock与Unix socket。
 
-所以，在同一checkout中并行设置不同`bots_config`不会形成两个deployment。它可能把一个群的history送入另一个群的模型context、用错误offset跳过update，或让两个daemon争抢同一PID/socket。
+所以，在同一checkout中只换配置文件并行运行不会形成两个deployment。它可能把一个群的history送入另一个群的模型context、用错误offset跳过update，或让两个daemon争抢同一PID/socket。
 
 第二个群应使用独立clone或worktree，并分别保存`.env`、config、persona和Telegram bot tokens；同时隔离整个`data`/DB、session、PID/lock/socket与daemon工作目录。不要只复制DB，也不要让两个目录指回同一data路径。
 

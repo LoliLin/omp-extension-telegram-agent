@@ -15,7 +15,7 @@
 7. **例子** — 具体的正常 case 和边界 case
 8. **验证** — 怎么证明这个陈述 / 流程是对的
 9. **更新触发条件** — 哪类代码 / 产品变化要求这篇文档跟着改
-10. **链接** — 需求、ADR、runbook、测试、代码入口
+10. **链接** — runbook、测试、代码入口
 
 ## 为检索优化
 
@@ -27,14 +27,14 @@
 
 ## 分清文档类型（生命周期不同，不要混）
 
-- **Requirement**：要求什么结果（`docs/requirements/`）
 - **Architecture**：稳定结构与 invariant（`docs/architecture.md`）
-- **ADR**：一个持久决策为什么这么做（`docs/adr/`）
-- **Plan**：当前工作怎么执行（`docs/plans/active/`）
+- **Guide**：流程与操作规范（`docs/engineering/`）
 - **Runbook**：可重复的运维操作（`docs/runbooks/`）
-- **Reference**：确切的接口语义（`docs/cache.md` / `docs/data-model.md`）
+- **Reference**：确切的接口语义（`docs/cache.md` / `docs/data-model.md` / `docs/testing.md`）
+- **User guide**：面向用户的双语文档（`docs/user-guide/`）
 - **AGENTS.md**：高信号路由、坑、命令
-- **devlog / handoff**：过程性状态，append-only / 保持短
+
+开发过程状态不单独建文档：追溯靠 git 历史（原子提交 + 清晰 message）。
 
 ## 避免重复
 

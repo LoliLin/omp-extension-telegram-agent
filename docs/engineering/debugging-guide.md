@@ -67,7 +67,7 @@ bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整�
 
 ## 新功能强制 Debug impact 检查
 
-每个新REQ/行为改动在实现前回答，并写进REQ「约束」或PLAN：
+每个新功能/行为改动在实现前回答，并写进任务说明：
 
 1. 成功、合法no-op/沉默、可重试失败、不可重试/unknown commit分别如何观察？
 2. 用哪些已有identity跨边界关联？是否误把log当业务authority？
@@ -86,6 +86,6 @@ bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整�
 4. 修职责拥有层；日志只补缺失的可观察状态，不能用重试掩盖unknown commit。
 5. 验证回归、source audit、cache golden、全量unit/typecheck；真实smoke单独说明授权与成本。
 
-REQ-SEND-0003是参考案例：route/run/send均存在，`agent_send.preflight_failed{category:reply_not_visible}`证明失败发生在Telegram create前；修复的是turn-local visibility时序，而不是重试Telegram或要求模型更积极。
+参考案例一（精确回复失败）：route/run/send 均存在，`agent_send.preflight_failed{category:reply_not_visible}` 证明失败发生在 Telegram create 前；修复的是 turn-local visibility 时序，而不是重试 Telegram 或要求模型更积极。
 
-REQ-SEARCH-0002是provider-context案例：历史session里的`search` call/result证明TinyFish返回没有被context extension过滤；默认context inventory显示当前工具只剩`send`，再回溯配置归一化即可定位“省略字段被改成禁用”，无需猜模型为何不调用。
+参考案例二（provider context 取证）：历史 session 里的 `search` call/result 证明 TinyFish 返回没有被 context extension 过滤；当时 context inventory 显示当前工具只剩 `send`，再回溯配置归一化即可定位“省略字段被改成禁用”，无需猜模型为何不调用。

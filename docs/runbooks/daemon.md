@@ -3,17 +3,17 @@
 ## 配置
 
 - **首选路径**：运行 `bun run pi`，先用 Pi `/login` 与 `/model`完成模型认证/默认选择，再执行 `/tg config`。向导在任何写入前本地预检并显示`provider/model:thinking`，随后只收集一个bot的Telegram最小配置，写入ignored `telegram.config.ts`、`.env`与`personas/<id>.local.md`，再走本runbook的受控restart。Pi当前没有密码输入控件，Telegram token输入时可见；只在私密终端操作，不要录屏或共享屏幕。
-- 已有配置重跑 `/tg config` 时可验证、用 Pi editor 编辑项目根 source，或在明确确认后备份并替换默认 source。自定义 `bots_config` source 不会被旁路覆盖；先修复缺失/坏 override。
-- **手工路径**：复制 `telegram.config.example.ts`、`.env.example` 与一个 public persona template，再按下列字段编辑。legacy JSON 只用于兼容。
-- `telegram.config.ts`（项目根，首选）：复制 `telegram.config.example.ts` 后编辑，`defineConfig()` 提供类型与逐字段注释。它会作为受信本机代码执行，不要粘贴来源不明的配置。legacy `bots.config.json` 继续支持；两份默认文件同时存在会拒绝启动。env `bots_config` 可显式指向 `.ts` / `.json`。
+- 已有配置重跑 `/tg config` 时可验证、用 Pi editor 编辑项目根 source，或在明确确认后备份并替换默认 source。
+- **手工路径**：复制 `telegram.config.example.ts`、`.env.example` 与一个 public persona template，再按下列字段编辑。
+- `telegram.config.ts`（项目根，唯一配置文件）：复制 `telegram.config.example.ts` 后编辑，`defineConfig()` 提供类型与逐字段注释。它会作为受信本机代码执行，不要粘贴来源不明的配置。
   - `group_peer_id`：群的裸正数 peer id（`-100...` 形式会被自动归一化）
   - deployment 默认模型：canonical example显式选择`openai-codex/gpt-5.6-luna`、reasoning `off`与short cache retention。旧配置省略provider/model时仍继承Pi合并后的选择，但省略reasoning始终是`off`；切换provider必须同时给model，认证始终来自Pi。
   - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1），可选覆盖 provider/model/reasoning/cache retention、compaction、12k suffix/4096 message预算、cooldown、`tools`与`sticker_sets`。顶层另有vision scheduler和90/30/365天telemetry/raw/event retention。模型覆盖只是选择，不承载credential。
   - `sampling_cooldown_ms` 默认 2000，可全局设置并由单 bot 覆盖；必须有限且 `>=0`，0 关闭概率冷却。它只影响 probability routing，mention/reply/name 不会被静默吞掉。
-  - `telegram_admins`：Telegram群内控制白名单，接受正整数user id或规范化`@username`；推荐固定numeric id。缺省/空数组会拒绝所有`compact/set/reset`，但不影响公开`help/bots/status`。
+  - `telegram_admins`：Telegram群内控制白名单，接受正整数user id或规范化`@username`；推荐固定numeric id。缺省/空数组会拒绝所有`compact`/`set`，但不影响公开`help`/`status`。
 - `.env`（`key: value` 冒号格式）：只放项目拥有的secret——bot tokens、`tiny_fish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）。LLM credential由Pi auth store独占。只有至少一个bot启用`tools.search`时才强制要求对应TinyFish key；首配默认关闭search，可在补key后编辑配置开启。
 - 改配置后重启daemon生效（无热重载）；本机persona除公开模板外默认被Git忽略。model/persona/cache policy/tools等cache-visible字段变化会在restore前生成新fingerprint/session/epoch，旧session文件保留但不会错误恢复。
-- 一份配置/daemon只对应一个`group_peer_id`。同一checkout的`data/`、pid、socket与DB是共享deployment资源，不能只换`bots_config`并行跑第二个群；多群当前必须使用彼此隔离的工作目录与data目录，不能共享DB/session/socket/pid。
+- 一份配置/daemon只对应一个`group_peer_id`。同一checkout的`data/`、pid、socket与DB是共享deployment资源，不能只换配置文件并行跑第二个群；多群当前必须使用彼此隔离的工作目录与data目录，不能共享DB/session/socket/pid。
 
 ## 启动
 
@@ -62,7 +62,9 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 /tg panel friend        # 将 Pi 原生 footer 切到 friend 的 Telegram usage
 /tg panel off           # 恢复当前 Pi session 的默认 footer
 /tg status friend       # lifetime + latest usage/latency 详细通知
+/tg start              # 启动 daemon
 /tg restart             # 优雅重启deployment并恢复当前feed filter/footer
+/tg stop                # 停止 daemon
 /tg status-daemon       # daemon 进程状态
 ```
 
@@ -98,7 +100,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 1. `.env` 加一行 token：`my_bot_token: REPLACE_WITH_BOTFATHER_TOKEN`
 2. `telegram.config.ts` 的 `bots` 数组加一项（id 唯一、`token_env` 指向新 key、persona 文件存在）
 3. 重启 daemon → 启动日志会列出新 bot；Pi 中 `/tg attach <id>` 可单独观察
-4. 需要 sticker 候选就加`sticker_sets`；完整目录只留在本地，每轮最多把8个相关且当前bot可发送的候选追加到动态suffix，不进入system prompt
+4. 需要 sticker 就加`sticker_sets`；启动时同步的固定目录以 identity-only 形式（set + emoji + short_id）固化进该 bot 的 system prompt，模型按 short_id 直接发送，不做每轮检索
 
 ## Opt-in 第三个 bot 真实 smoke
 

@@ -1,6 +1,6 @@
 # Cache 工程
 
-本文是 provider context、cache identity 与 compaction 的当前权威说明。历史版本变更见 `docs/devlog.md`。
+本文是 provider context、cache identity 与 compaction 的当前权威说明。
 
 ## Invariants
 
@@ -31,6 +31,20 @@ cache-visible protocol 包括：
 - Pi 版本及当前 bot 的 sticker catalog identity snapshot。
 
 `CACHE_SCHEMA_VERSION` 是 fingerprint 中的强制失效字段，不是恢复 session 后再补记的一项 telemetry。任何上述内容变化都必须先 bump version、更新本文件与 golden；runtime 在打开旧 session **之前**计算 fingerprint，不匹配时保留旧文件、创建新 session 并推进 epoch。
+
+## Schema history
+
+每次 bump 的一句话理由（追溯细节见 git 历史）：
+
+- v1：初始 cache grammar——日期分隔 / `#id` / `@username` / `↪` 引用 / 媒体占位的确定性消息序列化，persona + 共享 protocol 固定结构。
+- v2：sticker 目录块首次进入 system prompt。
+- v3：sticker 候选按 bot 可发送性隔离，prefix 移除当前 bot 不可发送的目录项。
+- v4：tool/persona/system 稳定 prefix 修订——send 成功 ACK 固定为 `ok`、persona 去除与 protocol 重复的 send 教程、toolsHash 覆盖 description。
+- v5：send tool description 切换为 Rich Markdown 发送。
+- v6：search 工具 schema 增加 `url` 字段与说明（page fetch）。
+- v7：send 改为确定性 Markdown → text/entities 转换，message 参数增加 4096 code points 约束。
+- v8：共享 protocol 前置到 persona 之前、`telegram_context_v2` 结构化消息、immutable edit/metadata/media delta、动态 sticker top-K 候选、`[no_send]` 持久化策略。
+- v9：固定 sticker catalog 以 identity-only 形式固化进 system prompt，删除每轮 top-K suffix 与 catalog vision 回填，protocol 去双 bot 硬编码，tool description 打磨（详见上文）。
 
 ## Provider payload 结构
 
@@ -92,9 +106,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确�
 
 每次 provider response 还记录 provider/api/model/session hash/cache retention、epoch、context/input/cache read/cache write/output/reasoning/latency/cost、trigger、public send、vision/tool rounds，以及 input event/token estimate/rows scanned。保留期默认 90 天，因此 UI 的 lifetime 表示**当前 SQLite 保留窗口**，不是永久累计。
 
-`bun run scripts/analyze-context-window.ts [db]` 可离线比较 threshold；它是估算工具，不是在线 optimizer。
-
-2026-08-07 的 50-run DeepSeek 数据曾测得 90.0% cache hit。该数字仅是历史 deployment 样本，不代表当前 schema v8、其他模型或未来负载。
+2026-08-07 的 50-run DeepSeek 数据曾测得 90.0% cache hit。该数字仅是历史 deployment 样本，不代表当前 schema 版本、其他模型或未来负载。
 
 ## Golden
 

@@ -62,7 +62,7 @@
 
 ### bot_state / daemon_state
 
-- `bot_state` 保存 per-bot epoch、Telegram update offset 与 deterministic control overrides；legacy `exposed_ids` migration 后删除，不再承担 context 状态。
+- `bot_state` 保存 per-bot epoch、Telegram update offset 与 bot identity（`bot_user_id` / `bot_username`）；legacy `exposed_ids` migration 后删除，不再承担 context 状态。routing/cooldown 的运行时调整不写 DB——`/set` 直接写穿 `telegram.config.ts`（见 `docs/architecture.md` 配置节）。
 - `daemon_state` 保存 deployment-wide router secret、schema/cache version 等 singleton metadata。
 - bot id 均为 `TEXT`，配置定义实际 bot 集合，代码不假设 A/B。
 

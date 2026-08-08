@@ -71,10 +71,8 @@ Inspect the redacted tail of `data/daemon.log` when needed. Do not overwrite con
 Running `/tg config` again lets you:
 
 - validate the current deployment;
-- edit a project-root `.ts` / `.json` source in Pi and retain an exact backup after confirmation;
+- edit the project-root `telegram.config.ts` source in Pi and retain an exact backup after confirmation;
 - explicitly back up and replace a default source;
 - cancel without changing a byte.
-
-When `.env` or the process selects a custom `bots_config` source, the wizard will not write an unrelated default file that the daemon would ignore. Fix or remove a missing/invalid override first.
 
 Next: [Configuration and additional bots](configuration.md).

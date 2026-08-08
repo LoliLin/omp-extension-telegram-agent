@@ -22,7 +22,7 @@ router_secret: REPLACE_WITH_RANDOM_LOCAL_SECRET
 ## 成本优先的单 bot 配置
 
 ```ts
-import { defineConfig } from "./src/config-schema.ts";
+import { defineConfig } from "./src/config.ts";
 
 export default defineConfig({
   group_peer_id: 1234567890,
@@ -106,22 +106,13 @@ model、reasoning、cache policy、persona、tools、serializer等cache-visible�
 - `routing_p` 是普通 human 消息的**回应机会**，不是最终群发言配额。每条 eligible 消息只生成一个确定性值并至多落入一个累计桶；当总和为 1 时，每条 eligible 消息恰有一个 probability target。
 - `sampling_cooldown_ms` 只约束 probability 路径；默认 2000，0 表示关闭冷却。
 - probability target busy 或 cooldown 时会直接 skip，不改投另一只 bot；mention/reply/name 走明确触发路径。即使成功开始，persona 仍可选择沉默，发送也可能失败，所以群内公开消息比例无需等于 `routing_p`。
-- `telegram_admins` 默认空，拒绝 Telegram 群内 `compact/set/reset`。需要时优先加入你自己的正整数 numeric user ID；不要复制示例占位值。
-- Telegram `set/reset` 写入 SQLite override，不改 TypeScript；`reset` 恢复文件基线。
+- `telegram_admins` 默认空，拒绝 Telegram 群内 `compact`/`set`。需要时优先加入你自己的正整数 numeric user ID；不要复制示例占位值。
+- Telegram `/set <routing_p|cooldown_ms> <value>` 写穿 `telegram.config.ts`（原子写入 + 全量校验，任何一步失败回滚文件），成功后立即更新内存 effective 值，重启后仍然生效。
 
-只读检查当前 deployment：
+只读诊断当前 deployment 用 `bun run debug`（见[运维](operations.md)与[故障排查](troubleshooting.md)）。
 
-```bash
-bun run scripts/analyze-routing.ts            # 使用默认 data/daemon.log
-bun run scripts/analyze-routing.ts --no-log   # 只重放 SQLite
-```
+## 多群
 
-报告只显示 `bot-1`、`bot-2` 等序号，分别列 current-effective assignment、daemon started/busy/cooldown、LLM run 与最终 public message。日志只覆盖当前进程且可能轮转，因此始终标为 `partial`；缺失则是 `unavailable`，不是 0。当前配置重放历史消息是反事实审计，不能证明旧时配置。命令不写数据库、不调用模型，正文只在本地 SQLite 内折叠成触发类别，不进入脚本内存或输出。也可把单个自定义日志路径作为唯一参数传入。
-
-## Legacy 与多群
-
-`bots.config.json` 继续可加载，但新配置优先 TypeScript。默认 TS 与 legacy JSON 同时存在会 fail-fast；`bots_config` 只接受显式 `.ts` / `.json`。
-
-一份 deployment 只有一个 `group_peer_id`。多个群必须使用隔离工作目录及 data/session/DB/pid/socket，不能在同一 checkout 只切 `bots_config` 并行运行。
+一份 deployment 只有一个 `group_peer_id`。多个群必须使用隔离工作目录及 data/session/DB/pid/socket，不能在同一 checkout 只换配置文件并行运行。
 
 下一步：[在 Pi 中聊天和观察](using-pi.md)。

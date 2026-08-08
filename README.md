@@ -64,7 +64,6 @@ cp personas/template.zh.md personas/friend.local.md
 - `telegram.config.ts`：受信本机 TypeScript，保存非 secret schema 与 env key 名；可写注释并获得类型提示。
 - `.env`：本项目自己的 `key: value` 冒号格式，只保存 Telegram token、可选 TinyFish key 与 router secret；模型 credential 不在这里。
 - `personas/*.local.md`：本机 persona；默认被 Git 忽略。
-- `bots.config.json`：只读兼容旧 deployment；新配置优先使用 TypeScript。
 
 单 bot 最小配置、添加第二/第三 bot、provider override 与 routing 规则见[中文配置指南](docs/user-guide/zh/src/configuration.md)。tracked example 不含有效 credential 或私人 persona。
 
@@ -87,6 +86,6 @@ cp personas/template.zh.md personas/friend.local.md
 
 ## 开发与维护
 
-用户不需要先读内部架构文档。要修改项目时，从 [AGENTS.md](AGENTS.md) 与[机器维护指南](docs/maintainers/guide.md)开始；当前状态见[handoff](docs/handoff.md)，完整索引见[docs/index.md](docs/index.md)。
+用户不需要先读内部架构文档。要修改项目时，从 [AGENTS.md](AGENTS.md) 与[开发指南](docs/engineering/development-guide.md)开始；完整索引见[docs/index.md](docs/index.md)。
 
 当前 HEAD 只跟踪公开 persona 模板；旧 Git 历史仍可能包含已经移除的 deployment persona。仓库没有改写历史，也不能替代必要的 credential 轮换。

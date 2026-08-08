@@ -54,7 +54,7 @@ A command acts on the bot that received it; append `@bot_username` to target a s
 
 ## Real verification
 
-Default `bun test` avoids Telegram/provider calls except explicitly environment-gated cases. Networked scripts require a bot selection:
+Default `bun test` avoids Telegram/provider calls; the test preload mechanically rejects every non-loopback network access. Networked scripts require a bot selection:
 
 ```bash
 bun run scripts/smoke-pi.ts --bot friend
@@ -73,7 +73,7 @@ One working directory currently hosts one group deployment. This is not merely a
 - each poller's Telegram update offset and the shared router secret;
 - the daemon PID, control lock, and Unix socket.
 
-Running different `bots_config` values concurrently in one checkout therefore does not create two deployments. It can feed one group's history into another group's model context, skip updates through the wrong offset, or make daemons compete for one PID/socket.
+Running a second group in one checkout by only switching configuration files therefore does not create two deployments. It can feed one group's history into another group's model context, skip updates through the wrong offset, or make daemons compete for one PID/socket.
 
 Use a separate clone or worktree for a second group. Give it independent `.env`, config, personas, and Telegram bot tokens, plus a separate `data`/database, sessions, PID/lock/socket, and daemon working directory. Do not merely copy the database or point both directories back to shared data.
 

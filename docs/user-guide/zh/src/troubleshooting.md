@@ -15,13 +15,11 @@ bun run pi --version
 
 ## `/tg config` 不在菜单中
 
-确认你从仓库根运行 `bun run pi`，并且 package discovery 加载了 `.pi/extensions/tg-extension.ts`。`config` 是静态命令，不依赖已有 config；若完全缺失，优先排查Pi/package加载，而不是手工创建空JSON。
+确认你从仓库根运行 `bun run pi`，并且 package discovery 加载了 `.pi/extensions/tg-extension.ts`。`config` 是静态命令，不依赖已有 config；若完全缺失，优先排查Pi/package加载，而不是手工创建空配置文件。
 
 ## 向导拒绝配置
 
 - 字段错误：按notification列出的字段修复；值不会回显。
-- `bots_config` missing/invalid：创建指定 `.ts`/`.json` source，或从 `.env` / process移除override后重试。
-- 同时存在默认TS与legacy JSON：保留一份，或用明确override选择；不要按mtime猜。
 - 已有文件：选择validate/editor，或明确确认backup-replace；取消不会改字节。
 - Pi model preflight：退出向导，用 Pi `/login`、`/model` 修复后重试；deployment 文件尚未写入。
 
@@ -77,7 +75,7 @@ bun run pi --version
 - `bun run status` 输出；
 - `bun run pi --version`；
 - `data/daemon.log`中手工复核过的脱敏末尾；
-- 失败命令、bot id、是否是fresh/legacy/custom `bots_config`；
+- 失败命令、bot id、配置是新写还是替换已有文件；
 - 是否使用tmux、Kitty/Ghostty/iTerm2。
 
 不要提交 `.env`、真实persona、完整群消息、token、API key或未脱敏绝对路径。

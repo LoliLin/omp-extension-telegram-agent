@@ -75,9 +75,9 @@
 - 一份 deployment 对应一个 Telegram supergroup 与 1..N bots。
 - 每个 bot 的 token、persona、可选provider/model选择、routing与tools来自配置；provider认证只来自Pi。生产代码不依赖固定id或名字。
 - 一个工作目录只有一个`group_peer_id`，而SQLite history/cursors/visibility/obligations、agent sessions、poller offsets/router secret、PID/control lock/Unix socket都没有第二层deployment namespace。
-- 因此在同一目录并行切换`bots_config`可能混入跨群history/context、推进错误offset或争抢同一进程资源。配置文件不同不构成隔离。
+- 因此在同一目录并行切换配置文件可能混入跨群history/context、推进错误offset或争抢同一进程资源。配置文件不同不构成隔离。
 - 第二个群必须使用独立checkout/worktree，并隔离`.env`、config/persona、Telegram bot tokens、data/DB、sessions、PID/lock/socket。当前不支持同目录多群。
 
 ## Scope
 
-见 docs/requirement.md。开发流程见 docs/engineering/development-guide.md（LLM 开发指南）：小 vertical slice、每步留痕（docs + devlog + handoff）、原子化签名 git 提交。
+开发流程见 docs/engineering/development-guide.md（LLM 开发指南）：小 vertical slice、原子化签名 git 提交、契约变化同步文档。

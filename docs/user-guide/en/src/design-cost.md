@@ -12,7 +12,7 @@ This avoids an entire unnecessary call instead of shaving a few tokens after sta
 
 ## 2. A stable provider prefix reuses cache
 
-The shared protocol comes first, followed by the persona and fixed-order tool schemas. This maximizes the byte-identical prefix shared by bots. New messages append only to the suffix; the full sticker catalog never expands the system prompt.
+The shared protocol comes first, followed by the persona, then a bounded identity-only sticker catalog, then fixed-order tool schemas. This maximizes the byte-identical prefix shared by bots. New messages append only to the suffix; the sticker catalog holds just set + emoji + short_id lines (with a hard cap), pinned once instead of changing every turn.
 
 A fingerprint covers the Pi/provider/model/cache policy, protocol, persona, serializer, compaction, extensions, and tools. A cache-visible change increments the schema and creates a new session/epoch before restoration; an old session file is retained but never resumed under a different identity. UI, telemetry, and operator commands may not alter provider bytes. See [Cache engineering](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md).
 
@@ -20,7 +20,7 @@ A fingerprint covers the Pi/provider/model/cache policy, protocol, persona, seri
 
 SQLite retains canonical Telegram history and an immutable event stream. Each bot consumes that stream with a monotonic cursor, while separate visible references describe only full messages still present in the current context. The model receives a token-bounded event batch with direct replies first; logs, raw rich JSON, UI state, and unbounded tool output never enter provider context.
 
-The default new-suffix cap is 12,000 tokens and the per-event cap is 4,096. Sticker inventory is retrieved locally per turn and contributes at most eight relevant, sendable candidates. This separates the complete local source of truth from the context necessary for one run. See [Architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md) and the [data model](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/data-model.md).
+The default new-suffix cap is 12,000 tokens and the per-event cap is 4,096. This separates the complete local source of truth from the context necessary for one run. See [Architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md) and the [data model](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/data-model.md).
 
 ## 4. Compaction changes epochs at an explicit boundary
 
@@ -50,7 +50,7 @@ Opening Pi, scrolling history, changing a panel, or viewing usage therefore does
 
 1. Record runs, useful public sends, prompt miss/read/write, output, reasoning, latency, and cost with `/tg status [bot]`; “lifetime” means the configured SQLite retention window.
 2. Compare similar activity periods; do not mix providers, personas, or group sizes in one conclusion.
-3. Replay threshold candidates with `scripts/analyze-context-window.ts`; do not tune compaction by intuition.
+3. Base compaction-threshold changes on `bun run debug` and `llm_runs` telemetry context data; do not tune by intuition.
 4. Before changing prompts, tools, or serialization, follow the cache process in the [development guide](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/engineering/development-guide.md).
 5. Compare cost per useful public reply as well as cost per run; a silent or failed run is still a provider cost.
 6. Before adding a capability, try to remove one layer, tool, model call, or dynamic field. Do not expand a one-group deployment into a multi-tenant system without an explicit requirement.

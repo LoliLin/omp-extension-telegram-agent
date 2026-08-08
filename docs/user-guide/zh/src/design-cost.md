@@ -12,7 +12,7 @@ mention、reply、配置名称和HMAC概率桶都由本地代码判断。普通�
 
 ## 2. Stable provider prefix 复用cache
 
-共享协议位于最前，persona与固定顺序tool schema随后，让多只bot尽可能共享逐字节相同的prefix。新消息只追加suffix；完整sticker目录不会扩大system prompt。
+共享协议位于最前，persona随后，末尾是有界的 identity-only sticker 目录，再之后是固定顺序tool schema，让多只bot尽可能共享逐字节相同的prefix。新消息只追加suffix；sticker 目录只含 set + emoji + short_id（有上限），一次固化后不再每轮变化。
 
 fingerprint覆盖Pi/provider/model/cache policy、protocol、persona、serializer、compaction、extensions与tools。cache-visible内容变化必须升级schema，并在restore前创建新session/epoch；旧session文件保留，但不会用不同identity恢复。UI、telemetry和operator命令不能偷偷改变provider bytes。权威规则见[Cache工程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md)。
 
@@ -20,7 +20,7 @@ fingerprint覆盖Pi/provider/model/cache policy、protocol、persona、serialize
 
 Telegram canonical history与immutable event stream保存在SQLite。每只bot用单调cursor消费event，另一组visible refs只描述当前context仍真正包含完整内容的消息。模型每轮只收到token有界、direct reply优先的event batch；日志、raw rich JSON、UI状态和无界工具输出不会进入provider context。
 
-默认新增suffix上限是12,000 tokens，单event上限4,096；sticker inventory每轮在本地检索，最多加入8个相关且当前bot可发送的候选。这把本地“完整事实来源”和模型“本轮必要上下文”分开。权威数据流见[架构](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md)与[数据模型](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/data-model.md)。
+默认新增suffix上限是12,000 tokens，单event上限4,096。这把本地“完整事实来源”和模型“本轮必要上下文”分开。权威数据流见[架构](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md)与[数据模型](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/data-model.md)。
 
 ## 4. Compaction 在明确边界换epoch
 
@@ -50,7 +50,7 @@ Pi native feed、assistant partial、footer、`/tg status`和Telegram control使
 
 1. 用`/tg status [bot]`记录runs、有效public send、prompt miss/read/write、output、reasoning、latency与cost；“lifetime”只表示配置的SQLite保留窗口。
 2. 比较同类活跃期，不把不同provider/persona/群规模混为一组。
-3. 用`scripts/analyze-context-window.ts`回放阈值候选；不要凭感觉改compaction。
+3. 调整compaction阈值时用`bun run debug`与`llm_runs`遥测的context数据做依据；不要凭感觉改。
 4. 任何prompt/tool/serialization改动先按[开发指南的cache流程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/engineering/development-guide.md)验证golden和epoch。
 5. 同时比较每个有效公开回复与每个run的成本；沉默或发送失败的run仍产生provider成本。
 6. 设计新能力时先尝试删除一层、一个tool、一次模型调用或一个动态字段；未经明确需求，不把单群deployment扩成多租户系统。

@@ -64,7 +64,6 @@ cp personas/template.en.md personas/friend.local.md
 - `telegram.config.ts`: trusted local TypeScript containing non-secret schema and environment-key names, with comments and editor types.
 - `.env`: the project's `key: value` colon format for Telegram tokens, an optional TinyFish key, and the router secret; model credentials do not belong here.
 - `personas/*.local.md`: local personas, ignored by Git by default.
-- `bots.config.json`: legacy deployment compatibility; prefer TypeScript for new setups.
 
 Read [Configuration](docs/user-guide/en/src/configuration.md) for a minimal one-bot config, additional bots, provider overrides, and routing rules. Tracked examples contain no valid credentials or private personas.
 
@@ -87,6 +86,6 @@ Read the [cost design overview](docs/user-guide/en/src/design-cost.md) for the s
 
 ## Development and maintenance
 
-Users do not need the internal architecture to complete setup. Contributors and coding agents should start with [AGENTS.md](AGENTS.md) and the [maintainer guide](docs/maintainers/guide.md). Current work is in the [handoff](docs/handoff.md), and the full map is in the [documentation index](docs/index.md).
+Users do not need the internal architecture to complete setup. Contributors and coding agents should start with [AGENTS.md](AGENTS.md) and the [development guide](docs/engineering/development-guide.md). The full map is in the [documentation index](docs/index.md).
 
 The current HEAD tracks only public persona templates. Older Git history may still contain removed deployment personas. The repository has not rewritten history and cannot replace necessary credential rotation.

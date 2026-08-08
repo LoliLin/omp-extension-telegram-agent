@@ -71,10 +71,8 @@ Pi 当前原生 `input` dialog 没有密码遮罩。BotFather token 输入时可
 再次运行 `/tg config` 时可以：
 
 - 验证现有 deployment；
-- 用 Pi editor 编辑项目根 `.ts` / `.json` 原文，确认后保留完整 backup；
+- 用 Pi editor 编辑项目根 `telegram.config.ts` 原文，确认后保留完整 backup；
 - 对默认 source 明确执行“备份并替换”；
 - 取消并保持所有字节不变。
-
-若 `.env` / process 的 `bots_config` 指向自定义 source，向导不会偷偷写一份 daemon 不会读取的默认配置。缺失或坏 override 必须先修复或移除。
 
 下一步：[配置与添加 bot](configuration.md)。

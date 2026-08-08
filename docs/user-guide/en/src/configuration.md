@@ -22,7 +22,7 @@ router_secret: REPLACE_WITH_RANDOM_LOCAL_SECRET
 ## Cost-first one-bot configuration
 
 ```ts
-import { defineConfig } from "./src/config-schema.ts";
+import { defineConfig } from "./src/config.ts";
 
 export default defineConfig({
   group_peer_id: 1234567890,
@@ -106,22 +106,13 @@ The wizard and example configs explicitly disable search and `run_js`. For compa
 - `routing_p` controls a normal human message's **response opportunity**, not a quota for final group posts. Each eligible message produces one deterministic value and enters at most one cumulative bucket. When the sum is 1, every eligible message has exactly one probability target.
 - `sampling_cooldown_ms` applies only to probability routing; it defaults to 2000, and 0 disables cooldown.
 - A busy or cooling probability target is skipped without reassignment. Mentions, replies, and configured names use the explicit path. Even after a run starts, the persona may remain silent and delivery may fail, so public-message ratios need not equal `routing_p`.
-- Empty `telegram_admins` denies Telegram `compact/set/reset`. When needed, prefer your own positive numeric user ID; never copy a placeholder ID.
-- Telegram `set/reset` stores an SQLite override without rewriting TypeScript; `reset` returns to the file baseline.
+- Empty `telegram_admins` denies Telegram `compact`/`set`. When needed, prefer your own positive numeric user ID; never copy a placeholder ID.
+- Telegram `/set <routing_p|cooldown_ms> <value>` writes through to `telegram.config.ts` (atomic write plus full validation; any failure rolls the file back). The in-memory effective value updates immediately and survives restarts.
 
-Audit the current deployment without writes:
+Use `bun run debug` for read-only deployment diagnostics (see [Operations](operations.md) and [Troubleshooting](troubleshooting.md)).
 
-```bash
-bun run scripts/analyze-routing.ts            # use the default data/daemon.log
-bun run scripts/analyze-routing.ts --no-log   # replay SQLite only
-```
+## Multiple groups
 
-The report uses only ordinal labels such as `bot-1` and separately shows current-effective assignment, daemon started/busy/cooldown, LLM runs, and final public messages. A daemon log covers only a process segment and may rotate, so it is always `partial`; a missing log is `unavailable`, never a fabricated zero. Replaying history with today's configuration is counterfactual and does not prove the historical configuration. The command never writes the database or calls a model. Message bodies are reduced to trigger categories inside local SQLite and never enter script memory or output. A single custom log path may be supplied as the only argument.
-
-## Legacy format and multiple groups
-
-`bots.config.json` remains loadable, but new deployments should prefer TypeScript. Both default TS and legacy JSON together fail fast; `bots_config` accepts only explicit `.ts` / `.json` sources.
-
-One deployment has one `group_peer_id`. Multiple groups require isolated working directories and data/session/database/PID/socket resources. Do not switch `bots_config` concurrently inside one checkout.
+One deployment has one `group_peer_id`. Multiple groups require isolated working directories and data/session/database/PID/socket resources. Do not run a second group in one checkout by only switching configuration files.
 
 Next: [Chat and observe in Pi](using-pi.md).

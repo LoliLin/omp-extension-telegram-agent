@@ -22,11 +22,11 @@
 ```
 
 - **daemon**：唯一长驻进程。`composeDeployment()`按配置为每个 bot 建立identity state与runtime map，`composePollers()`建立同数量poller；router、Telegram control与IPC消费同一组动态id/name/user-id map。daemon同时持有 SQLite 与 IPC server。
-- **Pi 插件**：项目 package 被 Pi 自动发现；通过 IPC 拉历史、订阅实时事件。关闭 Pi 或 `/tg detach` 不影响 daemon。
+- **Pi 插件**：没有独立 TUI 进程——chat UI 就是 Pi 插件本身：`.pi/extensions/tg-extension.ts`（Pi extension，拥有组件树与命令）+ `src/plugin/timeline.ts`（无展示逻辑的 IPC client）。项目 package 被 Pi 自动发现；通过 IPC 拉历史、订阅实时事件。关闭 Pi 或 `/tg detach` 不影响 daemon。
 
 ## 运行时与依赖
 
-- 运行时：**Bun**（Phase 1 会做 Pi SDK × Bun 兼容性 smoke test；不兼容则降级 Node 26 + node:sqlite 并更新本文档）
+- 运行时：**Bun**（Pi SDK × Bun 兼容性已经 smoke 验证）
 - Pi：registry `@earendil-works/pi-coding-agent`、`pi-ai`、`pi-agent-core`、`pi-tui` 精确锁定为 v0.84.1；`scripts/pi-launcher.ts` 在 project-local CLI 缺失时执行 `bun install --frozen-lockfile`，随后始终以 Bun 启动 lockfile 对应版本。运行与构建不读取 sibling `../pi`。
 - Telegram：raw Bot API（fetch long polling），无第三方 SDK
 
@@ -37,33 +37,32 @@
 - Telegram create 是不可回滚的 commit boundary。Bot API 返回 Message 后先按 25/100/250 ms 有界重试 canonical SQLite/event insert，再更新 context visibility、broadcast、agent event 与 typing cleanup；这些后置副作用任一失败都只能返回 terminal `committed/no_retry`并写脱敏`send_degraded`，绝不把整次tool call抛回模型。timeout、断线、非JSON、429/5xx等无法证明未创建的结果直接terminal `unknown/no_retry`；message已提交后sticker失败则是`partial/no_retry`。poller echo继续以canonical/event key完成本地幂等恢复。
 - agent `send.message` 先由Pi TUI公开的`Marked` lexer和本地有界renderer转换为classic `sendMessage {text,entities?}`；普通paragraph没有style entity，显式Markdown才产生格式。只有Telegram明确以确定性400拒绝entity/format且确认未创建消息时，才对同一生成text做一次无entities fallback。operator manual compose仍保持literal plain text，两条路径复用`src/telegram/send.ts`的send→canonical persistence primitive；incoming RichMessage normalize/raw persistence/projection继续保留。
 
-## Routing（Phase 5，REQ-CONF-0001 泛型化）
+## Routing
 
 - deterministic：`u = HMAC(router_secret, chatId + ":" + messageId)` → 按配置数组顺序累积 `routing_p` 阈值：`u < p[0]` → bots[0]；`p[0] ≤ u < p[0]+p[1]` → bots[1]；…否则 nobody（Σp ≤ 1 启动期校验）
 - 优先级：明确 @mention > reply target > 名字关键词 > 概率 routing
-- Bot 消息不进 trigger（`routeMessage` 内部单一权威判断，REQ-TEST-0001 R3）
+- Bot 消息不进 trigger（`routeMessageDecision` 内部单一权威判断）
 - router 返回target + reason + chat/message id；reply先认canonical `reply_to_sender_id` snapshot、再查父行。只有 `probability` 走runtime availability gate；bucket先按原HMAC决定，目标busy/cooldown时直接skip，绝不改投其他bot。
 - 每 bot 的 probability run 完成后用 monotonic deadline 冷却 `sampling_cooldown_ms`（默认 2000 ms）；deadline 不设 timer、不补抽，之后只有新消息才重新采样。不同 bot 仍可并发。
 - mention/reply/name 是 explicit path：配置 `name` 在 text/caption 中字面命中（例如“小雨”命中“我叫小雨”）即使 `routing_p=0` 也成立；busy 时继续 pending coalesce，cooldown 中也可立即启动；shutdown 不等待 cooldown。
-- Telegram control override只开放`routing_p`与`cooldown_ms`：文件配置是reset基线，`bot_state`中的有效override在runtime构造前恢复并直接更新同一`BotConfig`对象，因此router/runtime下一次决策立即读取effective值。任何routing set/reset都先按全部配置bot原子校验Σp≤1；坏持久值使启动失败，不静默回退。
-- `scripts/analyze-routing.ts`用production loader和严格只读SQLite连接重放**当前effective配置**：SQLite在本地把正文列折叠为trigger code，JavaScript扫描只收到chat/message identity与reason，不持有或输出正文。assignment只含非mention/reply/name的probability样本；canonical主键保证duplicate update不重复计数。daemon log只提供进程内started/busy/cooldown片段，永远标`partial`（缺失为`unavailable`）；报告只用`bot-N`并明确LLM run、response opportunity与最终public message是不同口径。它不写route event、不调用模型，也不能把当前配置重放冒充历史实际配置。
-- Telegram control service只接受offset 0的`bot_command` entity；command/subcommand/suffix大小写不敏感，未知suffix不接管，参数严格按固定arity/type解析。daemon在normal route前同步分流，human public read与allowlist mutation分层，所有mutation共用一个串行队列；manual compact先占runtime control lock，只在idle时无instructions调用Pi `session.compact()`，期间explicit coalesce、probability fast-skip，绝不abort在途回复。回复由suffix目标或实际接收bot走plain Telegram create→canonical DB→IPC broadcast，并用`reply_parameters`引用原命令；unknown outcome/local failure只脱敏记录、不远端重试。durable control claim/reply evidence跨restart/epoch永久排除这些message id；compact替换visibility也不会送入provider。每bot启动并行best-effort `setMyCommands(/tg)`，失败不阻塞polling。
+- Telegram control 只开放 `routing_p` 与 `cooldown_ms` 两个可变项：`/set` 经 `updateBotConfigField` 写穿 `telegram.config.ts`（配置文件是唯一权威，新值重启后仍生效），并同步更新内存中的同一 `BotConfig` 对象，router/runtime 下一次决策立即读取新值。任何 routing set 都先按全部配置 bot 原子校验 Σp≤1；校验失败不落盘、不改内存。
+- Telegram control service只接受offset 0的`bot_command` entity；命令固定为 `/help`、`/status`（human public read）与 `/compact`、`/set`（admin mutation），带 `@bot_username` 后缀时定向到对应 bot。未知命令、未知后缀不接管，参数严格按固定arity/type解析。daemon在normal route前同步分流，所有mutation共用一个串行队列；manual compact先占runtime control lock，只在idle时无instructions调用Pi `session.compact()`，期间explicit coalesce、probability fast-skip，绝不abort在途回复。回复由suffix目标或实际接收bot走plain Telegram create→canonical DB→IPC broadcast，并用`reply_parameters`引用原命令；unknown outcome/local failure只脱敏记录、不远端重试。durable control claim/reply evidence跨restart/epoch永久排除这些message id；compact替换visibility也不会送入provider。每bot启动并行best-effort `setMyCommands`（help/status/compact/set 菜单），失败不阻塞polling。
 - route acceptance先取得`routing_claims` durable claim；insert/enrichment/replay只会让同一bot启动一次。pending/nonaccepted可重取，accepted started/coalesced永久抑制重复；probability bucket和explicit优先级本身不变。
 - human direct reply在provider前已持久化per-bot obligation。flush最多索引读取256条近期event与64条obligation event，先打包全部可容纳的pending reply，再从最新普通event向前选择并恢复Telegram顺序。普通overflow可以推进cursor但不标visible；pending reply不因普通预算被删除，并按后续flush继续交付。只有结构化custom message与commit marker持久化后才清obligation；失败/stop保留，startup从session details幂等reconcile。
-- accepted trigger 同步 acquire per-bot Telegram `typing` lease（REQ-TG-0002）：当前目标是 supergroup，只调用 `sendChatAction`，不调用 private-only message/rich draft。单个递归 timer每4秒续约且最多一个in-flight；组合send完整成功时release，沉默/异常/abort/flush settle/shutdown由finally兜底。第一条send清状态后，coalesced pending在下一轮flush重新acquire。side channel失败按streak脱敏告警，不写DB/IPC/provider context，也不改变cursor、visibility、routing、cooldown或send结果。
+- accepted trigger 同步 acquire per-bot Telegram `typing` lease：当前目标是 supergroup，只调用 `sendChatAction`，不调用 private-only message/rich draft。单个递归 timer每4秒续约且最多一个in-flight；组合send完整成功时release，沉默/异常/abort/flush settle/shutdown由finally兜底。第一条send清状态后，coalesced pending在下一轮flush重新acquire。side channel失败按streak脱敏告警，不写DB/IPC/provider context，也不改变cursor、visibility、routing、cooldown或send结果。
 
-## Agent（Phase 3）
+## Agent
 
 - 每 bot 一个 `createAgentSession()`，各自拥有SessionManager和DefaultResourceLoader；整个daemon只创建一个Pi `ModelRuntime`，各session绑定解析后的provider/model/reasoning/cache retention。shared runtime在pid lock后、任何Telegram调用前预检全部聊天、compaction与启用的vision模型；认证完全由Pi auth store提供。
 - runtime在打开session前计算完整context fingerprint（Pi/provider/api/model/reasoning/cache retention/schema/shared protocol/persona/serializer/compaction/catalog snapshot/extensions/tools）。manifest fingerprint与session文件都匹配才resume；否则保留旧文件、创建新session、推进epoch并清当前visibility。
-- 固定hidden extension顺序为`tg-context → tg-compaction → tg-cache-observer → tg-assistant-persistence`。shared protocol是system prompt首段，persona随后；sticker catalog不进入system。
+- 固定hidden extension顺序为`tg-context → tg-compaction → tg-cache-observer → tg-assistant-persistence`。shared protocol是system prompt首段，persona随后，identity-only sticker catalog block 在末尾。
 - 触发/flush 是 BotRuntime 串行状态机：`idle → flushing → idle`。在途trigger只合并为`pendingTrigger`；shutdown最多等待30秒。每轮从`message_events`按cursor做有界索引读取，用保守token估算打包成`telegram_context_v2` custom message。Pi 的`sendCustomMessage(triggerTurn)`会在promise返回前执行完整provider/tool turn，因此本批完整打包的message id先获得turn-local内存可见性，使同轮`send.reply_to`可通过preflight；session提交失败则从structured entries恢复。只有session持久化成功或startup reconcile证明entry存在后才推进durable cursor/visibility。
 - 群消息、edit、metadata与media completion使用固定紧凑grammar追加；恢复和compaction只读structured details，不从文本正则反推identity。成功compaction只替换visibility与epoch，业务cursor永不回退。
-- tools 固定为 `send`、`search`、`run_js`（Phase 6 起），禁用 coding agent 默认文件工具。`src/agent/tools.ts` 是 provider-facing 用法唯一权威；persona/protocol 不复制参数。`send(message?,sticker?,reply_to?)` 是唯一公开通道，`message` 为自然Markdown；本地仅映射bold/italic/strike/code/public link/heading/list/blockquote/simple table等固定子集，不启用HTML/MarkdownV2 parser或远程图片。完整成功返回固定 `ok`，远端 committed/partial/unknown 的退化路径返回固定 `no_retry`，两者都用 `terminate:true` 阻止 follow-up provider call，sent ids 只留本地 details/event。
+- tools 固定为 `send`、`search`、`run_js`，禁用 coding agent 默认文件工具。`src/agent/tools.ts` 是 provider-facing 用法唯一权威；persona/protocol 不复制参数。`send(message?,sticker?,reply_to?)` 是唯一公开通道，`message` 为自然Markdown；本地仅映射bold/italic/strike/code/public link/heading/list/blockquote/simple table等固定子集，不启用HTML/MarkdownV2 parser或远程图片。完整成功返回固定 `ok`，远端 committed/partial/unknown 的退化路径返回固定 `no_retry`，两者都用 `terminate:true` 阻止 follow-up provider call，sent ids 只留本地 details/event。
 - `search(query?|url?)`复用同一TinyFish tool且强制二选一：query只发送现行`query`并在本地保留≤5条短结果；url只允许≤2048字符的public HTTP(S)，本机不做DNS/GET，提交一个URL到Fetch API。fetch固定一页、≤1 MiB、≤8,000字符/50秒，进入provider前再截到≤2,048 tokens并套untrusted boundary；事件不记录query、URL path/query/fragment、正文或key。群消息不会触发eager fetch。
 - local assistant text（未调send）→ agent_events + TUI；session里只保留固定`[no_send]`，不把未发布prose带入后续provider context。
 
-## run_js sandbox 威胁模型（REQ-SEC-0001）
+## run_js sandbox 威胁模型
 
 - **威胁**：run_js 输入来自 LLM，LLM 上下文来自群消息 → 群成员可经 prompt injection 让 bot 执行攻击者构造的 JS。最坏情况是读到 daemon 同 uid 可读的 `.env`（全部 bot token / API key）并联网外发。
 - **防到什么**：vm context 由 `Object.create(null)` 创建且 `codeGeneration: { strings: false, wasm: false }`，context 内**不存在任何 host realm 对象/函数**——`console.log.constructor` / `this.constructor.constructor` / `Function` / `eval` 全部拿不到 host `Function`，逃逸链在第一步就断。console/日志在 context 内部 bootstrap；结果只在 context 内 `JSON.stringify` 后以字符串跨界（primitive 跨界安全）。child 进程 env 被 scrub（仅 PATH，无 secret）、隔离 tmp cwd、`--smol` 限内存、同步代码 vm timeout 3s、进程级 5s SIGKILL 兜底、输出 4KB 上限。
@@ -84,7 +83,7 @@
 - 日志覆盖daemon/ingest/routing/runtime/provider/tool/send/IPC/media边界，但不承担业务authority。SQLite routing claims、cursor/obligation、agent events与llm runs仍是durable evidence；日志用既有bot/message/run/epoch identity关联，不保存正文、prompt/response/thinking、tool args、完整URL/path或stack。
 - `bun run debug`通过不依赖Pi认证的deployment loader、readonly SQLite/Pi session与最后64 KiB JSONL生成有界业务报告，并默认重建无正文的完整pre-adapter provider结构；显式单bot开关才把完整system与active messages写到stdout。机械finding区分cursor backlog、pending reply、route无run、model silence、tool preflight failure与send degraded。完整调查流程和新功能门禁见`docs/engineering/debugging-guide.md`。
 
-## Pi 原生 Telegram transcript（REQ-UI-0001/2/3/4）
+## Pi 原生 Telegram transcript
 
 - package 入口是 `.pi/extensions/tg-extension.ts`；`package.json` 的 `pi.extensions` 使项目可被 Pi 自动发现，规范启动命令是 `bun run pi`。
 - `/tg attach [bot-id]` 通过 `registerEntryRenderer` + `appendEntry` 在 Pi 自己的 transcript 中挂载一个 **TUI-only custom entry**。一次 attach 只写一个锚点；Telegram snapshot、实时消息和历史页只存在于该 entry 的内存组件树，不逐条写 Pi session，也不进入 provider context。
@@ -93,21 +92,21 @@
 - public extension API 没有 transcript scroll-top 事件，因此更早历史由 `/tg more` 显式加载；`/tg detach` 只断开 live socket，已显示内容保留。session restore 的旧锚点以 detached 状态呈现，不自动重连。
 - stats 通过官方 `ctx.ui.setFooter` mount point 直接返回 Pi 导出的 `FooterComponent`。插件只提供只读内存 telemetry session view；不复制 footer renderer、不写真实 Pi session。active feed 复用同一份 IPC stats，独立 panel 只拥有一个可清理的订阅。
 - `/tg` 只注册一个 Pi slash command；声明式递归 command tree 是 syntax/help/dispatch/completion 的共同来源。`getArgumentCompletions` 返回 replace-entire-argument value，动态节点只从启动期已验证 config 缓存 bot `id/name`，不读 DB、网络或 secret。
-- IPC：Unix socket JSONL，daemon 为 server；协议 = hello（可带 bot filter）/ history 分页拉取 / event 订阅 / usage 增量推送（REQ-UI-0003）/ additive `send_message`→`send_result`（REQ-UI-0005）/ additive `agent_stream`（REQ-UI-0010）/ identity-only `vision_update`与owner-local `media_ready`（REQ-UI-0006/0014）。
-- **manual send（UI-0005 daemon contract）**：extension 只提交 request id、bot id 与纯文本；daemon 校验身份/空文本/4096 字符上限，在有界 256-entry request cache 中合并并发重复，再调用 Telegram。API 成功后先写 canonical DB、再 broadcast、最后 ACK；ACK 丢失不触发 daemon retry。相同 id 不同内容返回 conflict；API/DB 边界给出 explicit failure/unknown outcome，token 不出 daemon。
-- **原生 editor compose（UI-0005）**：成功`/tg attach [bot-id]`自动建立scope compose。filtered scope或全局唯一bot直接得到身份；全局多bot在每次interactive提交时调用Pi公开`ctx.ui.select`，取消恢复原文并保持`handled`。`/tg compose <bot-id>`是sticky override，`compose off`让editor回到Pi，bare `compose`恢复scope。footer status持续显示`SEND AS`或`CHOOSE BOT ON SEND`。extension不替换editor/select，只拦截interactive `input`且不写Pi session/provider context；RPC/extension source继续交给Pi。选择/发送期间拒绝第二次提交；明确失败恢复原文，ACK超时/断线恢复原文并关闭compose、提示先查群且不自动重试。附件不降级。generation使attach replacement、detach、restart/config、daemon断线与session shutdown后的迟到选择/ACK不能关闭或使用新scope。
+- IPC：Unix socket JSONL，daemon 为 server；协议 = hello（可带 bot filter）/ history 分页拉取 / event 订阅 / usage 增量推送 / additive `send_message`→`send_result` / additive `agent_stream` / identity-only `vision_update`与owner-local `media_ready`。
+- **manual send（daemon contract）**：extension 只提交 request id、bot id 与纯文本；daemon 校验身份/空文本/4096 字符上限，在有界 256-entry request cache 中合并并发重复，再调用 Telegram。API 成功后先写 canonical DB、再 broadcast、最后 ACK；ACK 丢失不触发 daemon retry。相同 id 不同内容返回 conflict；API/DB 边界给出 explicit failure/unknown outcome，token 不出 daemon。
+- **原生 editor compose**：成功`/tg attach [bot-id]`自动建立scope compose。filtered scope或全局唯一bot直接得到身份；全局多bot在每次interactive提交时调用Pi公开`ctx.ui.select`，取消恢复原文并保持`handled`。`/tg compose <bot-id>`是sticky override，`compose off`让editor回到Pi，bare `compose`恢复scope。footer status持续显示`SEND AS`或`CHOOSE BOT ON SEND`。extension不替换editor/select，只拦截interactive `input`且不写Pi session/provider context；RPC/extension source继续交给Pi。选择/发送期间拒绝第二次提交；明确失败恢复原文，ACK超时/断线恢复原文并关闭compose、提示先查群且不自动重试。附件不降级。generation使attach replacement、detach、restart/config、daemon断线与session shutdown后的迟到选择/ACK不能关闭或使用新scope。
 - **传输层**：FrameDecoder 持单个 streaming TextDecoder（多字节字符跨 chunk 不腐蚀）；接收缓冲 4MB 上限，超限断开；socket.write <0 即踢连接，出站队列 1MB 上限，超限断开（TUI 挂起时 daemon 内存有界）
-- **分页**：merged timeline 统一排序键 (ts, rank, id)（rank 0=agent 事件，1=群消息），history 用复合游标，同秒多条消息不丢不重；旧客户端只发 beforeTs 时保持严格 `ts<` 语义（双向兼容，新客户端同时发送两字段）
+- **分页**：merged timeline 统一排序键 (ts, rank, id)（rank 0=agent 事件，1=群消息），history 用复合游标，同秒多条消息不丢不重。
 - **本机暴露面**：socket 文件 chmod 600；history limit 服务端夹取 [1,500]
 - **终端注入防护**：渲染前 strip ANSI/OSC/DCS 转义与控制字符（保留 \n/\t），群消息无法清屏/改色/写剪贴板（OSC 52）
 - **竞态去重**：snapshot 与 broadcast 重复条目按 (chatId,messageId)/(evtId) 去重；翻页补日期分隔线
-- **attach 过滤（REQ-UI-0002）**：`/tg attach <bot-id>` 以单 bot 视角观察——daemon 端对 snapshot / history / broadcast / usage 过滤 agent_events（群消息始终全量）；不指定时为全局视角；非法 id 由 extension 根据 daemon hello 信息列出有效清单。
-- **Pi 原生 telemetry footer（REQ-UI-0003/0007/0009）**：SQLite 保留期 lifetime 的 `cacheMiss/output/cacheRead/cacheWrite/cost` 映射到 Pi 原生 `↑/↓/R/W/CH/$`，最近 run 提供 current context，配置提供 model/reasoning；全局只聚合当前配置 bots 并取最新 run 的 model。snapshot 附全历史基线（`lastId` 防 live 双计），llm_run 经 additive IPC 推送 cache/reasoning/latency。telemetry view 只存在于内存，委托 `FooterComponent` 处理 theme/width/cwd/git/status；`panel off` 恢复 operator session default footer，完整 lifetime/latest 明细由 `/tg status` 通知。
-- **Pi 原生 assistant stream（REQ-UI-0010）**：runtime 将 Pi assistant `message_start/update/end` 转成有界完整快照（thinking/text/至多 4 个 tool args），daemon 按 bot filter只向 live listener 推送，不写 SQLite/snapshot/history/Pi session。feed 最多保留 32 张临时 `Container`/`Box`/`Text` 卡片，end/abort/disconnect 原位移除，迟到 ended id 被有界 tombstone 忽略；最终 LOCAL/tool/Telegram event继续走既有单次持久链路。extension 从 `setFooter` factory保留 session `TUI.requestRender()`，每次 feed 变化只请求宿主刷新；Pi 自己约 16 ms 合帧，`panel off` 不销毁 render handle。
-- **媒体内联（REQ-UI-0001/UI-0012/UI-0013）**：终端能力只读 Pi `getCapabilities()`。PNG 直接交给 Pi `Image`；Pi 判定为 Kitty protocol 时，JPEG/WebP/GIF 先用 coding-agent 公开的 `convertToPng()` 异步归一化，完成后只重建引用同一文件的原生卡片并请求 host render。sticker 使用 Pi `Image` 的 24×12 cell 上限，photo 等其他图片保留 56×16；比例、窄宽度 clamp、resize、crop 与 fallback 仍全部由 Pi 负责。转换按 path + size + mtime revision 合并 in-flight，结果/失败共用最多 32 项、32 MiB 的 LRU（单项 8 MiB，pending 32）；detach/restart/shutdown 会移除旧 feed callback。iTerm2/无图像能力继续走 Pi 自身 Image/fallback，WebM等不支持格式保留文字占位。IPC 只传 `mediaPath`/`mediaDesc`；source 读取仍限 1 MiB，base64与绝对路径不进入日志、DB、session或provider。
-- **photo readiness（REQ-UI-0014）**：poller先提交raw/canonical/offset，daemon再broadcast placeholder并把photo identity交给后台queue；routing/nobody/busy不影响下载。live queue按identity去重、最多2 active/128 pending；startup按最新`media.rowid`只排100条`local_path IS NULL`。precache和vision共享同一Telegram download in-flight；支持的≤1 MiB静态文件以hash basename写同目录0600临时文件后rename，成功才更新`media.local_path`并广播`media_ready`。timeline用256项/10分钟乱序cache把path合入live/history消息，feed只重建匹配slot并请求Pi host render；不新增entry、vision或LLM call。shutdown先stop/abort queue再关DB，失败只留label fallback与脱敏聚合。
+- **attach 过滤**：`/tg attach <bot-id>` 以单 bot 视角观察——daemon 端对 snapshot / history / broadcast / usage 过滤 agent_events（群消息始终全量）；不指定时为全局视角；非法 id 由 extension 根据 daemon hello 信息列出有效清单。
+- **Pi 原生 telemetry footer**：SQLite 保留期 lifetime 的 `cacheMiss/output/cacheRead/cacheWrite/cost` 映射到 Pi 原生 `↑/↓/R/W/CH/$`，最近 run 提供 current context，配置提供 model/reasoning；全局只聚合当前配置 bots 并取最新 run 的 model。snapshot 附全历史基线（`lastId` 防 live 双计），llm_run 经 additive IPC 推送 cache/reasoning/latency。telemetry view 只存在于内存，委托 `FooterComponent` 处理 theme/width/cwd/git/status；`panel off` 恢复 operator session default footer，完整 lifetime/latest 明细由 `/tg status` 通知。
+- **Pi 原生 assistant stream**：runtime 将 Pi assistant `message_start/update/end` 转成有界完整快照（thinking/text/至多 4 个 tool args），daemon 按 bot filter只向 live listener 推送，不写 SQLite/snapshot/history/Pi session。feed 最多保留 32 张临时 `Container`/`Box`/`Text` 卡片，end/abort/disconnect 原位移除，迟到 ended id 被有界 tombstone 忽略；最终 LOCAL/tool/Telegram event继续走既有单次持久链路。extension 从 `setFooter` factory保留 session `TUI.requestRender()`，每次 feed 变化只请求宿主刷新；Pi 自己约 16 ms 合帧，`panel off` 不销毁 render handle。
+- **媒体内联**：终端能力只读 Pi `getCapabilities()`。PNG 直接交给 Pi `Image`；Pi 判定为 Kitty protocol 时，JPEG/WebP/GIF 先用 coding-agent 公开的 `convertToPng()` 异步归一化，完成后只重建引用同一文件的原生卡片并请求 host render。sticker 使用 Pi `Image` 的 24×12 cell 上限，photo 等其他图片保留 56×16；比例、窄宽度 clamp、resize、crop 与 fallback 仍全部由 Pi 负责。转换按 path + size + mtime revision 合并 in-flight，结果/失败共用最多 32 项、32 MiB 的 LRU（单项 8 MiB，pending 32）；detach/restart/shutdown 会移除旧 feed callback。iTerm2/无图像能力继续走 Pi 自身 Image/fallback，WebM等不支持格式保留文字占位。IPC 只传 `mediaPath`/`mediaDesc`；source 读取仍限 1 MiB，base64与绝对路径不进入日志、DB、session或provider。
+- **photo readiness**：poller先提交raw/canonical/offset，daemon再broadcast placeholder并把photo identity交给后台queue；routing/nobody/busy不影响下载。live queue按identity去重、最多2 active/128 pending；startup按最新`media.rowid`只排100条`local_path IS NULL`。precache和vision共享同一Telegram download in-flight；支持的≤1 MiB静态文件以hash basename写同目录0600临时文件后rename，成功才更新`media.local_path`并广播`media_ready`。timeline用256项/10分钟乱序cache把path合入live/history消息，feed只重建匹配slot并请求Pi host render；不新增entry、vision或LLM call。shutdown先stop/abort queue再关DB，失败只留label fallback与脱敏聚合。
 
-## Vision（Phase 7）
+## Vision
 
 - 默认关闭；显式`vision.enabled: true`才启用，旧配置明确提供`auxiliary_visual_model`时兼容启用。图片落库即可显示，UI不触发vision。
 - 识别结果按 media identity 持久化，所有配置 bot 共享（vision cache）
@@ -115,34 +114,34 @@
 - daemon在任何Telegram调用前把视觉选择与所有聊天模型一起交给唯一Pi `ModelRuntime`做catalog/auth预检；视觉默认/示例为`openai-codex/gpt-5.6-luna:low`，历史`gpt-5.6-luna-low`仅在loader边界归一化，不进入runtime。模型缺失、未认证或不支持image input均按固定category终止启动，项目不读取credential。
 - JPEG/PNG原样作为Pi `ImageContent`发送；静态WebP/GIF先走Pi公开`convertToPng()`，TGS/WebM/未知格式确定性fallback且不调用provider。每次`completeSimple()`固定low、256 output tokens、90秒abort、provider retry 0；上游失败/空响应只落固定outcome，不写错误正文。
 - production vision event只含kind、source/converted bytes bucket、latency、input/output/reasoning token、cost与outcome；不含media identity/path/prompt/response。deployment scheduler默认并发2、每轮foreground最多2、每群每小时24、每日200。direct reply媒体优先；失败、unsupported或budget exceeded使用确定性fallback。
-- 新的非空描述持久化后追加唯一`media_update` event；已经写入session的message entry不重算、不重写。catalog身份只参与fingerprint，本轮可发送sticker由本地top-K检索进入动态suffix。
+- 新的非空描述持久化后追加唯一`media_update` event；已经写入session的message entry不重算、不重写。vision 只覆盖照片/图片；sticker catalog 不做 vision 回填，其 identity snapshot 只参与 fingerprint。
 - 新的非空描述成功写入 DB 后，`ensureVision` 只发布一次 `(fileUniqueId,text)`；cache hit、unsupported、空结果与失败不发布。background catalog 与 lazy batch 共用同一 in-flight promise，因此 UI transport 不增加 vision provider call。
 - `MsgItem.fileUniqueId` 与 additive `vision_update` 经 daemon IPC 广播给所有 live transcript；旧 client 可忽略新字段/帧。snapshot/history 仍从同一 `media.vision` 读取，provider serialization 不变。
 - timeline 以 256-entry / 10-minute map 有界缓存乱序 update；message/live/history 到达时按 `fileUniqueId` 合并。已显示消息收到新描述时，feed 更新所有匹配 item 并用 Pi component tree 原位 rebuild，不追加 session entry；重复 update 幂等。
 - media card 在图片或 fallback 正下方用 Pi theme `Text` 显示 `视觉理解 · <text>`，snapshot 与 live 文案一致；显示前继续走 `sanitize()`，ANSI/OSC 不进入终端控制流。
 
-## Sticker 可发送性（REQ-STICKER-0002）
+## Sticker 可发送性
 
 - `media.file_unique_id` / `short_id` 是共享身份；`media_file_ids(bot_id,file_id,file_unique_id)` 才是 bot-specific 可发送能力。
-- catalog identity、vision与每轮dynamic candidates都用当前bot mapping过滤；set name不能证明可发送。provider每轮最多看到8个与当前suffix相关的候选，完整catalog永不进入stable prefix。
+- catalog block 只用当前 bot mapping 过滤后的可发送 sticker 构建；set name 不能证明可发送。固定 catalog 以 identity-only 行（每行 set + emoji + short_id，按 set 名 + rowid 排序，上限 `STICKER_CATALOG_MAX` 条）固化在 system prompt 尾部，完整进入 stable prefix；不做每轮 top-K 检索，也没有动态候选 suffix。
 - `send` tool 在任何 network call 前再次用同一 mapping 做 preflight；若已提交的 short id 缺 mapping，记录 `candidate_invariant`，不会先发文字再失败。
-- catalog 启动日志给出fetched/catalog/sendable/missing_file_id；缺mapping行不进入候选。short id仍可由本地send preflight解析。
+- catalog 启动日志给出fetched/catalog/sendable/missing_file_id；缺mapping行不进入 catalog block。short id仍可由本地send preflight解析。
 
 ## Provider context flow
 
-- 稳定prefix：共享群聊protocol先于persona，之后是固定顺序tool name/description/parameter schema。
-- 动态suffix：有界immutable event batch、reply obligation、media delta、每轮sticker top-K与tool outputs，只追加。
+- 稳定prefix：共享群聊protocol先于persona，末尾是 identity-only sticker catalog block，之后是固定顺序tool name/description/parameter schema。
+- 动态suffix：有界immutable event batch、reply obligation、media delta与tool outputs，只追加。
 - `bot_cursors`保证业务消费单调；`bot_visible_messages`只表示当前generation真实可见的完整消息。两者不混用。
 - 成功compaction替换visible refs并开启新epoch但不改cursor；完整fingerprint不匹配则在restore前建立新session/epoch。
 - payload observer只持久化deployment-local HMAC和首个差异位置；不保存provider plaintext。
 
-## 配置（REQ-CONF-0001 重构后）
+## 配置
 
-- **`telegram.config.ts`**（项目根，首选）通过`defineConfig()`提供静态字段类型与注释；它是用户明确信任的本机代码，不是sandbox。legacy `bots.config.json`保持同一schema与归一化结果；默认同时存在两份时fail-fast，env `bots_config`可显式选择`.ts` / `.json`路径。除identity/routing/model/tools外，顶层和per-bot可配置`cache_retention`、compaction model/threshold/keep、`max_suffix_tokens`、`max_message_tokens`；deployment另有vision scheduler与telemetry/raw/event retention。canonical example显式选择Luna/off/short、关闭search/run_js/vision并使用12k/4096上限。旧配置省略provider/model时仍读取Pi defaults以保持兼容，但reasoning默认`off`；跨provider覆盖必须显式给model。
+- **`telegram.config.ts`**（项目根，唯一配置文件）通过`defineConfig()`提供静态字段类型与注释；它是用户明确信任的本机代码，不是sandbox。除identity/routing/model/tools外，顶层和per-bot可配置`cache_retention`、compaction model/threshold/keep、`max_suffix_tokens`、`max_message_tokens`；deployment另有vision scheduler与telemetry/raw/event retention。canonical example显式选择Luna/off/short、关闭search/run_js/vision并使用12k/4096上限。旧配置省略provider/model时仍读取Pi defaults以保持兼容，但reasoning默认`off`；跨provider覆盖必须显式给model。
 - **`.env`**（`key: value`冒号格式，自解析）+ `.env.example`：只放项目拥有的secret（bot tokens / TinyFish / router_secret / gpg passphrase）；Pi auth store独占provider credential。旧`.env`中的provider key即使保留也不会被loader读取，配置、启动日志与运行时对象均不含其env key或值。
 - **onboarding write boundary**：`src/onboarding/config-core.ts`只接受完整内存draft；先校验peer、Telegram token/env key与persona，再将`.env`、typed config与private persona写为各自同目录0600临时文件。fresh `.env`只含Telegram token；向导把已经通过catalog/auth预检的Pi provider/model固定进新config，并显式写reasoning/search/run_js/vision关闭及context/cache/compaction/retention上限。旧手写配置仍可省略provider/model兼容继承Pi。create模式遇到任一现有目标即保留并拒绝；明确replace才先rename到唯一backup，再安装全部新文件。任一rename/chmod/final `loadConfig()`失败会删除新目标并恢复backup。
-- **Pi 原生配置向导（REQ-ONBOARD-0001）**：`/tg config`是command tree中的静态节点，config loader失败时仍可帮助、补全和dispatch。fresh/replace流程在第一个输入dialog前用Pi defaults + catalog/auth status做零provider-call预检，只显示脱敏`provider/model:thinking`；失败固定分类并引导Pi `/login`、`/model`，writer调用为0。`src/onboarding/config-wizard.ts`只编排Pi公开的`select/input/confirm/editor/notify`；public persona template先于Telegram secret输入读取，取消任一步不调用writer。source探测与production loader同样服从`.env`/process的`bots_config`；自定义source只允许安全的validate/项目根原文edit，缺失或坏override先修复而不旁写一个daemon不会读取的default。首次写入或已确认的原文替换通过production loader后，extension只用固定参数委托既有`bun run src/main.ts restart`控制路径；只有exit 0且输出明确`daemon ready`才建立all-bots native feed。失败保留已验证文件、清除旧连接并显示经过credential redaction的status/retry诊断。dialog值不写notification、进程参数、Pi session或provider context。
-- **启动期校验（REQ-OPS-0001 R2 + REQ-CONF-0001 R6 合并框架）**：TS/JSON 共用运行时 schema 校验（id 唯一合法、token_env 在 .env 存在、persona 文件可读、routing_p ∈[0,1] 且 Σ≤1、数值有限>0）+ env 数值检查；peer id 三种形式统一归一化；校验失败收集**全部**错误一次性抛出（ConfigError 逐条点名），不静默 NaN
-- **进程管理（REQ-OPS-0001/0002）**：daemon 最早时机 `openSync(wx)` 排他pid锁，退出只删除仍属于自己的pid file。CLI controller把start/restart共用同一detached spawn与readiness：先按同仓库cwd/绝对entry验证PID，枚举并优雅停止该deployment的pid owner与孤儿进程，等待所有PID/pid file/socket消失后才spawn；新socket必须真实connect且新PID身份有效才是ready。restart另有可回收control lock，foreign PID与命令文本decoy绝不signal。Pi只异步委托CLI，保留原transcript并以原filter/footer更换IPC client；跨client snapshot按canonical identity去重，compose/pending send按unknown outcome/no-retry关闭。
-- **单群deployment边界（REQ-PLAT-0001）**：一个daemon只读取一个`group_peer_id`，且当前`data/`、DB、session、pid、control lock与socket均由工作目录决定。同一checkout内只换`bots_config`并行多群不安全且不支持；多群必须使用隔离工作目录/data资源，不能共享持久化或进程控制文件。
+- **Pi 原生配置向导**：`/tg config`是command tree中的静态节点，config loader失败时仍可帮助、补全和dispatch。fresh/replace流程在第一个输入dialog前用Pi defaults + catalog/auth status做零provider-call预检，只显示脱敏`provider/model:thinking`；失败固定分类并引导Pi `/login`、`/model`，writer调用为0。`src/onboarding/config-wizard.ts`只编排Pi公开的`select/input/confirm/editor/notify`；public persona template先于Telegram secret输入读取，取消任一步不调用writer。向导只操作项目根的 `telegram.config.ts` 与 `.env`；自定义source只允许安全的validate/项目根原文edit，坏配置先修复而不旁写一个daemon不会读取的default。首次写入或已确认的原文替换通过production loader后，extension只用固定参数委托既有`bun run src/main.ts restart`控制路径；只有exit 0且输出明确`daemon ready`才建立all-bots native feed。失败保留已验证文件、清除旧连接并显示经过credential redaction的status/retry诊断。dialog值不写notification、进程参数、Pi session或provider context。
+- **启动期校验**：运行时 schema 校验（id 唯一合法、token_env 在 .env 存在、persona 文件可读、routing_p ∈[0,1] 且 Σ≤1、数值有限>0）+ env 数值检查；peer id 三种形式统一归一化；校验失败收集**全部**错误一次性抛出（ConfigError 逐条点名），不静默 NaN
+- **进程管理**：daemon 最早时机 `openSync(wx)` 排他pid锁，退出只删除仍属于自己的pid file。CLI controller把start/restart共用同一detached spawn与readiness：先按同仓库cwd/绝对entry验证PID，枚举并优雅停止该deployment的pid owner与孤儿进程，等待所有PID/pid file/socket消失后才spawn；新socket必须真实connect且新PID身份有效才是ready。restart另有可回收control lock，foreign PID与命令文本decoy绝不signal。Pi只异步委托CLI，保留原transcript并以原filter/footer更换IPC client；跨client snapshot按canonical identity去重，compose/pending send按unknown outcome/no-retry关闭。
+- **单群deployment边界**：一个daemon只读取一个`group_peer_id`，且当前`data/`、DB、session、pid、control lock与socket均由工作目录决定。同一checkout内只换配置文件并行多群不安全且不支持；多群必须使用隔离工作目录/data资源，不能共享持久化或进程控制文件。
 - context window与价格来自Pi catalog；runtime以当前context、输出/reasoning/tool reserve和配置上限确定每轮suffix预算，不维护平行model表。

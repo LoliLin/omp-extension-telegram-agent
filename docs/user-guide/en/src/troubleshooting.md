@@ -15,13 +15,11 @@ The expected version is the project-locked Pi 0.84.1. If installation fails, ret
 
 ## `/tg config` is missing
 
-Confirm you started `bun run pi` from the repository root and package discovery loaded `.pi/extensions/tg-extension.ts`. `config` is static and does not depend on an existing deployment. If it is completely absent, inspect Pi/package loading instead of creating an empty JSON file.
+Confirm you started `bun run pi` from the repository root and package discovery loaded `.pi/extensions/tg-extension.ts`. `config` is static and does not depend on an existing deployment. If it is completely absent, inspect Pi/package loading instead of creating an empty config file.
 
 ## The wizard refuses configuration
 
 - Field error: correct the fields named in the notification; values are never echoed.
-- Missing/invalid `bots_config`: create the selected `.ts`/`.json` source or remove the override from `.env` / the process.
-- Both default TS and legacy JSON exist: retain one or select one explicitly; do not guess by modification time.
 - Existing files: choose validate/editor or explicitly confirm backup-replace. Cancellation preserves bytes.
 - Pi model preflight: leave the wizard, use Pi `/login` and `/model`, then retry. No deployment file was written.
 
@@ -77,7 +75,7 @@ Collect only non-sensitive evidence:
 - `bun run status` output;
 - `bun run pi --version`;
 - a manually reviewed, redacted tail of `data/daemon.log`;
-- the failed command, bot ID, and fresh/legacy/custom `bots_config` state;
+- the failed command, bot ID, and whether the config was newly written or replaced an existing file;
 - terminal and tmux details when UI is involved.
 
 Never submit `.env`, real personas, full group messages, tokens, API keys, or unredacted absolute paths.
