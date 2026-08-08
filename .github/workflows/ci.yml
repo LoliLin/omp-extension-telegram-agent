@@ -31,3 +31,5 @@ jobs:
         run: bun test
       - name: Type-check
         run: bun run check
+      - name: Lint and format check
+        run: bunx biome check .

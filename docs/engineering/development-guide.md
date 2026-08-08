@@ -100,7 +100,7 @@
 
 1. **一个结果**：只完成一个可观察行为或一个纯机械变化，可独立 review / revert。
 2. **自包含**：实现、对应测试、该行为必需的 contract 文档一起提交；不能提交会让主分支暂时无法 typecheck 的“半边改动”。
-3. **已验证**：提交前目标测试通过；任务全部结束后再补全量 `bun test` + `bun run check`。
+3. **已验证**：提交前目标测试通过；任务全部结束后再补全量 `bun test` + `bun run check` + `bun run lint`。
 4. **显式暂存**：脏工作树按路径或 patch 暂存并检查 staged diff；禁止用 `git add -A` 顺手夹带别的 task 或用户改动。提交前检查 `git diff --cached --check`、完整 staged diff 与 `git status --short`。
 5. **签名**：授权后的 commit 使用 repo GPG 配置签名；签名失败停下诊断，不得降级为 unsigned。提交后用 `git log -1 --show-signature` 确认 `Good signature`。
 

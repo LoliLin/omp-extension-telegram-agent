@@ -39,7 +39,6 @@ export interface MediaInfo {
 	sticker_emoji?: string;
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 export function normalizeMessage(msg: any, editDate: number | null = null): CanonicalMessage {
 	const from = msg.from ?? null;
 	const senderChat = msg.sender_chat ?? null;

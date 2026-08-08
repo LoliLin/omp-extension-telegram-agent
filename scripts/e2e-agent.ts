@@ -2,7 +2,7 @@
 // Verifies: serialization -> session -> LLM -> send tool (terminate) -> DB insert -> telemetry.
 // Usage: bun run scripts/e2e-agent.ts --bot <id>
 import { loadConfig } from "../src/config.ts";
-import { openDb, getBotState, setBotState } from "../src/db/db.ts";
+import { openDb, setBotState } from "../src/db/db.ts";
 import { BotApi } from "../src/telegram/api.ts";
 import { BotRuntime } from "../src/agent/runtime.ts";
 import { createSharedModelRuntime } from "../src/agent/model-runtime.ts";

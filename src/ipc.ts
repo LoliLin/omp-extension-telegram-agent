@@ -210,6 +210,7 @@ export class FrameDecoder {
 		if (this.buf.length > this.maxBufferBytes) throw new FrameOverflowError();
 		const out: unknown[] = [];
 		let idx: number;
+		// biome-ignore lint/suspicious/noAssignInExpressions: idiomatic frame-splitting read loop
 		while ((idx = this.buf.indexOf("\n")) >= 0) {
 			const line = this.buf.slice(0, idx).trim();
 			this.buf = this.buf.slice(idx + 1);

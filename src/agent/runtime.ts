@@ -313,9 +313,6 @@ export class BotRuntime {
 				};
 			},
 		};
-		// Tool order is cache-visible protocol: never reorder (docs/cache.md, REQ-TEST-0001 R2).
-		const tools = [sendTool, searchTool, runJsTool];
-
 		const model = this.modelRuntime.getModel(this.bot.provider, this.bot.model);
 		if (!model) throw new Error(`model not found: ${this.bot.provider}/${this.bot.model}`);
 		this.model = model;
@@ -334,6 +331,7 @@ export class BotRuntime {
 		// Pi's trigger formula is contextTokens > contextWindow - reserveTokens, so reserve = window - threshold.
 		const threshold = this.bot.compactionThreshold;
 		const reserveTokens = Math.max(16_384, model.contextWindow - threshold);
+		// Tool order is cache-visible protocol: never reorder (docs/cache.md, REQ-TEST-0001 R2).
 		// Per-bot tool toggles (REQ-CONF-0001): filter the fixed-order tool list. send off
 		// means the bot cannot speak in-group (observer-only); search/run_js off saves tokens.
 		const activeTools = [sendTool, searchTool, runJsTool].filter((t) =>

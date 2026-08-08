@@ -18,7 +18,6 @@ export interface IngestResult {
 // first_seen_by for edits that arrive before the original message (started mid-history)
 export const EDIT_UNKNOWN_BOT_ID = "edit-unknown";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 export function ingestUpdate(
 	db: Database,
 	botId: string,

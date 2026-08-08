@@ -10,7 +10,6 @@ import { IpcServer } from "./ipc-server.ts";
 import { acquirePidLock, releasePidLock } from "./pid.ts";
 import type { MessageRow } from "../agent/serialize.ts";
 import { randomBytes } from "node:crypto";
-import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CACHE_SCHEMA_VERSION } from "../agent/prompt.ts";
 import { ManualSendService } from "./manual-send.ts";

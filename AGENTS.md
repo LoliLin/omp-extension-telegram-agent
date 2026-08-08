@@ -57,8 +57,9 @@
 
 1. `bun test <相关文件>` → `bun test`
 2. `bun run check`（tsc --noEmit）
-3. `bun run docs:check`（文档站构建 + 链接检查）
-4. opt-in e2e：`scripts/e2e-*.ts`（需 `.env`，触真实服务，用户明确授权才跑）
+3. `bun run lint`（Biome lint + format check；`bun run format` 自动修）
+4. `bun run docs:check`（文档站构建 + 链接检查）
+5. opt-in e2e：`scripts/e2e-*.ts`（需 `.env`，触真实服务，用户明确授权才跑）
 
 规范命令以 `docs/testing.md` 为准；仓库已有脚本时不要猜底层命令。
 

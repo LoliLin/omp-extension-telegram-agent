@@ -36,6 +36,7 @@
 ```bash
 bun test                # 全量 unit（零外网、零付费调用）
 bun run check           # tsc --noEmit
+bun run lint            # Biome lint + format check（bun run format 自动修）
 bun run docs:check      # 文档站构建 + 链接检查
 bun run scripts/smoke-pi.ts --bot <id>              # 当前 bot 的 Pi provider/model smoke（需 .env）
 bun run scripts/e2e-agent.ts --bot <id>              # 真实链路 e2e（需 .env，opt-in）

@@ -5,7 +5,7 @@
 // - message serialization grammar                     => same
 // UI-only changes must NOT affect these hashes.
 
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 
 // bun test forces UTC; the daemon serializes in local time. Pin the deployment TZ
 // before anything calls Date so the golden hash matches production behavior.
