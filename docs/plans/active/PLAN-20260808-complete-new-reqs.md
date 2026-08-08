@@ -38,7 +38,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10g** — 核对 Telegram `sendChatAction` 官方时限/动作并正式化 response opportunity typing lease；validates: TG-0002 documented scope/AC；commit: docs/research only
 - [x] **T10h** — 吸收用户纠正并复核 Bot API 10.1/10.2：private draft Thinking、group fallback 与 Rich Messages 收发/投影边界；validates: TG-0002/TG-0003 capability docs；commit: docs correction/research
 - [x] **T10i** — 增加有界 ephemeral assistant stream IPC、原位 Pi native card 与每次 feed change 的 host render request；validates: UI-0010 AC1–AC7；commit: native streaming behavior
-- [ ] **T10j** — 增加每 bot `typing` activity lease、4 秒续约与 send/settle/shutdown 清理，并锁 group 不调用 private draft；validates: TG-0002 AC1–AC7；commit: Telegram response feedback
+- [x] **T10j** — 增加每 bot `typing` activity lease、4 秒续约与 send/settle/shutdown 清理，并锁 group 不调用 private draft；validates: TG-0002 AC1–AC7；commit: Telegram response feedback
 - [ ] **T10k** — 增加 rich JSON migration、统一 inbound/edit/sent normalize 与有界纯文本 projector；validates: TG-0003 AC4–AC6；commit: rich message data plane
 - [ ] **T10l** — 将 agent `send.message` 接到 `sendRichMessage` Rich Markdown、确定性 plain fallback并 bump cache epoch；validates: TG-0003 AC1–AC3/AC7/AC8；commit: rich outbound contract
 - [ ] **T10m** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane

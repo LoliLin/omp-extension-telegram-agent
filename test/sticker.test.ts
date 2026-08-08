@@ -167,7 +167,7 @@ describe("send from catalog (R3)", () => {
 	test("executeSend resolves a catalog short_id with the bot's file_id", async () => {
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-c1', 'sticker', 'cats', '😺', 's7')").run();
 		db.query("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', 'fid-c1', 'uq-c1')").run();
-		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never);
+		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never, { chatActionSender: async () => true });
 		let sentSticker: string | null = null;
 		(rt as any).api = {
 			sendMessage: async () => { throw new Error("no text"); },
@@ -177,15 +177,17 @@ describe("send from catalog (R3)", () => {
 			},
 		};
 		(rt as any).exposed = new Set();
+		(rt as any).typingLease.start();
 		const result = await (rt as any).executeSend({ sticker: "s7" });
 		expect(sentSticker as string | null).toBe("fid-c1");
 		expect(result.terminate).toBe(true);
+		expect((rt as any).typingLease.isActive).toBe(false);
 	});
 
 	test("one send combines message, sticker, and reply with a terminating minimal ACK", async () => {
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-combined', 'sticker', 'cats', '😺', 's8')").run();
 		db.query("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', 'fid-combined', 'uq-combined')").run();
-		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never);
+		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never, { chatActionSender: async () => true });
 		const calls: Array<{ kind: string; chatId: number; payload: string; replyTo?: number }> = [];
 		(rt as any).api = {
 			sendMessage: async (chatId: number, text: string, replyTo?: number) => {
@@ -204,6 +206,7 @@ describe("send from catalog (R3)", () => {
 			},
 		};
 		(rt as any).exposed = new Set([42]);
+		(rt as any).typingLease.start();
 
 		const result = await (rt as any).executeSend({ message: "收到", sticker: "s8", reply_to: 42 });
 
@@ -220,6 +223,7 @@ describe("send from catalog (R3)", () => {
 			{ message_id: 901 },
 			{ message_id: 902 },
 		]);
+		expect((rt as any).typingLease.isActive).toBe(false);
 	});
 
 	test("unknown id still errors before any network call", async () => {
@@ -266,7 +270,7 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 	}
 
 	test("R6: dynamic candidates serialize AFTER all messages (suffix tail), never before", async () => {
-		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never);
+		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never, { chatActionSender: async () => true });
 		const fake = attachFakeSession(rt);
 		// set-external stickers seen in context, with vision
 		insertStickerMsg(1, "uq-ext-1");

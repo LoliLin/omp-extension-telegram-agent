@@ -20,7 +20,8 @@ import {
 import { Type } from "typebox";
 import type { BotConfig, AppConfig } from "../config.ts";
 import { getBotState, setBotState } from "../db/db.ts";
-import { BotApi } from "../telegram/api.ts";
+import { BotApi, TelegramApiError } from "../telegram/api.ts";
+import { TelegramTypingLease, type ActivityScheduler } from "../telegram/activity.ts";
 import { insertSentMessage } from "../telegram/ingest.ts";
 import { sendTextAndPersist } from "../telegram/send.ts";
 import { serializeMessages, type MessageRow } from "./serialize.ts";
@@ -78,6 +79,7 @@ export class BotRuntime {
 	private toolsHash = "";
 	private streamSequence = 0;
 	private activeStreamId: string | null = null;
+	private readonly typingLease: TelegramTypingLease;
 	/** Optional sink for TUI/live broadcasting of agent events. */
 	eventSink: ((kind: string, payload: unknown) => void) | null = null;
 	/** Optional sink for messages this bot sent (poller echo dedupes them, so TUI needs this path). */
@@ -110,7 +112,11 @@ export class BotRuntime {
 		bot: BotConfig,
 		config: AppConfig,
 		modelRuntime: ModelRuntime,
-		options: { monotonicNow?: () => number } = {},
+		options: {
+			monotonicNow?: () => number;
+			activityScheduler?: ActivityScheduler;
+			chatActionSender?: () => Promise<unknown>;
+		} = {},
 	) {
 		this.db = db;
 		this.bot = bot;
@@ -118,6 +124,21 @@ export class BotRuntime {
 		this.modelRuntime = modelRuntime;
 		this.monotonicNow = options.monotonicNow ?? (() => performance.now());
 		this.api = new BotApi(bot.token);
+		const chatId = Number(`-100${config.groupPeerId}`);
+		this.typingLease = new TelegramTypingLease(
+			options.chatActionSender ?? (() => this.api.sendChatAction(chatId)),
+			{
+				scheduler: options.activityScheduler,
+				onFailure: (error) => {
+					const category = error instanceof TelegramApiError
+						? `telegram_${error.code}`
+						: typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "TimeoutError"
+							? "timeout"
+							: "request_failed";
+					console.warn(`[chat-action] bot=${this.bot.id} typing failed (${category}); will retry`);
+				},
+			},
+		);
 		this.exposed = new Set(JSON.parse(getBotState(db, bot.id, EXPOSED_KEY) ?? "[]") as number[]);
 		this.epoch = Number(getBotState(db, bot.id, EPOCH_KEY) ?? "1");
 	}
@@ -530,6 +551,7 @@ export class BotRuntime {
 			this.sentMessageSink?.(m);
 		}
 		this.recordEvent("send", { reply_to: params.reply_to ?? null, sticker: params.sticker ?? null, sent: sentIds });
+		this.typingLease.stop();
 		return successfulSendResult(sentIds);
 	}
 
@@ -560,6 +582,7 @@ export class BotRuntime {
 		}
 		if (source === "probability") this.cooldownAfterFlush = true;
 		this.flushing = true; // set synchronously, before any await — never gated on SDK events
+		this.typingLease.start();
 		this.flushPromise = this.flushLoop()
 			.catch((err) => {
 				// R3: a failed flush only produces an error event; nothing escapes as an
@@ -582,10 +605,15 @@ export class BotRuntime {
 	}
 
 	private async flushLoop(): Promise<void> {
-		do {
-			this.pendingTrigger = false;
-			await this.flush();
-		} while (this.pendingTrigger && !this.stopping);
+		try {
+			do {
+				this.pendingTrigger = false;
+				this.typingLease.start();
+				await this.flush();
+			} while (this.pendingTrigger && !this.stopping);
+		} finally {
+			this.typingLease.stop();
+		}
 	}
 
 	/** Serialize unexposed messages into a new context suffix and wake the agent. */
@@ -759,6 +787,7 @@ export class BotRuntime {
 
 	async stop(): Promise<void> {
 		this.stopping = true;
+		this.typingLease.stop();
 		this.endAssistantStream();
 		// Bounded wait for an in-flight flush so exposure isn't left half-written;
 		// the timeout only guards a wedged run (markExposed follows sendUserMessage

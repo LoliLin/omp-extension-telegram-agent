@@ -29,7 +29,7 @@
 - [ ] [REQ-UI-0007](REQ-UI-0007.md) 用 Pi 原生 footer status 呈现 Telegram 统计（P2，已调查/未实现）
 - [ ] [REQ-UI-0008](REQ-UI-0008.md) 为 `/tg` 提供原生分级命令补全（P2，已调查/未实现）
 - [ ] [REQ-CMD-0001](REQ-CMD-0001.md) Telegram 群内 help/status、手动 compact、参数调整与可配置管理员白名单（P1，已调查/未实现）
-- [ ] [REQ-TG-0002](REQ-TG-0002.md) Bot 获得响应机会后显示 Telegram 原生处理状态（P1，已复核 draft Thinking 私聊限制/未实现）
+- [ ] [REQ-TG-0002](REQ-TG-0002.md) Bot 获得响应机会后显示 Telegram 原生处理状态（P1，群内 typing 已实现/待真实群总验收）
 - [ ] [REQ-TG-0003](REQ-TG-0003.md) 支持 Telegram Rich Messages 的收发与持久化（P1，已核对 Bot API 10.1/10.2/未实现）
 
 

@@ -381,3 +381,12 @@
 - `setFooter` factory提供的session TUI render handle独立于footer presentation保存；append/prepend/vision/stats/status/stream/disconnect每次都请求host render，`panel off`后feed仍即时刷新，Pi继续拥有约16ms合帧。
 - flush/IPC/timeline/extension/cache 75 targeted tests、592 assertions；全量206 tests、3547 assertions与`bun run check`通过。真实Pi首个partial与连续生成刷新留T14。
 - Cache impact: **NONE**——provider request、system/tool/message/summary grammar与schema v4 golden逐字节不变；不新增LLM call或token，partial只存在于有界本地IPC/TUI内存。
+
+## 2026-08-08 (41) — 为群响应机会续约 Telegram typing 状态
+
+- `BotApi.sendChatAction(chatId)` 固定发送 `{action:"typing"}`，使用3.5秒请求timeout；chat id只由deployment的负数supergroup生成，不接收模型/trigger sender参数，也没有message/rich draft调用路径。
+- 每bot `TelegramTypingLease` 在accepted trigger同步start，单递归timeout每4秒续约且最多一个in-flight。重复start/stop幂等；旧request跨stop/restart时，新lease在它settle后立即补发，不创建overlap。
+- runtime把lease覆盖flush loop：probability busy/cooldown/stopping skip不start，explicit coalesce复用；组合send全部成功才stop，pending下一轮重新start，沉默、provider/flush错误、abort与shutdown都由finally/stop清理。
+- action错误不进入agent event或provider轨迹；每段连续failure只输出一次`[chat-action] bot=<id> ... (category)`，不拼error message/URL/token，成功后可重新告警。timeout/429/throw不改变routing、exposure或最终send。
+- fake clock锁定0/4/8/12秒、hung request、failure recovery、A/B独立lease、text/sticker/组合send、pending reacquire与draft=0；54 targeted tests / 2640 assertions、全量215 / 3609、typecheck与cache v4 golden通过，真实群>5秒run留T14。
+- Cache impact: **NONE**——纯Telegram side channel，不改DB/IPC/session/system/tool/message/summary grammar，不新增LLM call或token；每active bot每4秒至多一次API调用。

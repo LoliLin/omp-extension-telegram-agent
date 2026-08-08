@@ -67,11 +67,12 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | Pi 原生 `/tg` 分级补全（REQ-UI-0008 T10） | ✅ unit / ⏳ real smoke | 2026-08-08 targeted extension/cache 28 pass：共享递归 tree 驱动 help/parser/completion，A/B/C 动态 id/name、off、partial/whitespace、leaf、config error 与 future third-level 均覆盖，所有 suggestion 可被同 parser 接受；typecheck/cache golden 通过。真实菜单 Tab/选择留 T14。 |
 | lifetime telemetry completeness（REQ-UI-0009 T10b） | ✅ unit / ⏳ real smoke | 2026-08-08 DB/runtime/IPC/plugin/cache targeted 70 pass：legacy file migration 幂等、cacheWrite/reasoning/latency persist+push、file DB close/reopen + daemon rebuild、removed bot exclusion、baseline/live once、Pi 原生 `W/CH`、session isolation、status detail/zero run；typecheck/cache golden 通过。真实 deployment restart/footer/status 留 T14。 |
 | Pi feed 即时刷新与 assistant stream（REQ-UI-0010 T10i） | ✅ unit / ⏳ real smoke | 2026-08-08 flush/IPC/timeline/extension/cache targeted 75 pass / 592 assertions：start/update/end不落库、无matching listener不构造snapshot、thinking/text/tool-only args完整快照、A/B filter、pre-hello不推送、update-before-start、32 active/64 tombstone bounds、ANSI/OSC、end/disconnect、单 anchor entry，以及 `panel off` 后每次 feed change仍调用 host render；typecheck/cache v4 golden通过。真实首个 partial/连续刷新留 T14。 |
+| Telegram response typing lease（REQ-TG-0002 T10j） | ✅ unit / ⏳ real smoke | 2026-08-08 activity/flush/sticker/router/cache 54 targeted pass / 2640 assertions：立即调用与0/4/8/12秒上界、per-bot隔离、单timer/in-flight、stop/restart、failure streak恢复/脱敏、accepted/skip/coalesce、text/sticker/组合send、pending reacquire、flush/stop清理、负数group payload与private draft=0均覆盖；typecheck/cache v4 golden通过。真实>5秒run与send/沉默自然清除留T14。 |
 | compaction（threshold→summary→epoch） | ✅ | 2026-08-07 e2e-compaction 强制触发，epoch 持久化+重启恢复；REQ-AGENT-0001 后补 e2e-compaction-manual：成功路径 epoch 4→5、kept tail 41 条精确重标（N≠40），失败路径（Nothing to compact）epoch 不动 + error 落库 |
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |
 | threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ⏳ Phase 9 | - |
-| 当前全量回归 | ✅ | 2026-08-08 `bun test`：206 pass / 0 fail / 3547 assertions；`bun run check` 通过；`git diff --check` 通过；cache golden 6/6 |
+| 当前全量回归 | ✅ | 2026-08-08 `bun test`：215 pass / 0 fail / 3609 assertions；`bun run check` 通过；`git diff --check` 通过；cache golden 6/6 |
 
 ## 已知 flaky
 

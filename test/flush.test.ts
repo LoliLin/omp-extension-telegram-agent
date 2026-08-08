@@ -17,6 +17,7 @@ import { getBotState } from "../src/db/db.ts";
 import type { AppConfig, BotConfig } from "../src/config.ts";
 import type { MessageRow } from "../src/agent/serialize.ts";
 import type { AgentStreamFrame } from "../src/ipc.ts";
+import type { ActivityScheduler } from "../src/telegram/activity.ts";
 
 const GROUP = 4402809405;
 const CHAT = Number(`-100${GROUP}`);
@@ -27,7 +28,13 @@ beforeEach(() => {
 	db.exec(readFileSync(join(import.meta.dir, "../src/db/schema.sql"), "utf8"));
 });
 
-function makeRuntime(options: { samplingCooldownMs?: number; monotonicNow?: () => number } = {}): BotRuntime {
+function makeRuntime(options: {
+	samplingCooldownMs?: number;
+	monotonicNow?: () => number;
+	activityScheduler?: ActivityScheduler;
+	chatActionSender?: () => Promise<unknown>;
+	useBotApiForActivity?: boolean;
+} = {}): BotRuntime {
 	const config: AppConfig = {
 		dataDir: "/tmp/req-agent-0001-test",
 		dbPath: ":memory:",
@@ -52,7 +59,45 @@ function makeRuntime(options: { samplingCooldownMs?: number; monotonicNow?: () =
 		tools: { send: true, search: true, runJs: true },
 		stickerSets: [],
 	};
-	return new BotRuntime(db, bot, config, null as never, { monotonicNow: options.monotonicNow });
+	return new BotRuntime(db, bot, config, null as never, {
+		monotonicNow: options.monotonicNow,
+		activityScheduler: options.activityScheduler,
+		...(options.useBotApiForActivity
+			? {}
+			: { chatActionSender: options.chatActionSender ?? (async () => true) }),
+	});
+}
+
+class FakeActivityScheduler implements ActivityScheduler {
+	now = 0;
+	private nextId = 0;
+	private readonly tasks = new Map<number, { at: number; callback: () => void }>();
+
+	setTimeout(callback: () => void, delayMs: number): number {
+		const id = ++this.nextId;
+		this.tasks.set(id, { at: this.now + delayMs, callback });
+		return id;
+	}
+
+	clearTimeout(handle: unknown): void {
+		this.tasks.delete(handle as number);
+	}
+
+	async advance(ms: number): Promise<void> {
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		const target = this.now + ms;
+		while (true) {
+			const due = [...this.tasks.entries()]
+				.filter(([, task]) => task.at <= target)
+				.sort((left, right) => left[1].at - right[1].at || left[0] - right[0])[0];
+			if (!due) break;
+			this.now = due[1].at;
+			this.tasks.delete(due[0]);
+			due[1].callback();
+			for (let index = 0; index < 5; index++) await Promise.resolve();
+		}
+		this.now = target;
+	}
 }
 
 interface FakeSession {
@@ -339,10 +384,135 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		let networkCalls = 0;
 		(rt as any).api = {
 			sendMessage: async () => { networkCalls++; throw new Error("must not reach network"); },
-			sendSticker: async () => { networkCalls++; throw new Error("must not reach network"); },
+				sendSticker: async () => { networkCalls++; throw new Error("must not reach network"); },
 		};
+		(rt as any).typingLease.start();
 		await expect((rt as any).executeSend({ message: "hi", sticker: "s999" })).rejects.toThrow(/unknown sticker/);
 		expect(networkCalls).toBe(0);
+		expect((rt as any).typingLease.isActive).toBe(true);
+		(rt as any).typingLease.stop();
+	});
+
+	test("REQ-TG-0002 accepted triggers renew group typing and all settle paths clear it", async () => {
+		const scheduler = new FakeActivityScheduler();
+		const actions: Array<{ at: number; chatId: number }> = [];
+		let draftCalls = 0;
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const rt = makeRuntime({ activityScheduler: scheduler, useBotApiForActivity: true });
+		const fake = attachFakeSession(rt, {
+			send: async (text) => {
+				await gate;
+				fake.sent.push(text);
+			},
+		});
+		(rt as any).api = {
+			sendChatAction: async (chatId: number) => { actions.push({ at: scheduler.now, chatId }); return true; },
+			sendMessageDraft: async () => { draftCalls++; },
+			sendRichMessageDraft: async () => { draftCalls++; },
+		};
+		insertMsg({ message_id: 1, text: "wait for the provider" });
+
+		expect(rt.trigger("probability")).toBe("started");
+		expect(actions).toEqual([{ at: 0, chatId: CHAT }]);
+		expect(rt.trigger("explicit")).toBe("coalesced");
+		expect(rt.trigger("probability")).toBe("skipped_busy");
+		expect(actions).toHaveLength(1);
+		await scheduler.advance(3999);
+		expect(actions).toHaveLength(1);
+		await scheduler.advance(1);
+		expect(actions).toEqual([{ at: 0, chatId: CHAT }, { at: 4000, chatId: CHAT }]);
+
+		release();
+		await (rt as any).flushPromise;
+		expect((rt as any).typingLease.isActive).toBe(false);
+		await scheduler.advance(12_000);
+		expect(actions).toHaveLength(2);
+		expect(draftCalls).toBe(0);
+		await rt.stop();
+		expect(rt.trigger("explicit")).toBe("skipped_stopping");
+		expect(actions).toHaveLength(2);
+	});
+
+	test("REQ-TG-0002 successful send releases typing and pending flush reacquires it", async () => {
+		const scheduler = new FakeActivityScheduler();
+		const actions: number[] = [];
+		let draftCalls = 0;
+		let sentMessageId = 900;
+		const rt = makeRuntime({ activityScheduler: scheduler, useBotApiForActivity: true });
+		(rt as any).api = {
+			sendChatAction: async (chatId: number) => { expect(chatId).toBe(CHAT); actions.push(scheduler.now); return true; },
+			sendMessage: async (chatId: number, text: string) => ({
+				chat: { id: chatId }, message_id: sentMessageId++, from: { id: 777, is_bot: true, first_name: "小雪" },
+				date: 1754600100, text,
+			}),
+			sendMessageDraft: async () => { draftCalls++; },
+			sendRichMessageDraft: async () => { draftCalls++; },
+		};
+		let runs = 0;
+		const fake = attachFakeSession(rt, {
+			send: async (text) => {
+				fake.sent.push(text);
+				runs++;
+				if (runs !== 1) return;
+				await (rt as any).executeSend({ message: "first reply" });
+				expect((rt as any).typingLease.isActive).toBe(false);
+				insertMsg({ message_id: 2, date: 1754600200, text: "pending explicit" });
+				expect(rt.trigger("explicit")).toBe("coalesced");
+			},
+		});
+		insertMsg({ message_id: 1, text: "first trigger" });
+
+		expect(rt.trigger("explicit")).toBe("started");
+		await (rt as any).flushPromise;
+
+		expect(runs).toBe(2);
+		expect(actions).toEqual([0, 0]);
+		expect((rt as any).typingLease.metrics).toMatchObject({ starts: 2, stops: 2 });
+		expect((rt as any).typingLease.isActive).toBe(false);
+		expect(draftCalls).toBe(0);
+		expect(db.query("SELECT kind FROM agent_events ORDER BY id").all()).toEqual([{ kind: "send" }]);
+	});
+
+	test("REQ-TG-0002 action failures are deduplicated, redacted, and isolated from flush", async () => {
+		const scheduler = new FakeActivityScheduler();
+		let actionCalls = 0;
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const rt = makeRuntime({ activityScheduler: scheduler, useBotApiForActivity: true });
+		const fake = attachFakeSession(rt, {
+			send: async (text) => {
+				await gate;
+				fake.sent.push(text);
+			},
+		});
+		(rt as any).api = {
+			sendChatAction: async () => {
+				actionCalls++;
+				throw new Error("https://api.telegram.org/bottest-token/private-detail");
+			},
+		};
+		insertMsg({ message_id: 1, text: "provider still runs" });
+		const warnings: string[] = [];
+		const originalWarn = console.warn;
+		console.warn = (...parts: unknown[]) => warnings.push(parts.join(" "));
+		try {
+			expect(rt.trigger("explicit")).toBe("started");
+			await scheduler.advance(8000);
+			expect(actionCalls).toBe(3);
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("bot=A typing failed (request_failed)");
+			expect(warnings[0]).not.toContain("test-token");
+			expect(warnings[0]).not.toContain("https://");
+			release();
+			await (rt as any).flushPromise;
+		} finally {
+			console.warn = originalWarn;
+		}
+		expect(fake.sent).toHaveLength(1);
+		expect(exposedIds()).toEqual([1]);
+		expect(db.query("SELECT COUNT(*) n FROM agent_events").get()).toEqual({ n: 0 });
+		expect((rt as any).typingLease.isActive).toBe(false);
 	});
 });
 

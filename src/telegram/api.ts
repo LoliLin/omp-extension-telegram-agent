@@ -4,6 +4,7 @@
 const API_BASE = "https://api.telegram.org";
 const CALL_TIMEOUT_MS = 10_000;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
+const CHAT_ACTION_TIMEOUT_MS = 3500;
 // headroom on top of the long-poll window so the server-side timeout fires first
 const LONG_POLL_GRACE_MS = 10_000;
 
@@ -95,6 +96,15 @@ export class BotApi {
 			sticker: fileId,
 			...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {}),
 		});
+	}
+
+	/** Current deployment's group-capable processing indicator; draft Thinking is private-only. */
+	sendChatAction(chatId: number): Promise<true> {
+		return this.call<true>(
+			"sendChatAction",
+			{ chat_id: chatId, action: "typing" },
+			CHAT_ACTION_TIMEOUT_MS,
+		);
 	}
 
 	getFile(fileId: string): Promise<{ file_id: string; file_unique_id: string; file_path?: string }> {
