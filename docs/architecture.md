@@ -27,7 +27,7 @@
 ## 运行时与依赖
 
 - 运行时：**Bun**（Phase 1 会做 Pi SDK × Bun 兼容性 smoke test；不兼容则降级 Node 26 + node:sqlite 并更新本文档）
-- Pi：本地源码 `../pi`（commit f562a1a, v0.84.1, dist 已构建），通过 `file:../pi/packages/*` 依赖 `@earendil-works/pi-coding-agent`、`pi-ai`、`pi-agent-core`、`pi-tui`；传递依赖经 symlink realpath 从 `../pi/node_modules` 解析
+- Pi：registry `@earendil-works/pi-coding-agent`、`pi-ai`、`pi-agent-core`、`pi-tui` 精确锁定为 v0.84.1；`scripts/pi-launcher.ts` 在 project-local CLI 缺失时执行 `bun install --frozen-lockfile`，随后始终以 Bun 启动 lockfile 对应版本。运行与构建不读取 sibling `../pi`。
 - Telegram：raw Bot API（fetch long polling），无第三方 SDK
 
 ## Telegram ingestion

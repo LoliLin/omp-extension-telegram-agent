@@ -352,16 +352,23 @@ describe("native Pi Telegram extension", () => {
 		expect(host.notifies.at(-1)).toEqual({ text: formatTgHelp(), level: "info" });
 	});
 
-	test("package manifest exposes the extension and pins the local fullscreen launcher", () => {
-		const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8")) as { keywords: string[]; pi: { extensions: string[] }; scripts: { pi: string } };
+	test("package manifest exposes the extension through the portable fullscreen launcher", () => {
+		const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8")) as {
+			keywords: string[];
+			pi: { extensions: string[] };
+			scripts: { pi: string };
+			dependencies: Record<string, string>;
+		};
 		const settings = JSON.parse(readFileSync(join(import.meta.dir, "../.pi/settings.json"), "utf8")) as { tuiMode: string };
 		expect(pkg.keywords).toContain("pi-package");
 		expect(pkg.pi.extensions).toContain("./.pi/extensions/tg-extension.ts");
-		expect(pkg.scripts.pi).toContain("node_modules/@earendil-works/pi-coding-agent");
+		expect(pkg.scripts.pi).toBe("bun run scripts/pi-launcher.ts");
+		expect(Object.values(pkg.dependencies)).toEqual(["0.84.1", "0.84.1", "0.84.1", "0.84.1"]);
+		expect(Object.values(pkg.dependencies).some((value) => value.startsWith("file:"))).toBe(false);
 		expect(settings.tuiMode).toBe("fullscreen");
 	});
 
-	test("version guard rejects the old global Pi with the local launcher hint", async () => {
+	test("version guard points unsupported hosts to the project launcher", async () => {
 		expect(supportsPiVersion("0.83.0")).toBe(false);
 		expect(supportsPiVersion("0.84.1")).toBe(true);
 		expect(supportsPiVersion("1.0.0")).toBe(true);

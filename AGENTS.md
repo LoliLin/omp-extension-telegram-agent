@@ -102,7 +102,7 @@
 - `bun test` 强制 UTC：涉及时间序列化的测试必须 pin TZ（参考 `test/cache.test.ts`，生产为 Asia/Singapore）。
 - Bun `socket.write` 返回**字节数**且可能部分写入：必须 TextEncoder 编码成 Uint8Array 后按字节偏移排队写（参考 `src/ipc.ts`）。
 - `.env` 是 `key: value` 冒号格式，由 `src/config.ts` 自己解析，不是 dotenv 的 `KEY=value`。
-- Pi 依赖是 `file:../pi/packages/*`（本地源码 @ f562a1a，v0.84.1），传递依赖经 symlink 从 `../pi/node_modules` 解析；`../pi` 变动会影响本项目。
+- Pi 依赖精确锁定 registry `0.84.1`；`bun run pi` 缺依赖时会先执行 frozen-lockfile bootstrap。开发 sibling `../pi` 不参与解析，升级四个 Pi package 时必须同一原子提交更新 manifest、lock 与兼容性测试。
 - sticker short_id 用 rowid 分配，不要用 COUNT+1（并发/删除下撞号）。
 
 ## 11. 指南更新规则

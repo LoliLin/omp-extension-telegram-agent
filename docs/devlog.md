@@ -541,3 +541,10 @@
 - runbook明确一份daemon=一个group；同checkout只换config不能并行多群，DB/session/pid/socket必须隔离。另给出真实C的provider、Telegram、Pi filter/stats/reply与回滚清单；当前无第三个真实token，故明确未运行opt-in C smoke。
 - 新增6 tests / 61 assertions；相关config/router/IPC共63 / 2541，全量314 / 4371、typecheck、cache v5 golden与diff check通过。
 - Cache impact: **NONE**——composition与operator script只重用既有确定性配置/边界，不改provider prefix/suffix、DB/IPC协议、context epoch或正常turn token/call。
+
+## 2026-08-08 (61) — 移除 Pi sibling 依赖并自举项目版本
+
+- 四个 `@earendil-works/pi-*` direct dependency 从 `file:../pi/packages/*` 改为精确 registry 0.84.1，Bun lock 改存发布包 integrity；项目不再因 sibling 源码、symlink realpath 或 sibling `node_modules` 变化而漂移。
+- `bun run pi` 现在进入最小 launcher：若 project-local CLI 不存在，只执行一次 `bun install --frozen-lockfile`，确认 CLI 出现后再用当前 Bun 原样启动；已安装路径不触发 install，安装失败 fail-closed 并给出可复现命令。
+- 4 个 deterministic launcher tests 覆盖 fresh/installed/install failure/missing artifact；targeted extension 44 tests 与 typecheck通过。另在无 `.env`、config、persona、`node_modules`、sibling Pi 的隔离目录真实 bootstrap，`bun run pi --version` 输出0.84.1；完整 `/tg config` host smoke等待T13d。
+- Cache impact: **NONE**——只改变依赖获取与operator launcher；Pi/package版本、extension/provider grammar、context epoch与每turn token/call不变。

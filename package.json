@@ -9,7 +9,7 @@
 		"extensions": ["./.pi/extensions/tg-extension.ts"]
 	},
 	"scripts": {
-		"pi": "node node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
+		"pi": "bun run scripts/pi-launcher.ts",
 		"start": "bun run src/main.ts start",
 		"restart": "bun run src/main.ts restart",
 		"status": "bun run src/main.ts status",
@@ -19,10 +19,10 @@
 		"check": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@earendil-works/pi-agent-core": "file:../pi/packages/agent",
-		"@earendil-works/pi-ai": "file:../pi/packages/ai",
-		"@earendil-works/pi-coding-agent": "file:../pi/packages/coding-agent",
-		"@earendil-works/pi-tui": "file:../pi/packages/tui"
+		"@earendil-works/pi-agent-core": "0.84.1",
+		"@earendil-works/pi-ai": "0.84.1",
+		"@earendil-works/pi-coding-agent": "0.84.1",
+		"@earendil-works/pi-tui": "0.84.1"
 	},
 	"devDependencies": {
 		"@types/node": "^24.0.0",
