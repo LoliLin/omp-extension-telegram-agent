@@ -1140,6 +1140,11 @@ export class BotRuntime {
 			visionCalls: this.pendingInputMetrics.visionCalls,
 		};
 		const supportsCustomMessages = typeof (this.session as { sendCustomMessage?: unknown }).sendCustomMessage === "function";
+		const visibleBeforeTurn = new Set(this.visibleMessageIds);
+		// sendCustomMessage(triggerTurn) does not resolve until the provider turn, including
+		// tool execution, has finished. Make only the fully packed references addressable
+		// during that turn; durable visibility still commits after the session submission.
+		for (const messageId of packed.visibleMessageIds) this.visibleMessageIds.add(messageId);
 		try {
 			if (supportsCustomMessages) {
 				await this.session.sendCustomMessage(
@@ -1152,6 +1157,7 @@ export class BotRuntime {
 			}
 		} catch (error) {
 			if (supportsCustomMessages) this.reconcileContextStateFromSession();
+			else this.visibleMessageIds = visibleBeforeTurn;
 			throw error;
 		}
 		const deliveredObligationIds = delivered.map((obligation) => obligation.messageId);

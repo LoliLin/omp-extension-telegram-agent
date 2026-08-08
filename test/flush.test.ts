@@ -127,6 +127,7 @@ function attachFakeSession(
 	rt: BotRuntime,
 	opts: {
 		send?: (text: string) => Promise<void>;
+		customSend?: (message: { content: string; details: { visibleMessageIds: number[] } }) => Promise<void>;
 		contextEntries?: () => unknown[];
 		compact?: (...args: unknown[]) => Promise<{ tokensBefore: number }>;
 		isStreaming?: boolean;
@@ -141,6 +142,7 @@ function attachFakeSession(
 	(rt as any).session = {
 		subscribe: (l: (e: unknown) => void) => { fake.listener = l; },
 		sendUserMessage: (t: string) => fake.sendUserMessage(t),
+		...(opts.customSend ? { sendCustomMessage: opts.customSend } : {}),
 		compact: (...args: unknown[]) => fake.compact(...args),
 		isStreaming: opts.isStreaming ?? false,
 		sessionManager: { buildContextEntries: () => opts.contextEntries?.() ?? [] },
@@ -498,6 +500,58 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		expect(fake.sent.length).toBe(1);
 		expect(fake.sent[0]).toContain("#1 ");
 		expect(visibleIds()).toEqual([1]);
+	});
+
+	test("REQ-SEND-0003: a message packed for this provider turn is immediately replyable", async () => {
+		const rt = makeRuntime();
+		let replyTo: number | undefined;
+		let telegramCalls = 0;
+		(rt as any).api = {
+			sendMessageWithEntities: async (_chatId: number, text: string, _entities: unknown, reply?: number) => {
+				telegramCalls++;
+				replyTo = reply;
+				return {
+					chat: { id: CHAT }, message_id: 100, date: 1_754_600_100,
+					from: { id: 999, is_bot: true, first_name: "A" }, text,
+				};
+			},
+			sendMessage: async () => { throw new Error("plain fallback must not run"); },
+		};
+		attachFakeSession(rt, {
+			customSend: async (message) => {
+				expect(message.details.visibleMessageIds).toEqual([42]);
+				const result = await (rt as any).executeSend({ message: "精确回复", reply_to: 42 });
+				expect(result.terminate).toBe(true);
+			},
+		});
+		insertMsg({ message_id: 42, text: "reply to this turn" });
+
+		rt.trigger();
+		await (rt as any).flushPromise;
+
+		expect(telegramCalls).toBe(1);
+		expect(replyTo).toBe(42);
+		expect(visibleIds()).toEqual([42, 100]);
+		expect(errorEvents()).toEqual([]);
+	});
+
+	test("REQ-SEND-0003: failed provider submission rolls back turn-local reply visibility", async () => {
+		const rt = makeRuntime();
+		attachFakeSession(rt, {
+			customSend: async (message) => {
+				expect((rt as any).visibleMessageIds.has(message.details.visibleMessageIds[0])).toBe(true);
+				throw new Error("provider unavailable before session persistence");
+			},
+			contextEntries: () => [],
+		});
+		insertMsg({ message_id: 43, text: "must remain retryable" });
+
+		rt.trigger();
+		await (rt as any).flushPromise;
+
+		expect((rt as any).visibleMessageIds.has(43)).toBe(false);
+		expect(visibleIds()).toEqual([]);
+		expect(errorEvents()).toEqual([{ stage: "flush", category: "provider_request_failed" }]);
 	});
 
 	test("AC3: failed/aborted compaction does not bump epoch or replace visibility", () => {
