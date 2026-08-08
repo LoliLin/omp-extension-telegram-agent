@@ -2,10 +2,11 @@
 // Each bot can configure Telegram sticker set names; at startup the sets are fetched, media
 // identity + per-bot file_id persisted, short_ids assigned (same s<rowid> namespace as the
 // dynamic candidates), and background vision started through the shared lazy cache.
-// The catalog serializes as a STABLE block inside the system prompt (stable prefix), so a
-// catalog change is a cache-visible protocol change: bump CACHE_SCHEMA_VERSION (docs/cache.md).
+// Catalog identities remain persistent, but retrieval is a bounded local top-K dynamic suffix;
+// catalog bytes no longer inflate or invalidate the stable system prefix (cache schema v8).
 
 import type { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import type { BotApi } from "../telegram/api.ts";
 import {
 	ensureVision,
@@ -15,7 +16,7 @@ import {
 	type VisionUpdateSink,
 } from "./vision.ts";
 
-export const STICKER_CATALOG_MAX = 120; // R5: bounded catalog keeps the prefix cheap
+export const STICKER_CATALOG_MAX = 120; // bounded local inventory and startup work
 
 export interface CatalogSticker {
 	file_unique_id: string;
@@ -147,7 +148,7 @@ export function preRecognizeCatalogVision(
 	executor: VisionExecutor,
 	onVision?: VisionUpdateSink,
 	onTelemetry?: VisionTelemetrySink,
-	options: Pick<EnsureVisionOptions, "cacheDir" | "monotonicNow"> = {},
+	options: Pick<EnsureVisionOptions, "cacheDir" | "monotonicNow" | "scheduler" | "chatId"> = {},
 ): Promise<void> {
 	const pending = db
 		.query(
@@ -220,4 +221,82 @@ export function stickerCatalogBlock(db: Database, botId: string, sets: string[])
 	}
 	if (lines.length === 0) return "";
 	return `\n---\n\n# Sticker 目录\n\n可用 sticker（short_id = 语义，可直接发送）：\n${lines.join("\n")}`;
+}
+
+interface StickerCandidateRow {
+	rowid: number;
+	short_id: string;
+	sticker_emoji: string | null;
+	vision: string;
+}
+
+function searchTerms(value: string): Set<string> {
+	const normalized = value.normalize("NFKC").toLocaleLowerCase();
+	const terms = new Set(normalized.match(/[\p{L}\p{N}]{2,}|\p{Extended_Pictographic}/gu) ?? []);
+	for (const run of normalized.match(/[\p{Script=Han}]{2,}/gu) ?? []) {
+		for (const char of run) terms.add(char);
+		for (let index = 0; index + 1 < run.length; index++) terms.add(run.slice(index, index + 2));
+	}
+	return terms;
+}
+
+/** Local deterministic retrieval; candidates are a bounded dynamic suffix, never system prefix. */
+export function stickerCandidatesForTurn(
+	db: Database,
+	botId: string,
+	turnText: string,
+	limit = 8,
+): string {
+	if (limit <= 0 || !turnText.trim()) return "";
+	const queryTerms = searchTerms(turnText);
+	if (queryTerms.size === 0) return "";
+	const rows = db.query(`
+		SELECT rowid, short_id, sticker_emoji, vision
+		  FROM media m
+		 WHERE kind = 'sticker'
+		   AND short_id IS NOT NULL
+		   AND json_extract(vision, '$.text') IS NOT NULL
+		   AND EXISTS (
+		     SELECT 1 FROM media_file_ids f
+		      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
+		   )
+		 ORDER BY rowid DESC
+		 LIMIT 512
+	`).all(botId) as StickerCandidateRow[];
+	const ranked = rows
+		.map((row) => {
+			const description = (JSON.parse(row.vision) as { text?: string }).text?.replace(/\s+/g, " ").trim() ?? "";
+			const terms = searchTerms(`${row.sticker_emoji ?? ""} ${description}`);
+			let score = 0;
+			for (const term of queryTerms) {
+				if (terms.has(term)) score += term.length > 1 ? 3 : 1;
+			}
+			if (row.sticker_emoji && turnText.includes(row.sticker_emoji)) score += 12;
+			return { row, description, score };
+		})
+		.filter((candidate) => candidate.score > 0)
+		.sort((left, right) => right.score - left.score || right.row.rowid - left.row.rowid)
+		.slice(0, Math.min(8, limit));
+	if (ranked.length === 0) return "";
+	return `Available stickers:\n${ranked.map(({ row, description }) =>
+		`${row.short_id} = ${row.sticker_emoji ?? ""} ${description.slice(0, 60)}`.trim()
+	).join("\n")}`;
+}
+
+/** Fingerprint only local catalog/config state; plaintext descriptions never leave this hash. */
+export function stickerCatalogSnapshotHash(db: Database, botId: string, sets: readonly string[]): string {
+	const rows = db.query(`
+		SELECT short_id, sticker_set, sticker_emoji,
+		       COALESCE(json_extract(vision, '$.text'), '') AS description
+		  FROM media m
+		 WHERE kind = 'sticker' AND short_id IS NOT NULL
+		   AND EXISTS (
+		     SELECT 1 FROM media_file_ids f
+		      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
+		   )
+		 ORDER BY rowid
+	`).all(botId);
+	return createHash("sha256")
+		.update(JSON.stringify({ sets: [...sets], rows }))
+		.digest("hex");
 }

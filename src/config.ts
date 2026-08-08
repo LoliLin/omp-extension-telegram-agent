@@ -32,6 +32,7 @@ export type {
 	TelegramBotConfigInput,
 	TelegramConfigInput,
 	TelegramToolsConfigInput,
+	TelegramVisionConfigInput,
 } from "./config-schema.ts";
 
 export interface BotToolsConfig {
@@ -64,9 +65,27 @@ export interface BotConfig {
 	reasoningEffort: ThinkingLevel;
 	compactionThreshold: number;
 	compactionKeepRecent: number;
+	compactionModel?: string;
+	cacheRetention?: "none" | "short" | "long";
+	maxSuffixTokens?: number;
+	maxMessageTokens?: number;
 	tools: BotToolsConfig;
-	/** Telegram sticker set names; loaded into the stable prefix at startup (REQ-STICKER-0001). */
+	/** Telegram sticker set names; locally retrieved into a bounded per-turn suffix. */
 	stickerSets: string[];
+}
+
+export interface VisionConfig {
+	enabled: boolean;
+	foregroundMediaLimit: number;
+	concurrency: number;
+	perChatHourlyLimit: number;
+	dailyLimit: number;
+}
+
+export interface RetentionConfig {
+	telemetryDays: number;
+	rawUpdateDays: number;
+	messageEventDays: number;
 }
 
 export interface AppConfig {
@@ -76,6 +95,8 @@ export interface AppConfig {
 	bots: BotConfig[];
 	tinyfishApiKey: string;
 	auxiliaryVisualModel: string;
+	vision?: VisionConfig;
+	retention?: RetentionConfig;
 	routerSecret: string | null; // generated+persisted by daemon if absent
 	telegramAdmins: TelegramAdmin[]; // deny-by-default deterministic control allowlist
 }
@@ -125,6 +146,10 @@ export interface RawBotConfig {
 	reasoning_effort?: unknown;
 	compaction_threshold?: unknown;
 	compaction_keep_recent?: unknown;
+	compaction_model?: unknown;
+	cache_retention?: unknown;
+	max_suffix_tokens?: unknown;
+	max_message_tokens?: unknown;
 	tools?: unknown;
 	sticker_sets?: unknown;
 }
@@ -142,7 +167,15 @@ export interface RawConfig {
 	reasoning_effort?: unknown;
 	compaction_threshold?: unknown;
 	compaction_keep_recent?: unknown;
+	compaction_model?: unknown;
+	cache_retention?: unknown;
+	max_suffix_tokens?: unknown;
+	max_message_tokens?: unknown;
 	sampling_cooldown_ms?: unknown;
+	vision?: unknown;
+	telemetry_retention_days?: unknown;
+	raw_update_retention_days?: unknown;
+	message_event_retention_days?: unknown;
 	telegram_admins?: unknown;
 	bots?: unknown;
 }
@@ -225,6 +258,15 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 			`[config] auxiliary_visual_model: expected provider/model:effort, got ${JSON.stringify(raw.auxiliary_visual_model)}`,
 		);
 	}
+	if (
+		raw.compaction_model !== undefined &&
+		(typeof raw.compaction_model !== "string" || !normalizeAuxiliaryVisualModel(raw.compaction_model))
+	) {
+		errors.push(`[config] compaction_model: expected provider/model:effort, got ${JSON.stringify(raw.compaction_model)}`);
+	}
+	if (raw.cache_retention !== undefined && !["none", "short", "long"].includes(String(raw.cache_retention))) {
+		errors.push(`[config] cache_retention: expected none, short, or long, got ${JSON.stringify(raw.cache_retention)}`);
+	}
 	if (raw.reasoning_effort !== undefined && !isPiThinkingLevel(raw.reasoning_effort)) {
 		errors.push(`[config] reasoning_effort: expected a Pi thinking level, got ${JSON.stringify(raw.reasoning_effort)}`);
 	}
@@ -280,7 +322,16 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 		if (b.reasoning_effort !== undefined && !isPiThinkingLevel(b.reasoning_effort)) {
 			errors.push(`[config] ${at}.reasoning_effort: expected a Pi thinking level, got ${JSON.stringify(b.reasoning_effort)}`);
 		}
-		for (const key of ["compaction_threshold", "compaction_keep_recent"] as const) {
+		if (
+			b.compaction_model !== undefined &&
+			(typeof b.compaction_model !== "string" || !normalizeAuxiliaryVisualModel(b.compaction_model))
+		) {
+			errors.push(`[config] ${at}.compaction_model: expected provider/model:effort, got ${JSON.stringify(b.compaction_model)}`);
+		}
+		if (b.cache_retention !== undefined && !["none", "short", "long"].includes(String(b.cache_retention))) {
+			errors.push(`[config] ${at}.cache_retention: expected none, short, or long, got ${JSON.stringify(b.cache_retention)}`);
+		}
+		for (const key of ["compaction_threshold", "compaction_keep_recent", "max_suffix_tokens", "max_message_tokens"] as const) {
 			const v = b[key];
 			if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v <= 0)) {
 				errors.push(`[config] ${at}.${key}: expected positive finite number, got ${JSON.stringify(v)}`);
@@ -315,10 +366,34 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 		errors.push(`[config] bots routing_p: probabilities must sum to <= 1, got ${sum.toFixed(3)}`);
 	}
 	// global numeric params
-	for (const key of ["compaction_threshold", "compaction_keep_recent"] as const) {
+	for (const key of [
+		"compaction_threshold",
+		"compaction_keep_recent",
+		"max_suffix_tokens",
+		"max_message_tokens",
+		"telemetry_retention_days",
+		"raw_update_retention_days",
+		"message_event_retention_days",
+	] as const) {
 		const v = raw[key];
 		if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v <= 0)) {
 			errors.push(`[config] ${key}: expected positive finite number, got ${JSON.stringify(v)}`);
+		}
+	}
+	if (raw.vision !== undefined) {
+		if (raw.vision == null || typeof raw.vision !== "object" || Array.isArray(raw.vision)) {
+			errors.push(`[config] vision: expected object`);
+		} else {
+			const vision = raw.vision as Record<string, unknown>;
+			if (vision.enabled !== undefined && typeof vision.enabled !== "boolean") {
+				errors.push(`[config] vision.enabled: expected boolean, got ${JSON.stringify(vision.enabled)}`);
+			}
+			for (const key of ["foreground_media_limit", "concurrency", "per_chat_hourly_limit", "daily_limit"] as const) {
+				const value = vision[key];
+				if (value !== undefined && (!Number.isSafeInteger(value) || (value as number) < 0)) {
+					errors.push(`[config] vision.${key}: expected non-negative integer, got ${JSON.stringify(value)}`);
+				}
+			}
 		}
 	}
 	if (
@@ -377,7 +452,15 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 	Object.assign(env, options.env);
 	if (options.configPath) env.bots_config = options.configPath;
 	const raw = loadBotConfig(rootDir, env);
-	const piDefaults = options.piModelDefaults ?? loadPiModelDefaults(rootDir);
+	const rawBots = raw.bots as RawBotConfig[];
+	const needsPiDefaults = rawBots.some((bot) =>
+		(bot.provider === undefined && raw.provider === undefined)
+		|| (bot.model === undefined && raw.model === undefined && bot.provider === undefined)
+	);
+	const piDefaults = options.piModelDefaults
+		?? (needsPiDefaults
+			? loadPiModelDefaults(rootDir)
+			: { provider: undefined, model: undefined, thinkingLevel: "medium" as const });
 	const errors: string[] = [];
 
 	const num = (key: string, fallback: number, min: number, max: number): number => {
@@ -411,23 +494,25 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 		: explicitDefaultProvider && explicitDefaultProvider !== piDefaults.provider
 			? undefined
 			: piDefaults.model;
-	const defaultEffort = isPiThinkingLevel(raw.reasoning_effort) ? raw.reasoning_effort : piDefaults.thinkingLevel;
-	if (!defaultProvider) {
-		errors.push(`[config] Pi default provider/model is missing; use Pi /login and /model, then restart`);
-	} else if (!defaultModel) {
-		errors.push(
-			explicitDefaultProvider
-				? `[config] deployment selects provider "${explicitDefaultProvider}" without a model; select both in config or Pi /model`
-				: `[config] Pi default provider/model is missing; use Pi /login and /model, then restart`,
-		);
-	}
+	const defaultEffort = isPiThinkingLevel(raw.reasoning_effort) ? raw.reasoning_effort : "off";
 	const defaultThreshold = num("compaction_threshold", 128000, 1, Number.MAX_SAFE_INTEGER);
 	const defaultKeepRecent = num("compaction_keep_recent", 20000, 1, Number.MAX_SAFE_INTEGER);
+	const defaultCompactionModel = typeof raw.compaction_model === "string"
+		? normalizeAuxiliaryVisualModel(raw.compaction_model)!
+		: DEFAULT_AUXILIARY_VISUAL_MODEL;
+	const defaultCacheRetention = (["none", "short", "long"] as const).includes(raw.cache_retention as never)
+		? raw.cache_retention as "none" | "short" | "long"
+		: "short";
+	const defaultMaxSuffixTokens = num("max_suffix_tokens", 12_000, 512, Number.MAX_SAFE_INTEGER);
+	const defaultMaxMessageTokens = num("max_message_tokens", 4_096, 128, Number.MAX_SAFE_INTEGER);
 	const defaultSamplingCooldown = num("sampling_cooldown_ms", 2000, 0, Number.MAX_SAFE_INTEGER);
-	const botList = raw.bots as RawBotConfig[];
+	const botList = rawBots;
 	const telegramAdmins = Array.isArray(raw.telegram_admins)
 		? raw.telegram_admins.map((value) => normalizeTelegramAdmin(value)!)
 		: [];
+	if (needsPiDefaults && !defaultProvider && !defaultModel) {
+		errors.push("[config] Pi default provider/model is missing; run Pi /login and select both with /model, or set them explicitly in telegram.config.ts");
+	}
 
 	const bots: BotConfig[] = botList.map((b) => {
 		const tokenEnv = b.token_env as string;
@@ -438,7 +523,10 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 			? b.model.trim()
 			: explicitProvider && explicitProvider !== defaultProvider
 				? ""
-				: (defaultModel ?? "");
+					: (defaultModel ?? "");
+		if (!provider) {
+			errors.push(`[config] bot "${String(b.id)}" has no provider; select one in config or Pi /model`);
+		}
 		if (!model) {
 			errors.push(`[config] bot "${String(b.id)}" selects provider "${provider}" without a model; select both in config or Pi /model`);
 		}
@@ -454,10 +542,18 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 			reasoningEffort: isPiThinkingLevel(b.reasoning_effort) ? b.reasoning_effort : defaultEffort,
 			compactionThreshold: typeof b.compaction_threshold === "number" ? b.compaction_threshold : defaultThreshold,
 			compactionKeepRecent: typeof b.compaction_keep_recent === "number" ? b.compaction_keep_recent : defaultKeepRecent,
+			compactionModel: typeof b.compaction_model === "string"
+				? normalizeAuxiliaryVisualModel(b.compaction_model)!
+				: defaultCompactionModel,
+			cacheRetention: (["none", "short", "long"] as const).includes(b.cache_retention as never)
+				? b.cache_retention as "none" | "short" | "long"
+				: defaultCacheRetention,
+			maxSuffixTokens: typeof b.max_suffix_tokens === "number" ? b.max_suffix_tokens : defaultMaxSuffixTokens,
+			maxMessageTokens: typeof b.max_message_tokens === "number" ? b.max_message_tokens : defaultMaxMessageTokens,
 			tools: {
 				send: toolsRaw.send !== false,
-				search: toolsRaw.search !== false,
-				runJs: toolsRaw.run_js !== false,
+				search: toolsRaw.search === true,
+				runJs: toolsRaw.run_js === true,
 			},
 			stickerSets: Array.isArray(b.sticker_sets) ? (b.sticker_sets as string[]) : [],
 		};
@@ -466,6 +562,16 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 		? needEnv(tinyfishKeyEnv, `tinyfish_key_env "${tinyfishKeyEnv}"`)
 		: env[tinyfishKeyEnv] ?? "";
 
+	const visionRaw = raw.vision && typeof raw.vision === "object" ? raw.vision as Record<string, unknown> : {};
+	const visionNumber = (key: string, fallback: number, max: number): number => {
+		const value = visionRaw[key];
+		return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= max ? value as number : fallback;
+	};
+	const retention: RetentionConfig = {
+		telemetryDays: num("telemetry_retention_days", 90, 1, 3650),
+		rawUpdateDays: num("raw_update_retention_days", 30, 1, 3650),
+		messageEventDays: num("message_event_retention_days", 365, 1, 3650),
+	};
 	if (errors.length > 0) throw new ConfigError(errors);
 
 	return {
@@ -477,6 +583,14 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 		auxiliaryVisualModel: typeof raw.auxiliary_visual_model === "string"
 			? normalizeAuxiliaryVisualModel(raw.auxiliary_visual_model)!
 			: DEFAULT_AUXILIARY_VISUAL_MODEL,
+		vision: {
+			enabled: typeof visionRaw.enabled === "boolean" ? visionRaw.enabled : raw.auxiliary_visual_model !== undefined,
+			foregroundMediaLimit: visionNumber("foreground_media_limit", 2, 16),
+			concurrency: Math.max(1, visionNumber("concurrency", 2, 16)),
+			perChatHourlyLimit: visionNumber("per_chat_hourly_limit", 24, 10_000),
+			dailyLimit: visionNumber("daily_limit", 200, 1_000_000),
+		},
+		retention,
 		routerSecret: env[routerSecretEnv] || null,
 		telegramAdmins,
 	};

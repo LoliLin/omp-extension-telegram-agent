@@ -155,7 +155,7 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 		try {
 			const config = loadConfig(dir);
 			expect(config.bots.map((bot) => [bot.id, bot.name, bot.provider, bot.model])).toEqual([
-				["friend", "Mochi", "deepseek", "deepseek-v4-flash"],
+				["friend", "Mochi", "openai-codex", "gpt-5.6-luna"],
 			]);
 			expect(config.telegramAdmins).toEqual([]);
 			expect(config.bots[0]!.tools.search).toBe(false);
@@ -310,7 +310,7 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 			expect(a.model).toBe("custom-model");
 			expect(a.compactionThreshold).toBe(999);
 			expect(a.compactionKeepRecent).toBe(20000); // default
-			expect(a.tools).toEqual({ send: true, search: false, runJs: true });
+			expect(a.tools).toEqual({ send: true, search: false, runJs: false });
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -416,12 +416,12 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 			expect(loadConfig(globalOnlyDir, { piModelDefaults: globalDefaults }).bots[0]).toMatchObject({
 				provider: "deepseek",
 				model: "deepseek-v4-flash",
-				reasoningEffort: "high",
+				reasoningEffort: "off",
 			});
 			expect(loadConfig(projectOverrideDir, { piModelDefaults: projectDefaults }).bots[0]).toMatchObject({
 				provider: "openai-codex",
 				model: "gpt-5.6-luna",
-				reasoningEffort: "low",
+				reasoningEffort: "off",
 			});
 		} finally {
 			rmSync(globalOnlyDir, { recursive: true, force: true });

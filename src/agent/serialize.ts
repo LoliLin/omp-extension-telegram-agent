@@ -1,7 +1,10 @@
-// Serialize canonical messages into the fixed LLM grammar (docs/cache.md, CACHE_SCHEMA_VERSION=1).
+// Serialize immutable Telegram events into the fixed LLM grammar (docs/cache.md, schema v8).
 // Grammar stability is a cache invariant: never change existing output shape.
 
 import type { Database } from "bun:sqlite";
+import type { MediaUpdatePayload, MessageEvent } from "../db/message-events.ts";
+
+export const TELEGRAM_SERIALIZER_VERSION = 2;
 
 export interface MessageRow {
 	chat_id: number;
@@ -12,6 +15,7 @@ export interface MessageRow {
 	display_name: string | null;
 	username: string | null;
 	sender_tag: string | null;
+	sender_chat?: string | null;
 	is_bot: number;
 	text: string | null;
 	caption: string | null;
@@ -20,6 +24,7 @@ export interface MessageRow {
 	reply_to_message_id: number | null;
 	reply_to_sender_id?: number | null;
 	quote: string | null;
+	forward_origin?: string | null;
 	edit_date: number | null;
 	media: string | null;
 }
@@ -48,10 +53,10 @@ function senderLabel(db: Database, m: MessageRow): string {
 	return parts.length > 0 ? `${name} (${parts.join(" · ")})` : name;
 }
 
-function mediaPlaceholder(db: Database, mediaJson: string): string {
+function mediaPlaceholder(db: Database, mediaJson: string, resolveVision = true): string {
 	const media = JSON.parse(mediaJson) as { kind: string; sticker_emoji?: string; sticker_set?: string; file_unique_id?: string };
 	let vision: string | null = null;
-	if (media.file_unique_id) {
+	if (resolveVision && media.file_unique_id) {
 		const row = db.query("SELECT vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as
 			| { vision: string | null }
 			| null;
@@ -91,8 +96,10 @@ function shortQuote(db: Database, chatId: number, messageId: number): string | n
 }
 
 export interface SerializeOptions {
-	/** message ids already visible in the model's current context (exposed ∪ current batch) */
+	/** Message ids whose content is already visible in the model's current context. */
 	visibleIds: Set<number>;
+	/** Event-log serialization disables live lookups so prior bytes stay immutable. */
+	resolveVision?: boolean;
 }
 
 /**
@@ -121,12 +128,50 @@ export function serializeMessages(db: Database, rows: MessageRow[], opts: Serial
 			if (q.text) line += ` quote="${q.text.replace(/\s+/g, " ").slice(0, 60)}"`;
 		}
 		line += ":";
-		const body = m.text ?? m.caption ?? (m.media ? mediaPlaceholder(db, m.media) : "");
+		const body = m.text ?? m.caption ?? (m.media ? mediaPlaceholder(db, m.media, opts.resolveVision) : "");
 		if (body) line += ` ${body}`;
-		if (m.media && (m.text || m.caption)) line += ` ${mediaPlaceholder(db, m.media)}`;
+		if (m.media && (m.text || m.caption)) line += ` ${mediaPlaceholder(db, m.media, opts.resolveVision)}`;
 		if (m.edit_date) line += " (edited)";
 		lines.push(line);
 		opts.visibleIds.add(m.message_id);
 	}
 	return lines.join("\n");
+}
+
+function serializeMediaUpdate(event: MessageEvent): string {
+	const payload = event.payload as MediaUpdatePayload;
+	const label = payload.media_kind === "photo" ? "图片" : payload.media_kind === "sticker" ? "sticker" : payload.media_kind;
+	return `[media_update #${event.messageId}] [${label}: ${payload.text}]`;
+}
+
+/** Delta events are always appended; no existing serialized message is rewritten. */
+export function serializeMessageEvents(db: Database, events: MessageEvent[], opts: SerializeOptions): string {
+	const blocks: string[] = [];
+	let pendingMessages: MessageRow[] = [];
+	const flushMessages = (): void => {
+		if (pendingMessages.length === 0) return;
+		blocks.push(serializeMessages(db, pendingMessages, { ...opts, resolveVision: false }));
+		pendingMessages = [];
+	};
+	for (const event of events) {
+		if (event.kind === "message") {
+			pendingMessages.push(event.payload as MessageRow);
+			continue;
+		}
+		flushMessages();
+		if (event.kind === "media_update") {
+			blocks.push(serializeMediaUpdate(event));
+			continue;
+		}
+		const row = event.payload as MessageRow;
+		if (event.kind === "edit") {
+			const body = row.text ?? row.caption ?? "";
+			blocks.push(`[message_edit #${event.messageId}]${body ? ` ${body}` : " [empty]"}`);
+		} else {
+			const reply = row.reply_to_message_id == null ? "reply metadata updated" : `↪ #${row.reply_to_message_id}`;
+			blocks.push(`[message_metadata #${event.messageId}] ${reply}`);
+		}
+	}
+	flushMessages();
+	return blocks.filter(Boolean).join("\n");
 }

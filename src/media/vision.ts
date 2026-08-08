@@ -20,6 +20,8 @@ import {
 	staticMediaMimeForPath,
 	type LocalMediaFailure,
 } from "./local-cache.ts";
+import { appendMediaUpdateEvents } from "../db/message-events.ts";
+import { VisionBudgetExceededError, type VisionScheduler } from "./vision-scheduler.ts";
 
 export { fileIdForBot } from "./local-cache.ts";
 
@@ -44,6 +46,7 @@ export type VisionOutcome =
 	| "empty_file"
 	| "download_oversize"
 	| "media_download_aborted"
+	| "budget_exceeded"
 	| PiProviderFailureCategory;
 
 export interface VisionTelemetry {
@@ -89,6 +92,10 @@ export interface EnsureVisionOptions {
 	cacheDir?: string;
 	/** Deterministic latency seam. */
 	monotonicNow?: () => number;
+	/** Shared deployment-wide provider gate; cache/local work remains outside the queue. */
+	scheduler?: VisionScheduler;
+	chatId?: number;
+	foreground?: boolean;
 }
 
 interface PiVisionExecutorOptions {
@@ -376,13 +383,24 @@ async function ensureVisionInner(
 		return null;
 	}
 
-	const result = await executor.describe({ kind, bytes: local.bytes, mimeType: local.mimeType });
+	let result: VisionDescriptionResult;
+	try {
+		const describe = () => executor.describe({ kind, bytes: local.bytes, mimeType: local.mimeType });
+		result = options.scheduler
+			? await options.scheduler.schedule(options.chatId ?? 0, options.foreground ?? false, describe)
+			: await describe();
+	} catch (error) {
+		if (!(error instanceof VisionBudgetExceededError)) throw error;
+		emitTelemetry(options, emptyTelemetry(kind, "budget_exceeded", monotonicNow() - startedAt));
+		return null;
+	}
 	const text = result.text?.trim() || null;
 	db.query("UPDATE media SET vision = ?, local_path = COALESCE(?, local_path) WHERE file_unique_id = ?").run(
 		JSON.stringify({ model: executor.modelRef, kind, text, outcome: result.telemetry.outcome, at: Date.now() }),
 		local.mediaPath,
 		fileUniqueId,
 	);
+	if (text) appendMediaUpdateEvents(db, fileUniqueId, text);
 	emitTelemetry(options, result.telemetry);
 	if (text && options.onPersist) {
 		try {

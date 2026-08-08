@@ -254,9 +254,10 @@ describe("provider search tool modes and privacy", () => {
 		expect(telemetry).not.toContain("url-secret");
 		expect(telemetry).not.toContain("body-secret");
 		expect(telemetry).not.toContain("api-secret");
-		expect(page.event).toEqual({
+		expect(page.event).toMatchObject({
 			kind: "tool_fetch",
 			payload: { stage: "tool_fetch", hostname: "example.com", chars: 11, truncated: false },
 		});
+		expect((page.event.payload as { tokens: number }).tokens).toBeGreaterThan(0);
 	});
 });

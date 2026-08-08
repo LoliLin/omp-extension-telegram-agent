@@ -4,8 +4,12 @@ export default defineConfig({
 	// Telegram supergroup id. Bare, negative, and -100-prefixed forms are accepted.
 	group_peer_id: 1234567890,
 
-	// Chat model, reasoning level, and authentication inherit Pi's current settings.
-	// Advanced deployments may select another authenticated Pi provider/model here.
+	// Cost-first fixed profile. Authentication remains exclusively in Pi's auth storage.
+	provider: "openai-codex",
+	model: "gpt-5.6-luna",
+	reasoning_effort: "off",
+	cache_retention: "short",
+	compaction_model: "openai-codex/gpt-5.6-luna:low",
 
 	// Deterministic local behavior. These defaults keep context and background work bounded.
 	compaction_threshold: 128_000,
@@ -15,6 +19,15 @@ export default defineConfig({
 	router_secret_env: "router_secret",
 	tinyfish_key_env: "tinyfish_api_key",
 	auxiliary_visual_model: "openai-codex/gpt-5.6-luna:low",
+	max_suffix_tokens: 12_000,
+	max_message_tokens: 4_096,
+	vision: {
+		enabled: false,
+		foreground_media_limit: 2,
+		concurrency: 2,
+		per_chat_hourly_limit: 24,
+		daily_limit: 200,
+	},
 
 	// Empty means all state-changing Telegram /tg commands are denied.
 	telegram_admins: [],
@@ -35,7 +48,7 @@ export default defineConfig({
 				send: true,
 				// Enable only after adding tinyfish_api_key to .env.
 				search: false,
-				run_js: true,
+				run_js: false,
 			},
 		},
 	],

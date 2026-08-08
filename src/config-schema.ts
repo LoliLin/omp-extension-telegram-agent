@@ -6,6 +6,14 @@ export interface TelegramToolsConfigInput {
 	run_js?: boolean;
 }
 
+export interface TelegramVisionConfigInput {
+	enabled?: boolean;
+	foreground_media_limit?: number;
+	concurrency?: number;
+	per_chat_hourly_limit?: number;
+	daily_limit?: number;
+}
+
 export type TelegramAdminInput = number | `@${string}`;
 
 export interface TelegramBotConfigInput {
@@ -26,6 +34,11 @@ export interface TelegramBotConfigInput {
 	reasoning_effort?: ThinkingLevel;
 	compaction_threshold?: number;
 	compaction_keep_recent?: number;
+	/** Cheap task model used only for compaction: provider/model:effort. */
+	compaction_model?: string;
+	cache_retention?: "none" | "short" | "long";
+	max_suffix_tokens?: number;
+	max_message_tokens?: number;
 	tools?: TelegramToolsConfigInput;
 	sticker_sets?: readonly string[];
 }
@@ -43,7 +56,15 @@ export interface TelegramConfigInput {
 	reasoning_effort?: ThinkingLevel;
 	compaction_threshold?: number;
 	compaction_keep_recent?: number;
+	compaction_model?: string;
+	cache_retention?: "none" | "short" | "long";
+	max_suffix_tokens?: number;
+	max_message_tokens?: number;
 	sampling_cooldown_ms?: number;
+	vision?: TelegramVisionConfigInput;
+	telemetry_retention_days?: number;
+	raw_update_retention_days?: number;
+	message_event_retention_days?: number;
 	telegram_admins?: readonly TelegramAdminInput[];
 	bots: readonly TelegramBotConfigInput[];
 }

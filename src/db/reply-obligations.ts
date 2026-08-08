@@ -23,16 +23,22 @@ export function createReplyObligation(
 }
 
 /** Pending rows in Telegram chronology; an obligation without a message cannot enter context. */
-export function listReplyObligations(db: Database, botId: string, chatId: number): ReplyObligation[] {
+export function listReplyObligations(
+	db: Database,
+	botId: string,
+	chatId: number,
+	limit = 64,
+): ReplyObligation[] {
 	return db
 		.query(
 			`SELECT o.chat_id AS chatId, o.message_id AS messageId
 			   FROM reply_obligations o
 			   JOIN messages m ON m.chat_id = o.chat_id AND m.message_id = o.message_id
 			  WHERE o.bot_id = ? AND o.chat_id = ?
-			  ORDER BY m.date, m.message_id`,
+			  ORDER BY m.date, m.message_id
+			  LIMIT ?`,
 		)
-		.all(botId, chatId) as ReplyObligation[];
+		.all(botId, chatId, Math.max(1, Math.floor(limit))) as ReplyObligation[];
 }
 
 export function removeReplyObligations(
