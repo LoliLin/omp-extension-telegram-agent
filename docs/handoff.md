@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：REQ-PLAT-0002已用四个behavior hash关闭，当前Pi credential的DeepSeek text与Luna low image脱敏真实smoke均通过。下一步关闭VISION traceability，再做photo readiness、TinyFish、editor bot selector与T14总验收。
+2026-08-08：REQ-PLAT-0002与REQ-VISION-0001均已用真实behavior hash关闭，DeepSeek text与Luna low image脱敏真实smoke通过。下一步实现photo readiness、TinyFish、editor bot selector，再做T14总验收。
 
 ## 已完成
 
@@ -42,6 +42,7 @@
 24. **已实现 `REQ-DOC-0002`（`dfc23b5`）**：project拥有“最少机制、完整边界”六原则与无namespace资源清单；中英operations解释history/session/offset/PID/socket隔离和第二群安全做法；AGENTS/development/maintainer加入可执行减法检查。7 docs tests、双mdBook links、全量340/4641与typecheck通过。
 25. **已实现 `REQ-ROUTE-0002`（`a1321f1`）**：production loader + readonly SQLite只返回identity/trigger code，100,000连续id property锁0.66/0.34互斥；报告匿名拆分assignment、partial lifecycle、run与public。验收快照重放2,046 probability为67.06/32.94%，started为66.74/33.26%，public为52.05/47.95%，确认采样正常而口径不同。
 26. **已完成 `REQ-PLAT-0002`（`0859490` + `f30e22c` + `c95c695` + `f4ff63b`）**：项目不再拥有provider secret；Pi defaults/auth与单shared runtime覆盖chat和vision，fresh `/tg config`只收Telegram配置。当前credential的DeepSeek text与Luna low image真实smoke只输出聚合并通过。
+27. **已完成 `REQ-VISION-0001`（`f4ff63b` + `6efd768` + `8b2d410`）**：动态media在首次provider提交前最多两路完成同一次Luna low识别，catalog保持后台且当前session prefix不变；匿名photo/static-sticker真实gate通过并且reasoning=0。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 

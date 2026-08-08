@@ -1,6 +1,6 @@
 # REQ-VISION-0001: cache-visible 视觉结果在 provider 提交前同步确定
 
-- **Status:** Implemented（2026-08-08，待completion commit写入真实hash并在REQ-LIST勾选）
+- **Status:** Completed（2026-08-08；fake、全量与匿名真实基准均通过）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「群聊图像与未识别sticker要在bot读上下文前同步；目录sticker保持异步；用Codex 5.6 Luna low并按成本/延迟数据取舍」
 - **依赖:** REQ-AGENT-0001、REQ-STICKER-0001、REQ-UI-0006、REQ-PLAT-0002
@@ -83,4 +83,5 @@ catalog在未来restart吸收新vision是否需要显式epoch/hash gate，超出
 ## 追溯
 
 - Plans: `PLAN-20260808-complete-new-reqs#T13g/T13k`
-- Commits: 从`Requirement: REQ-VISION-0001` git trailer查
+- Behavior commits: `f4ff63b`（shared Pi vision executor）、`6efd768`（两路provider gate与脱敏遥测）、`8b2d410`（匿名真实基准）
+- 完整查询：从 `Requirement: REQ-VISION-0001` git trailer 查

@@ -669,3 +669,10 @@
 - 当前Pi credential执行一次不回显内容的DeepSeek text completion：ok、795ms、8 input / 1 output / 0 reasoning token、$0.0000014；Luna low image证据复用匿名photo/static-sticker smoke，二者均ok且0 reasoning。所有真实调用只记录status/usage/latency/cost聚合。
 - 验证沿用行为提交后的全量372 / 4836、typecheck、cache v5 golden与双mdBook gate；本次文档变更另跑docs gate和diff check。
 - Cache impact: **NONE**——completion只更新追溯与验收记录；provider-visible bytes、runtime行为、context epoch、调用数与每turn token不变。
+
+## 2026-08-08 (77) — 关闭provider前视觉gate需求
+
+- 用真实behavior commits记录REQ-VISION-0001完成：shared Pi/Luna executor `f4ff63b`、两路动态media gate与脱敏遥测 `6efd768`、匿名基准 `8b2d410`；REQ-LIST在AC1–AC9全部有证据后勾选。
+- fake regression锁定首次provider提交前settle、1/2/3项峰值1/2/2、单次序列化、failure/unsupported fallback、persistent/in-flight cache、catalog非阻塞snapshot与遥测allowlist。全量372 / 4836、typecheck、cache v5 golden及文档门禁通过。
+- 当前Pi真实photo/static-sticker各n=1均成功、reasoning=0且低于调查基线2倍gate；报告只有latency/token/cost/outcome/bytes bucket，n=1不解释成分布。
+- Cache impact: **NONE**——completion只更新状态与追溯；视觉实现没有改变聊天system/tools/message/summary grammar、context epoch或调用次数。

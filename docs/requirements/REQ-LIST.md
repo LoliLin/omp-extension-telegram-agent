@@ -47,7 +47,7 @@
 - [ ] [REQ-UI-0014](REQ-UI-0014.md) 群友照片不依赖 vision 即时进入 Pi 原生卡片（P1，已复现定位/未实现）
 - [x] [REQ-UI-0013](REQ-UI-0013.md) 用Pi原生Image语义化缩小sticker卡片、保持photo尺寸（P2，commit `533c9ec`）
 - [x] [REQ-ROUTE-0002](REQ-ROUTE-0002.md) 验证 0.66/0.34 概率桶频率并区分回应机会与公开发言（P1，commit `a1321f1`）
-- [ ] [REQ-VISION-0001](REQ-VISION-0001.md) 群内动态媒体在 provider 提交前同步识别，目录 sticker 保持后台处理（P1，主路径已同步/Pi执行器未实现）
+- [x] [REQ-VISION-0001](REQ-VISION-0001.md) 群内动态媒体在 provider 提交前同步识别，目录 sticker 保持后台处理（P1，commits `f4ff63b`、`6efd768`、`8b2d410`）
 - [x] [REQ-PLAT-0002](REQ-PLAT-0002.md) 复用 Pi 的模型设置与认证，取消项目 provider API key（P0，commits `0859490`、`f30e22c`、`c95c695`、`f4ff63b`）
 
 
