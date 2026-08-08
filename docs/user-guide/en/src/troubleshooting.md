@@ -57,7 +57,9 @@ Another process is long-polling with the same token. Run `bun run restart`; the 
 
 ## Images do not render inline
 
-Pi selects Kitty, iTerm2, or text fallback from current terminal capabilities. First check whether the media label or vision description exists, then inspect the local media file, terminal image capability, and project Pi version. Do not add terminal escape sequences or bypass Pi components. For a stable reproduction, record terminal type, tmux state, media kind, and whether a local path exists—without attaching tokens or private image contents.
+A new photo first shows its media label, then the daemon downloads it in the background and updates the same Pi card. This does not depend on a bot responding or on vision running. Startup backfills only the newest 100 missing records, so very old gaps may require later restarts to continue.
+
+If a new photo remains label-only, inspect only the fixed `media_cache_ready/skip/error` category and queue number in redacted logs, then check the 1 MiB limit, terminal image capability, and project Pi version. Pi still selects Kitty, iTerm2, or native text fallback. Do not add terminal escapes or bypass Pi components. Record terminal type, tmux state, media kind, fixed outcome, and whether a local path exists—never a token, absolute path, or private image contents.
 
 ## Still unable to recover
 

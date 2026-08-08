@@ -44,7 +44,7 @@
 - [ ] [REQ-UI-0010](REQ-UI-0010.md) 恢复 Pi 原生 feed 的即时刷新与流式 Agent 输出（P1，已实现/待真实 Pi 总验收）
 - [x] [REQ-SEND-0002](REQ-SEND-0002.md) Telegram 远端提交后不得因本地失败而重复发送（P0，commit `bd4be62`）
 - [x] [REQ-UI-0012](REQ-UI-0012.md) 用Pi原生PNG转换与Image修复Kitty/Ghostty媒体显示（P1，commit `49e3067`）
-- [ ] [REQ-UI-0014](REQ-UI-0014.md) 群友照片不依赖 vision 即时进入 Pi 原生卡片（P1，已复现定位/未实现）
+- [ ] [REQ-UI-0014](REQ-UI-0014.md) 群友照片不依赖 vision 即时进入 Pi 原生卡片（P1，已实现并通过全量回归，待真实群photo smoke后勾选）
 - [x] [REQ-UI-0013](REQ-UI-0013.md) 用Pi原生Image语义化缩小sticker卡片、保持photo尺寸（P2，commit `533c9ec`）
 - [x] [REQ-ROUTE-0002](REQ-ROUTE-0002.md) 验证 0.66/0.34 概率桶频率并区分回应机会与公开发言（P1，commit `a1321f1`）
 - [x] [REQ-VISION-0001](REQ-VISION-0001.md) 群内动态媒体在 provider 提交前同步识别，目录 sticker 保持后台处理（P1，commits `f4ff63b`、`6efd768`、`8b2d410`）

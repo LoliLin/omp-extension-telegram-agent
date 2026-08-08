@@ -981,6 +981,34 @@ describe("native Pi Telegram extension", () => {
 		expect(host.entries).toHaveLength(1);
 	});
 
+	test("media_ready rebuilds matching photo slots in place with Pi native Image", async () => {
+		Tui.setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		const path = writeMediaFixture("png", TINY_PNG);
+		const host = makeHost();
+		try {
+			await host.command("attach A");
+			const photo = { ...message, text: null, mediaKind: "photo", fileUniqueId: "ready-photo" };
+			host.clients[0]!.emit({
+				type: "append",
+				items: [photo, { ...photo, messageId: 6, ts: photo.ts + 1 }],
+			});
+			const feed = host.entries[0]!.component as TelegramFeed;
+			const entriesBefore = host.entries.length;
+			const rendersBefore = host.renderRequests.count;
+			expect((feed as any).items.map((item: { mediaPath?: string | null }) => item.mediaPath ?? null)).toEqual([null, null]);
+
+			host.clients[0]!.emit({ type: "media", fileUniqueId: "ready-photo", mediaPath: path });
+
+			expect((feed as any).items.map((item: { mediaPath?: string | null }) => item.mediaPath ?? null)).toEqual([path, path]);
+			expect(host.entries).toHaveLength(entriesBefore);
+			expect(host.renderRequests.count).toBeGreaterThan(rendersBefore);
+			expect(host.entries[0]!.component.render(80).join("\n")).toContain("\x1b_G");
+		} finally {
+			host.shutdown();
+			unlinkSync(path);
+		}
+	});
+
 	test("native Pi FooterComponent renders Telegram usage with exact Pi metrics", async () => {
 		const host = makeHost();
 		await host.command("attach A");

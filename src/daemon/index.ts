@@ -20,6 +20,7 @@ import { publishTelegramControlMenus, TelegramControlCoordinator } from "../tele
 import { createSharedModelRuntime, piAuthSource } from "../agent/model-runtime.ts";
 import { parsePiModelReference } from "../agent/model-ref.ts";
 import { assertPiVisionExecutorReady, createPiVisionExecutor } from "../media/vision.ts";
+import { PhotoCacheQueue } from "../media/photo-cache.ts";
 import { composeDeployment, composePollers } from "./composition.ts";
 
 const rootDir = process.cwd();
@@ -127,6 +128,17 @@ for (const [botId, rt] of runtimes) {
 	rt.streamDemand = () => ipc.hasStreamListener(botId);
 }
 ipc.start();
+const photoCache = new PhotoCacheQueue(db, botApis, {
+	cacheDir: join(config.dataDir, "media"),
+	onReady: (fileUniqueId, mediaPath) => ipc.broadcastMediaReady({ fileUniqueId, mediaPath }),
+	onTelemetry: (event) => {
+		console.log(
+			`[media-cache] event=${event.event} kind=${event.kind} outcome=${event.outcome} bytes=${event.bytesBucket} queue=${event.queueDepth}`,
+		);
+	},
+});
+const photoBackfillCount = photoCache.scheduleBackfill();
+console.log(`[media-cache] startup scheduled=${photoBackfillCount} limit=100 concurrency=2`);
 
 const telegramControl = new TelegramControlCommandService(
 	db,
@@ -203,7 +215,11 @@ const pollers = composePollers(
 			const row = db
 				.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
 				.get(result.chatId, result.messageId) as MessageRow | null;
-			if (row) ipc.broadcast(ipc.msgToItem(row));
+			if (row) {
+				ipc.broadcast(ipc.msgToItem(row));
+				// Poller offset + canonical row are durable before this non-blocking side effect.
+				photoCache.scheduleMessage(botId, row);
+			}
 		}
 	},
 	replyBotTargets,
@@ -222,7 +238,9 @@ async function shutdown(signal: string) {
 	}, 35_000);
 	hardTimer.unref?.();
 	for (const p of pollers) p.stop();
+	const photoCacheStop = photoCache.stop();
 	for (const rt of runtimes.values()) await rt.stop();
+	await photoCacheStop;
 	if (controlTasks.size > 0) {
 		await Promise.race([
 			Promise.allSettled([...controlTasks]),

@@ -61,6 +61,7 @@ bun run scripts/benchmark-vision.ts --photo <local.jpg> --sticker <local.webp> -
 | provider前视觉gate（REQ-VISION-0001 T13k1a–T13k1c） | ✅ fake + real opt-in smoke | 2026-08-08 1/2/3 uncached media deferred fixture锁并发峰值1/2/2、第三项第二波、release前0 provider submit、release后单次suffix直接含描述；failure/unsupported单次fallback且exposed后不重写，persistent cache零Telegram/describe。同identity in-flight只下载/识别一次；catalog两路后台不阻塞且当前prompt/hash snapshot不变。vision telemetry/report精确allowlist且无identity/path/description。benchmark unit 4 cases覆盖strict args、p50/p95/token/cost/gate、failure/reasoning与path redaction；current Pi各n=1 photo 3312ms、sticker 4309ms、reasoning均0且2×gate通过（n=1不代表分布）。 |
 | vision update transport（REQ-UI-0006 T7） | ✅ | 2026-08-08 50 targeted pass：新描述写库后 identity-only callback、concurrent/cache 共用且 describe call=1、empty/unsupported 不发布、snapshot identity/trim、additive IPC 向所有 listener 广播；sticker/flush/timeline regression 与 `bun run check` 通过。native card merge/real smoke 留 T8/T14。 |
 | native live vision card（REQ-UI-0006 T8） | ✅ unit / ⏳ real smoke | 2026-08-08 44 plugin/timeline/IPC pass：update-before-live、later history、256-entry bound、重复幂等、同 uid 多卡片原位更新、`视觉理解` 置于 media 下方、ANSI/OSC sanitize、Pi entry 不增长；`bun run check` 通过。真实 live photo/sticker 留 T14。 |
+| durable photo readiness（REQ-UI-0014 T13l） | ✅ unit / ⏳ real group smoke | 2026-08-08 photo-cache/vision/poller/IPC/timeline/extension/cache 108 pass / 930 assertions：canonical+offset先durable、placeholder→0600 atomic path→`media_ready`、同identity/双bot/并发vision一次下载、最新100回填、两路active/128 pending、oversize/格式/network/write/rename/shutdown失败、256项乱序cache、history/disconnect与同entry Pi Image原位更新。全量383 / 4911、typecheck与cache v5 golden通过；真实群新photo留T14后才勾选。 |
 | IPC/插件数据层健壮性（REQ-IPC-0001） | ✅ | 2026-08-08 test/ipc.test.ts 14 条 + test/tg-engine.test.ts 5 条：streaming FrameDecoder、多字节边界、复合游标、队列上限、socket 600、过滤/stats、ANSI/OSC strip，以及真实 Unix socket snapshot/live/more/断线 |
 | manual send daemon contract（REQ-UI-0005 T5） | ✅ | 2026-08-08 62 targeted pass：request-id concurrent dedupe/conflict/bounded cache、bot/text/4096-code-point boundary、401/error/unknown outcome、send→DB→broadcast、poller echo dedupe、ACK-loss drop、旧 observer IPC 兼容；typecheck/cache golden 通过。 |
 | Pi editor compose（REQ-UI-0005 T6） | ✅ unit / ⏳ real smoke | 2026-08-08 `test/tg-extension.test.ts` + `test/tg-engine.test.ts` + IPC 共 39 pass：interactive handled/单发、read-only/off/RPC/extension continue、附件/空文本、明确失败恢复、in-flight 防重、ACK timeout unknown/no retry、footer identity、disconnect/detach/shutdown cleanup，以及真实 Unix socket ACK matching；`bun run check` 通过。真实 Pi/Telegram 留 T14。 |
@@ -91,7 +92,7 @@ bun run scripts/benchmark-vision.ts --photo <local.jpg> --sticker <local.webp> -
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |
 | threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ⏳ Phase 9 | - |
-| 当前全量回归 | ✅ | 2026-08-08 `bun test`：372 pass / 0 fail / 4836 assertions；`bun run check` 通过；cache v5 golden 6/6；双mdBook 18 Markdown/98 links与21 HTML/608 links通过 |
+| 当前全量回归 | ✅ | 2026-08-08 `bun test`：383 pass / 0 fail / 4911 assertions；`bun run check` 通过；cache v5 golden 6/6；双mdBook 18 Markdown/98 links与21 HTML/608 links通过 |
 
 ## 已知 flaky
 

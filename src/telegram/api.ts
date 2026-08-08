@@ -34,12 +34,20 @@ export class BotApi {
 		this.token = token;
 	}
 
-	async call<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs: number = CALL_TIMEOUT_MS): Promise<T> {
+	async call<T = unknown>(
+		method: string,
+		params: Record<string, unknown> = {},
+		timeoutMs: number = CALL_TIMEOUT_MS,
+		externalSignal?: AbortSignal,
+	): Promise<T> {
+		const signal = externalSignal
+			? AbortSignal.any([externalSignal, AbortSignal.timeout(timeoutMs)])
+			: AbortSignal.timeout(timeoutMs);
 		const res = await fetch(`${API_BASE}/bot${this.token}/${method}`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(params),
-			signal: AbortSignal.timeout(timeoutMs),
+			signal,
 		});
 		let body: ApiResponse<T>;
 		try {
@@ -123,13 +131,16 @@ export class BotApi {
 		);
 	}
 
-	getFile(fileId: string): Promise<{ file_id: string; file_unique_id: string; file_path?: string }> {
-		return this.call("getFile", { file_id: fileId });
+	getFile(fileId: string, signal?: AbortSignal): Promise<{ file_id: string; file_unique_id: string; file_path?: string }> {
+		return this.call("getFile", { file_id: fileId }, CALL_TIMEOUT_MS, signal);
 	}
 
-	async downloadFile(filePath: string): Promise<Uint8Array> {
+	async downloadFile(filePath: string, externalSignal?: AbortSignal): Promise<Uint8Array> {
+		const signal = externalSignal
+			? AbortSignal.any([externalSignal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)])
+			: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
 		const res = await fetch(`${API_BASE}/file/bot${this.token}/${filePath}`, {
-			signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+			signal,
 		});
 		if (!res.ok) throw new TelegramApiError(res.status, `file download failed: ${filePath}`);
 		return new Uint8Array(await res.arrayBuffer());

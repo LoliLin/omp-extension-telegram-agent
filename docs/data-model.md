@@ -26,7 +26,8 @@
 
 ### media — 媒体身份与本地缓存（Phase 7）
 
-- `file_unique_id` 为主身份；存 file_id(per bot)、mime、尺寸、本地路径
+- `file_unique_id` 为主身份；`media_file_ids`另存per-bot `file_id`，`media`存mime、尺寸与本地路径
+- `local_path`只在完整静态文件以0600临时文件+同目录rename安装成功后更新；新photo由durable ingest后的两路后台queue补齐，启动最多回填最新100条missing行。缓存文件名是identity hash，不把Telegram identity写进path；图片bytes不进SQLite。
 - vision 结果按 file_unique_id 缓存，所有配置 bot 共享
 
 ### agent_events — bot 内部行为

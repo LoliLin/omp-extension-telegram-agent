@@ -19,6 +19,8 @@ const SEND_ACK_TIMEOUT_MS = 15_000;
 const MAX_PENDING_SENDS = 32;
 const MAX_VISION_UPDATES = 256;
 const VISION_UPDATE_TTL_MS = 10 * 60 * 1000;
+const MAX_MEDIA_READY_UPDATES = 256;
+const MEDIA_READY_TTL_MS = 10 * 60 * 1000;
 const IMAGE_MIME: Record<string, string> = {
 	png: "image/png",
 	jpg: "image/jpeg",
@@ -66,6 +68,7 @@ export type TimelineEvent =
 	| { type: "prepend"; items: TimelineItem[] }
 	| { type: "stats"; stats: Record<string, BotStats> }
 	| { type: "vision"; fileUniqueId: string; text: string }
+	| { type: "media"; fileUniqueId: string; mediaPath: string }
 	| { type: "stream"; stream: AgentStreamFrame }
 	| { type: "status"; text: string }
 	| { type: "disconnected"; reason: string };
@@ -96,6 +99,11 @@ interface CachedVisionUpdate {
 	expiresAt: number;
 }
 
+interface CachedMediaReadyUpdate {
+	mediaPath: string;
+	expiresAt: number;
+}
+
 function itemKey(item: TimelineItem): string {
 	if (item.kind === "msg") return `m:${item.chatId}:${item.messageId}`;
 	return item.evtId != null ? `e:${item.evtId}` : `e?:${item.botId}:${item.ts}:${item.evtKind}:${item.payload}`;
@@ -119,6 +127,7 @@ export class TimelineClient implements TimelinePort {
 	private pendingUsage = new Map<number, UsageRun>();
 	private readonly pendingSends = new Map<string, PendingSend>();
 	private readonly visionUpdates = new Map<string, CachedVisionUpdate>();
+	private readonly mediaReadyUpdates = new Map<string, CachedMediaReadyUpdate>();
 	private oldestTs = Number.MAX_SAFE_INTEGER;
 	private oldestCursor: TimelineCursor | null = null;
 	private socket: Socket | null = null;
@@ -245,6 +254,8 @@ export class TimelineClient implements TimelinePort {
 		this.failPendingSends("timeline client disposed before Telegram acknowledged the send");
 		this.socket?.destroy();
 		this.socket = null;
+		this.visionUpdates.clear();
+		this.mediaReadyUpdates.clear();
 	}
 
 	private handleFrame(message: ServerMessage): void {
@@ -273,6 +284,8 @@ export class TimelineClient implements TimelinePort {
 			this.emitStats();
 		} else if (message.type === "vision_update") {
 			this.receiveVisionUpdate(message.fileUniqueId, message.text);
+		} else if (message.type === "media_ready") {
+			this.receiveMediaReady(message.fileUniqueId, message.mediaPath);
 		} else if (message.type === "agent_stream") {
 			this.hooks.onEvent({ type: "stream", stream: message.stream });
 		}
@@ -297,6 +310,27 @@ export class TimelineClient implements TimelinePort {
 		const now = Date.now();
 		for (const [fileUniqueId, update] of this.visionUpdates) {
 			if (update.expiresAt <= now) this.visionUpdates.delete(fileUniqueId);
+		}
+	}
+
+	private receiveMediaReady(fileUniqueId: string, mediaPath: string): void {
+		if (!fileUniqueId || !mediaPath || mediaPath.includes("\0")) return;
+		this.pruneMediaReadyUpdates();
+		const existing = this.mediaReadyUpdates.get(fileUniqueId);
+		if (existing?.mediaPath === mediaPath) return;
+		if (!existing && this.mediaReadyUpdates.size >= MAX_MEDIA_READY_UPDATES) {
+			const oldest = this.mediaReadyUpdates.keys().next().value as string | undefined;
+			if (oldest) this.mediaReadyUpdates.delete(oldest);
+		}
+		this.mediaReadyUpdates.delete(fileUniqueId);
+		this.mediaReadyUpdates.set(fileUniqueId, { mediaPath, expiresAt: Date.now() + MEDIA_READY_TTL_MS });
+		this.hooks.onEvent({ type: "media", fileUniqueId, mediaPath });
+	}
+
+	private pruneMediaReadyUpdates(): void {
+		const now = Date.now();
+		for (const [fileUniqueId, update] of this.mediaReadyUpdates) {
+			if (update.expiresAt <= now) this.mediaReadyUpdates.delete(fileUniqueId);
 		}
 	}
 
@@ -330,6 +364,7 @@ export class TimelineClient implements TimelinePort {
 
 	private emitFresh(type: "append" | "prepend", items: TimelineItem[]): void {
 		this.pruneVisionUpdates();
+		this.pruneMediaReadyUpdates();
 		const fresh = items.filter((item) => {
 			const key = itemKey(item);
 			if (this.seen.has(key)) return false;
@@ -342,8 +377,11 @@ export class TimelineClient implements TimelinePort {
 			return true;
 		}).map((item) => {
 			if (item.kind !== "msg" || !item.fileUniqueId) return item;
-			const update = this.visionUpdates.get(item.fileUniqueId);
-			return update ? { ...item, mediaDesc: update.text } : item;
+			const vision = this.visionUpdates.get(item.fileUniqueId);
+			const media = this.mediaReadyUpdates.get(item.fileUniqueId);
+			return vision || media
+				? { ...item, ...(vision ? { mediaDesc: vision.text } : {}), ...(media ? { mediaPath: media.mediaPath } : {}) }
+				: item;
 		});
 		if (fresh.length > 0) this.hooks.onEvent({ type, items: fresh });
 	}

@@ -3,8 +3,6 @@
 // starts another CLI or reads provider credential material.
 
 import type { Database } from "bun:sqlite";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import {
 	convertToPng,
 	type ModelRuntime,
@@ -17,6 +15,13 @@ import {
 	PiModelConfigurationError,
 	type PiProviderFailureCategory,
 } from "../agent/model-runtime.ts";
+import {
+	ensureLocalMedia,
+	staticMediaMimeForPath,
+	type LocalMediaFailure,
+} from "./local-cache.ts";
+
+export { fileIdForBot } from "./local-cache.ts";
 
 const PHOTO_PROMPT = `你在帮一个群聊 bot 理解图片。简短描述：实际可见内容、重要文字/OCR（尤其是界面和报错）、人物或物体、对聊天可能有用的信息、不确定的地方。2-3 句话以内，用中文，直接给描述不要客套。`;
 
@@ -35,6 +40,10 @@ export type VisionOutcome =
 	| "file_id_unavailable"
 	| "telegram_file_unavailable"
 	| "telegram_download_failed"
+	| "media_unavailable"
+	| "empty_file"
+	| "download_oversize"
+	| "media_download_aborted"
 	| PiProviderFailureCategory;
 
 export interface VisionTelemetry {
@@ -285,14 +294,6 @@ export function assertPiVisionExecutorReady(executor: VisionExecutor): void {
 	}
 }
 
-/** Find this bot's file_id for a shared media identity. */
-export function fileIdForBot(db: Database, botId: string, fileUniqueId: string): string | null {
-	const row = db
-		.query("SELECT file_id FROM media_file_ids WHERE bot_id = ? AND file_unique_id = ?")
-		.get(botId, fileUniqueId) as { file_id: string } | null;
-	return row?.file_id ?? null;
-}
-
 const inFlightByDb = new WeakMap<Database, Map<string, Promise<string | null>>>();
 
 /** Ensure a terminal vision result exists; same-identity calls share one provider request. */
@@ -327,12 +328,12 @@ function emitTelemetry(options: EnsureVisionOptions, telemetry: VisionTelemetry)
 }
 
 export function visionMimeForPath(filePath: string): VisionDescribeInput["mimeType"] | null {
-	const extension = filePath.split(".").pop()?.toLowerCase();
-	if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
-	if (extension === "png") return "image/png";
-	if (extension === "webp") return "image/webp";
-	if (extension === "gif") return "image/gif";
-	return null;
+	return staticMediaMimeForPath(filePath);
+}
+
+function localMediaVisionOutcome(outcome: LocalMediaFailure): VisionOutcome {
+	if (outcome === "aborted") return "media_download_aborted";
+	return outcome;
 }
 
 async function ensureVisionInner(
@@ -354,58 +355,32 @@ async function ensureVisionInner(
 		const cached = JSON.parse(media.vision) as { text?: string | null };
 		return cached.text?.trim() || null;
 	}
-	const fileId = fileIdForBot(db, botId, fileUniqueId);
-	if (!fileId) {
-		emitTelemetry(options, emptyTelemetry(kind, "file_id_unavailable", monotonicNow() - startedAt));
+	const local = await ensureLocalMedia(db, api, botId, fileUniqueId, { cacheDir: options.cacheDir });
+	if (!local.ok) {
+		const outcome = localMediaVisionOutcome(local.outcome);
+		if (outcome === "unsupported_format") {
+			db.query("UPDATE media SET vision = ? WHERE file_unique_id = ?").run(
+				JSON.stringify({ model: "none", kind, text: null, unsupported: true, outcome, at: Date.now() }),
+				fileUniqueId,
+			);
+		}
+		emitTelemetry(options, emptyTelemetry(kind, outcome, monotonicNow() - startedAt));
 		return null;
 	}
-
-	let filePath: string | null = null;
-	try {
-		filePath = (await api.getFile(fileId)).file_path ?? null;
-	} catch {
-		emitTelemetry(options, emptyTelemetry(kind, "telegram_file_unavailable", monotonicNow() - startedAt));
-		return null;
-	}
-	if (!filePath) {
-		emitTelemetry(options, emptyTelemetry(kind, "telegram_file_unavailable", monotonicNow() - startedAt));
-		return null;
-	}
-
-	const mimeType = visionMimeForPath(filePath);
-	if (!mimeType) {
+	if (local.kind !== kind) {
 		db.query("UPDATE media SET vision = ? WHERE file_unique_id = ?").run(
-			JSON.stringify({ model: "none", kind, text: null, unsupported: true, outcome: "unsupported_format", at: Date.now() }),
+			JSON.stringify({ model: "none", kind, text: null, outcome: "media_unavailable", at: Date.now() }),
 			fileUniqueId,
 		);
-		emitTelemetry(options, emptyTelemetry(kind, "unsupported_format", monotonicNow() - startedAt));
+		emitTelemetry(options, emptyTelemetry(kind, "media_unavailable", monotonicNow() - startedAt));
 		return null;
 	}
 
-	let bytes: Uint8Array;
-	try {
-		bytes = await api.downloadFile(filePath);
-	} catch {
-		emitTelemetry(options, emptyTelemetry(kind, "telegram_download_failed", monotonicNow() - startedAt));
-		return null;
-	}
-
-	const cacheDir = options.cacheDir ?? join(process.cwd(), "data", "media");
-	const extension = filePath.split(".").pop()?.toLowerCase() ?? "bin";
-	let localPath: string | null = null;
-	try {
-		mkdirSync(cacheDir, { recursive: true });
-		localPath = join(cacheDir, `${fileUniqueId}.${extension}`);
-		writeFileSync(localPath, bytes);
-	} catch {
-		localPath = null;
-	}
-
-	const result = await executor.describe({ kind, bytes, mimeType });
+	const result = await executor.describe({ kind, bytes: local.bytes, mimeType: local.mimeType });
 	const text = result.text?.trim() || null;
 	db.query("UPDATE media SET vision = ?, local_path = COALESCE(?, local_path) WHERE file_unique_id = ?").run(
 		JSON.stringify({ model: executor.modelRef, kind, text, outcome: result.telemetry.outcome, at: Date.now() }),
-		localPath,
+		local.mediaPath,
 		fileUniqueId,
 	);
 	emitTelemetry(options, result.telemetry);

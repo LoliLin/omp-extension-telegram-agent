@@ -698,6 +698,8 @@ export class TelegramFeed extends Tui.Container {
 				updated = true;
 			}
 			if (updated) this.rebuildItems();
+		} else if (event.type === "media") {
+			this.applyMediaReady(event.fileUniqueId, event.mediaPath);
 		} else if (event.type === "stream") {
 			this.applyStream(event.stream);
 		} else if (event.type === "status") {
@@ -751,6 +753,22 @@ export class TelegramFeed extends Tui.Container {
 			if (!slot) continue;
 			slot.clear();
 			slot.addChild(itemComponent(item, this.theme, this.mediaResolver));
+			refreshed = true;
+		}
+		if (refreshed) this.requestRender();
+	}
+
+	private applyMediaReady(fileUniqueId: string, mediaPath: string): void {
+		let refreshed = false;
+		for (let index = 0; index < this.items.length; index++) {
+			const item = this.items[index]!;
+			if (item.kind !== "msg" || item.fileUniqueId !== fileUniqueId || item.mediaPath === mediaPath) continue;
+			const updated = { ...item, mediaPath };
+			this.items[index] = updated;
+			const slot = this.cardSlots.get(this.itemKey(updated));
+			if (!slot) continue;
+			slot.clear();
+			slot.addChild(itemComponent(updated, this.theme, this.mediaResolver));
 			refreshed = true;
 		}
 		if (refreshed) this.requestRender();

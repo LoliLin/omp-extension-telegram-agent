@@ -5,6 +5,7 @@
 //   C->S {type:"send_message", requestId,...} S->C {type:"send_result", requestId, ok,...}
 //   (push)                                    S->C {type:"append", item: TimelineItem}
 //   (push)                                    S->C {type:"vision_update", fileUniqueId, text}
+//   (push)                                    S->C {type:"media_ready", fileUniqueId, mediaPath}
 //   (push)                                    S->C {type:"agent_stream", stream: AgentStreamFrame}
 //
 // Pagination uses a composite cursor (ts, rank, id): rank 0 = agent event (id = agent_events.id),
@@ -104,6 +105,12 @@ export interface VisionUpdate {
 	text: string;
 }
 
+/** A newly installed owner-only local media file (REQ-UI-0014). */
+export interface MediaReadyUpdate {
+	fileUniqueId: string;
+	mediaPath: string;
+}
+
 export interface AgentStreamToolCall {
 	name: string;
 	arguments: string;
@@ -170,6 +177,7 @@ export type ServerMessage =
 	| { type: "append"; item: TimelineItem }
 	| { type: "usage"; run: UsageRun }
 	| ({ type: "vision_update" } & VisionUpdate)
+	| ({ type: "media_ready" } & MediaReadyUpdate)
 	| { type: "agent_stream"; stream: AgentStreamFrame }
 	| ({ type: "send_result" } & SendMessageResult);
 

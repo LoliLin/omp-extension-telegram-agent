@@ -413,6 +413,26 @@ describe("vision update transport (REQ-UI-0006)", () => {
 	});
 });
 
+describe("media ready transport (REQ-UI-0014)", () => {
+	test("owner-only local paths broadcast additively and empty frames are rejected", () => {
+		const server = makeServer();
+		const first: unknown[] = [];
+		const second: unknown[] = [];
+		const firstSocket = fakeSocket(() => 1 << 20, (frame) => first.push(frame));
+		const secondSocket = fakeSocket(() => 1 << 20, (frame) => second.push(frame));
+		attach(server, firstSocket);
+		attach(server, secondSocket);
+
+		server.broadcastMediaReady({ fileUniqueId: "shared-photo", mediaPath: "/private/cache/photo.jpg" });
+		server.broadcastMediaReady({ fileUniqueId: "", mediaPath: "/private/cache/ignored.jpg" });
+		server.broadcastMediaReady({ fileUniqueId: "shared-photo", mediaPath: "" });
+
+		const expected = [{ type: "media_ready", fileUniqueId: "shared-photo", mediaPath: "/private/cache/photo.jpg" }];
+		expect(first).toEqual(expected);
+		expect(second).toEqual(expected);
+	});
+});
+
 describe("sanitization (R5)", () => {
 	test("AC5: ANSI clear-screen and colors are removed, text survives", () => {
 		const dirty = "hello \x1b[2J\x1b[31mred\x1b[0m world";

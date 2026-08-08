@@ -57,7 +57,9 @@ bun run pi --version
 
 ## 图片没有内联显示
 
-Pi根据当前terminal capability选择Kitty/iTerm2/native fallback。先确认media label/视觉描述是否存在，再检查本地媒体文件、terminal图像能力和当前项目Pi版本。不要在插件里手写terminal escape或绕过Pi组件。若可稳定复现，记录terminal、tmux状态、媒体种类与是否有本地path，不要附带token或私人图片本体。
+新photo会先显示media label，再由daemon后台下载并在同一Pi卡片原位出现；它不依赖bot是否回应或vision是否运行。daemon启动也只回填最新100条缺图记录，所以很旧的记录可能要等后续restart继续补齐。
+
+若新photo持续只有label，先在脱敏日志中查`media_cache_ready/skip/error`的固定category与queue数字，再检查文件是否超过1 MiB、terminal图像能力和当前项目Pi版本。Pi根据当前capability选择Kitty/iTerm2/native fallback；不要手写terminal escape或绕过Pi组件。稳定复现时只记录terminal、tmux状态、媒体种类、固定outcome和“是否有本地path”，不要附带token、绝对path或私人图片本体。
 
 ## 仍无法恢复
 

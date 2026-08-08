@@ -312,7 +312,9 @@ describe("vision persistence and sharing (REQ-UI-0006 / REQ-VISION-0001)", () =>
 		expect(telemetryEvents).toEqual([telemetry("photo")]);
 		expect(JSON.stringify(telemetryEvents)).not.toContain("photo-1");
 		const stored = db.query("SELECT local_path, vision FROM media WHERE file_unique_id = 'photo-1'").get() as { local_path: string; vision: string };
-		expect(stored.local_path).toBe(join(cacheDir, "photo-1.png"));
+		expect(stored.local_path.startsWith(`${cacheDir}/`)).toBe(true);
+		expect(stored.local_path.endsWith(".png")).toBe(true);
+		expect(stored.local_path).not.toContain("photo-1");
 		expect(JSON.parse(stored.vision)).toMatchObject({
 			model: DEFAULT_AUXILIARY_VISUAL_MODEL,
 			text: "一只猫坐在窗边",

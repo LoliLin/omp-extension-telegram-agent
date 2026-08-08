@@ -31,6 +31,19 @@ function makeUpdate(updateId: number, text = "hi"): object {
 	};
 }
 
+function makePhotoUpdate(updateId: number): object {
+	return {
+		update_id: updateId,
+		message: {
+			message_id: updateId * 100,
+			from: { id: 111, is_bot: false, first_name: "Alice" },
+			chat: { id: SUPERGROUP, type: "supergroup" },
+			date: 1754600000,
+			photo: [{ file_id: "photo-file", file_unique_id: "photo-unique", width: 32, height: 32 }],
+		},
+	};
+}
+
 interface FakeApi {
 	getUpdates(offset: number, timeoutSec: number): Promise<unknown[]>;
 }
@@ -182,5 +195,41 @@ describe("Poller (REQ-TG-0001)", () => {
 		expect(getBotState(db, "A", "update_offset")).toBe("6");
 		expect(errors).toEqual(["[poller A] message handler failed for update 5"]);
 		expect(errors[0]).not.toContain("secret detail");
+	});
+
+	test("REQ-UI-0014 R1: photo side effects observe both canonical media and offset as durable", async () => {
+		const db = freshDb();
+		const observations: unknown[] = [];
+		const p = new Poller(db, "A", "token", GROUP, (result) => {
+			observations.push({
+				result,
+				offset: getBotState(db, "A", "update_offset"),
+				message: db.query("SELECT media FROM messages WHERE message_id = 700").get(),
+				media: db.query("SELECT kind, local_path FROM media WHERE file_unique_id = 'photo-unique'").get(),
+				mapping: db.query("SELECT bot_id FROM media_file_ids WHERE file_unique_id = 'photo-unique'").get(),
+			});
+		});
+		let polls = 0;
+		injectApi(p, {
+			getUpdates: async () => {
+				polls++;
+				if (polls === 1) return [makePhotoUpdate(7)];
+				await sleep(10);
+				return [];
+			},
+		});
+
+		const running = p.run();
+		await waitFor(() => observations.length === 1);
+		p.stop();
+		await running;
+
+		expect(observations).toEqual([{
+			result: { kind: "inserted", chatId: SUPERGROUP, messageId: 700 },
+			offset: "8",
+			message: { media: JSON.stringify({ kind: "photo", file_unique_id: "photo-unique", file_id: "photo-file", width: 32, height: 32 }) },
+			media: { kind: "photo", local_path: null },
+			mapping: { bot_id: "A" },
+		}]);
 	});
 });

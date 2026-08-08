@@ -1,6 +1,6 @@
 # REQ-UI-0014: 群友照片不依赖 vision 即时进入 Pi 原生卡片
 
-- **Status:** Approved（2026-08-08 已复现定位，未实现）
+- **Status:** Implemented（2026-08-08；unit/full/typecheck/cache验证通过，真实群新photo smoke留T14后再勾选）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「群友发的图片不展示」
 - **依赖:** REQ-UI-0001、REQ-UI-0006、REQ-UI-0012、REQ-UI-0013
@@ -17,6 +17,8 @@ Telegram photo已被normalize、入库并在卡片显示`[photo]`，但`media.lo
 - Poller offset与canonical message已在`onMessage`前durable commit。媒体下载属于可失败side effect，不能反过来卡住offset或回滚消息。
 - snapshot/history已经从`media.local_path`读取最终值；live card缺少的是下载完成后的additive identity通知。
 - Pi显示层已有1 MiB source guard、异步`convertToPng`、LRU和原位card rebuild。修复应只把本地path及时送进这条现有链。
+- 实现后photo precache与provider vision共用同一个按DB/media identity合并的Telegram download promise；≤1 MiB静态文件用hash basename、0600临时文件与同目录rename安装。因而UI与vision并发也只下载一次，且媒体身份不出现在缓存文件名。
+- daemon在placeholder broadcast之后才调用非阻塞queue；启动只取`media.rowid`最新100条missing photo。queue固定最多2 active、128 pending，stop会abort自己的网络请求并在每个await边界拒绝迟到DB/IPC写入。
 
 官方参考：<https://core.telegram.org/bots/api#getfile>。
 
@@ -81,4 +83,4 @@ Telegram photo已被normalize、入库并在卡片显示`[photo]`，但`media.lo
 ## 追溯
 
 - Plans: `PLAN-20260808-complete-new-reqs#T13g/T13l`
-- Commits: 从`Requirement: REQ-UI-0014` git trailer查
+- Commits: 从 `Requirement: REQ-UI-0014` git trailer查；真实behavior hash在T14 completion record写入

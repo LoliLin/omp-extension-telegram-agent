@@ -191,6 +191,63 @@ describe("Pi plugin timeline client", () => {
 		client.dispose();
 	});
 
+	test("media_ready before append is merged once into every matching message identity", () => {
+		const log = new EventLog();
+		const client = new TimelineClient(sockPath, null, { onEvent: (event) => log.events.push(event) });
+		(client as any).handleFrame({ type: "media_ready", fileUniqueId: "photo-ready", mediaPath: "/private/cache/photo.jpg" });
+		(client as any).handleFrame({ type: "media_ready", fileUniqueId: "photo-ready", mediaPath: "/private/cache/photo.jpg" });
+		(client as any).handleFrame({
+			type: "append",
+			item: {
+				kind: "msg", ts: 1, chatId: -1001, messageId: 91, senderName: "Alice", username: null,
+				isBot: false, botId: null, text: null, mediaKind: "photo", stickerEmoji: null,
+				fileUniqueId: "photo-ready", replyTo: null, edited: false,
+			},
+		});
+		(client as any).handleFrame({
+			type: "append",
+			item: {
+				kind: "msg", ts: 2, chatId: -1001, messageId: 92, senderName: "Bob", username: null,
+				isBot: false, botId: null, text: null, mediaKind: "photo", stickerEmoji: null,
+				fileUniqueId: "photo-ready", replyTo: null, edited: false,
+			},
+		});
+
+		const messages = allItems(log).filter((item) => item.kind === "msg");
+		expect(messages.map((item) => item.kind === "msg" ? item.mediaPath : null)).toEqual([
+			"/private/cache/photo.jpg",
+			"/private/cache/photo.jpg",
+		]);
+		expect(log.events.filter((event) => event.type === "media")).toHaveLength(1);
+		client.dispose();
+	});
+
+	test("media_ready cache is bounded, applies to history, and is cleared on disconnect", () => {
+		const log = new EventLog();
+		const client = new TimelineClient(sockPath, null, { onEvent: (event) => log.events.push(event) });
+		for (let index = 0; index < 300; index++) {
+			(client as any).handleFrame({ type: "media_ready", fileUniqueId: `photo-${index}`, mediaPath: `/private/cache/${index}.png` });
+		}
+		(client as any).handleFrame({
+			type: "history",
+			items: [{
+				kind: "msg", ts: 1, chatId: -1001, messageId: 1, senderName: "Alice", username: null,
+				isBot: false, botId: null, text: null, mediaKind: "photo", stickerEmoji: null,
+				fileUniqueId: "photo-299", replyTo: null, edited: false,
+			}],
+			hasMore: false,
+		});
+
+		expect((client as any).mediaReadyUpdates.size).toBe(256);
+		const older = log.events.find((event) => event.type === "prepend") as Extract<TimelineEvent, { type: "prepend" }>;
+		expect(older.items[0]?.kind === "msg" ? older.items[0].mediaPath : null).toBe("/private/cache/299.png");
+		client.dispose();
+		expect((client as any).mediaReadyUpdates.size).toBe(0);
+		const count = log.events.length;
+		(client as any).handleFrame({ type: "media_ready", fileUniqueId: "late", mediaPath: "/private/cache/late.png" });
+		expect(log.events).toHaveLength(count);
+	});
+
 	test("snapshot emits raw items and merged DB stats", async () => {
 		insertMsg(100, 1754600000, "hello");
 		insertEvt("A", 1754600001 * 1000);

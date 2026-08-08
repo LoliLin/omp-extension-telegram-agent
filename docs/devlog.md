@@ -676,3 +676,11 @@
 - fake regression锁定首次provider提交前settle、1/2/3项峰值1/2/2、单次序列化、failure/unsupported fallback、persistent/in-flight cache、catalog非阻塞snapshot与遥测allowlist。全量372 / 4836、typecheck、cache v5 golden及文档门禁通过。
 - 当前Pi真实photo/static-sticker各n=1均成功、reasoning=0且低于调查基线2倍gate；报告只有latency/token/cost/outcome/bytes bucket，n=1不解释成分布。
 - Cache impact: **NONE**——completion只更新状态与追溯；视觉实现没有改变聊天system/tools/message/summary grammar、context epoch或调用次数。
+
+## 2026-08-08 (78) — 让photo独立于vision进入Pi原生卡片
+
+- 新增daemon-owned photo cache queue：poller canonical/offset与placeholder broadcast之后才排任务；live identity去重、最多2 active/128 pending，startup仅按最新rowid回填100条missing photo，ready不等待网络。stop会abort queue I/O、丢弃pending并阻止await后的迟到DB/IPC写入。
+- 抽出precache/vision共享的单一media download in-flight。支持的静态JPEG/PNG/WebP/GIF在≤1 MiB时用identity hash basename、0600临时文件、fsync与同目录rename安装；DB只在完成后写path。oversize、unsupported、getFile/download、write/rename失败不留partial target，vision并发不会二次下载且仍可消费已取得bytes。
+- IPC增加可忽略`media_ready {fileUniqueId,mediaPath}`；timeline用256项/10分钟cache处理update-before-message/history/重复，disconnect清理。Pi feed只替换所有matching card slot并请求host render，仍完全使用原生`Image`、既有converter/capability/尺寸，没有新entry、自绘协议或高频动画。
+- 目标photo/vision/poller/IPC/timeline/extension/cache为108 pass / 930 assertions；全量383 / 4911、typecheck、cache v5 golden与diff check通过。真实群新photo原卡片smoke留T14，完成前REQ-LIST不勾选。
+- Cache impact: **NONE**——下载、SQLite path、owner socket与Pi TUI均在provider外；0新增vision/LLM call，system/tools/messages/summary、epoch与每turn token逐字节不变。

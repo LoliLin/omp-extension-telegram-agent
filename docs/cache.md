@@ -42,7 +42,7 @@ DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`
 
 **动态候选（动态 suffix 尾部）**：`Available stickers:` 块保留，只列**上下文出现过、set 外且当前 bot 确有 file_id 映射**的 sticker（set 内 sticker 已在 prefix 里，排除防冗余）；位置约束：必须在全部消息序列之后（R6，测试锁定），不并入 prefix。
 
-**动态媒体 gate**：photo/sticker按identity命中持久cache或以最多2个worker完成一次terminal vision；全部settle后才序列化当前batch。成功描述或确定性fallback都只进入这次新suffix，已exposed entry不重发。`vision_update`、本地文件完成和catalog后台completion不写Pi session；cache v5 golden因此逐字节不变。
+**动态媒体 gate**：photo/sticker按identity命中持久cache或以最多2个worker完成一次terminal vision；全部settle后才序列化当前batch。成功描述或确定性fallback都只进入这次新suffix，已exposed entry不重发。photo precache只提前准备≤1 MiB本地显示文件，并与vision共享同一次Telegram download；`media_ready`、`vision_update`、本地转换和catalog后台completion不写Pi session。cache v5 golden因此逐字节不变，新增LLM/vision call与provider token均为0。
 
 **send**：两种来源的 short_id 共用 media 表解析 + 每 bot file_id；无效 id 在发送前结构化报错（REQ-AGENT-0001 R7 协同）。
 
@@ -95,5 +95,6 @@ bot、model、provider、timestamp、context epoch、context tokens、cache read
 - 2026-08-08 REQ-TG-0003 T10k：**NONE**；新增canonical rich source只留SQLite，既有动态消息位置消费≤32768 code points确定性plain projection；不改system/tool/serialization grammar、消息entry数或LLM调用数，raw JSON不进Pi/provider。cache schema仍为4，golden逐字节不变。T10l的tool description变更再单独bump。
 - 2026-08-08 REQ-TG-0003 T10l：**INTENTIONAL**；agent文字改为Rich Markdown并只在send tool schema说明能力，CACHE_SCHEMA_VERSION 4→5、tools hash `631bf05405d1`。systemA/B、serialize、compaction与catalog hash不变；daemon下次启动只开一个新epoch。参数/工具/LLM调用数不变，具体rich source仍不进入provider。
 - 2026-08-08 REQ-REPLY-0001 T10o：**NONE**；reply sender/obligation只改变动态消息选择，原`#id`行仍用既有serialization。system/tool/message/summary grammar、schema v5 golden与正常burst调用数不变；只有真实pending reply超过40条时按有界normal batch产生必要的额外call。
+- 2026-08-08 REQ-UI-0014 T13l：**NONE**；photo precache、`media.local_path`与additive `media_ready`只存在于Telegram/local SQLite/owner socket/Pi TUI side channel。与vision共享下载但不调用模型；system/tools/messages/summary grammar、context epoch、vision次数与每turn token逐字节不变，schema仍v5。
 - cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=5、systemA/B hash、serialize hash、**tools hash（含 description/schema/order）、compaction summary prompt hash** 与 per-bot catalog filter 全部锁定；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
 - 分析脚本（REQ-TEST-0001 R5）：llm_runs 的 epoch/compaction 列与 >30% context 回落都被视为真实 compaction 并同步模拟 context；60 runs 回放识别 3 次真实 compaction（e2e 遗留 epoch 1→4），幻影触发 0

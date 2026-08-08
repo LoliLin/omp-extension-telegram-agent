@@ -12,6 +12,7 @@ import type {
 	StatsSnapshot,
 	UsageRun,
 	VisionUpdate,
+	MediaReadyUpdate,
 	AgentStreamFrame,
 	SendMessageRequest,
 	SendMessageResult,
@@ -199,6 +200,13 @@ export class IpcServer {
 	broadcastVision(update: VisionUpdate): void {
 		if (this.listeners.size === 0 || !update.fileUniqueId || !update.text.trim()) return;
 		const frame = encodeFrame({ type: "vision_update", ...update } satisfies ServerMessage);
+		for (const socket of this.listeners) this.writeFrame(socket, frame);
+	}
+
+	/** Push one owner-only local media path to every live transcript (REQ-UI-0014). */
+	broadcastMediaReady(update: MediaReadyUpdate): void {
+		if (this.listeners.size === 0 || !update.fileUniqueId || !update.mediaPath) return;
+		const frame = encodeFrame({ type: "media_ready", ...update } satisfies ServerMessage);
 		for (const socket of this.listeners) this.writeFrame(socket, frame);
 	}
 
