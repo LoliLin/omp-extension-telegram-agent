@@ -1,119 +1,83 @@
-# Agent 指南（仓库根）
+# AGENTS.md
 
-本文件是编码 agent 的常载路由与安全指南。保持短、稳定、高信号；详细知识放链接文档，不要在这里展开。
+本文件是 agent 会话自动加载的唯一常载文档：短、稳定、高信号。详细内容一律在 `docs/`，这里只放哲学、路由、硬约束和坑。
 
-## 1. 仓库地图
+## 1. 项目哲学
 
-- 项目说明与核心目标：`docs/project.md`
-- 架构边界与 invariant：`docs/architecture.md`
-- 文档索引：`docs/index.md`
-- 开发流程（LLM 开发指南，日常开发以此为准）：`docs/engineering/development-guide.md`
-- 机器维护指南（开发、提交、验证、发布入口）：`docs/maintainers/guide.md`
-- 当前状态 / 新 agent 入口：`docs/handoff.md`（动手前必读，保持短）
-- 主需求文档：`docs/requirement.md`；新需求：`docs/requirements/`（**总清单 `REQ-LIST.md`，完成打勾**；模板 `REQ-TEMPLATE.md`）
-- 进行中的计划：`docs/plans/active/`（模板 `docs/plans/PLAN-TEMPLATE.md`）
-- 架构决策：`docs/adr/`（模板 `ADR-TEMPLATE.md`）
-- Cache 工程（provider prefix invariant）：`docs/cache.md`
-- 数据模型：`docs/data-model.md`
-- 测试策略、命令、当前状态：`docs/testing.md`
-- 文档写作规范：`docs/engineering/documentation-guide.md`
-- Debug / 可观察性规范：`docs/engineering/debugging-guide.md`
-- 追溯规则：`docs/engineering/traceability.md`
-- 变更记录：`docs/devlog.md`（append-only）
+- **极简，最少机制**：一套设计，不留兼容层。Breaking change 随时可以做，只要求迁移干净、一步到位。
+- **Pi 原生优先**：动手前先查 `node_modules/@earendil-works` 各包导出了什么；Pi 能做的事不自造轮子（审计结论见 `docs/engineering/code-review-2608.md`）。
+- **不花冤枉钱**：能用确定性代码解决的不花 LLM token；任何功能先评估 cache hit 率与每 turn 新增 token（`docs/cache.md`、`docs/engineering/development-guide.md`）。
+- 删代码优先于加抽象；防御代码只防真实可能的分支。
 
-## 2. 指令优先级
+## 2. 仓库地图
 
-1. 用户 / 任务的显式要求
-2. 本文件
-3. 链接的架构、cache、测试、需求文档
+- `docs/index.md` — 文档总索引
+- `docs/project.md` — 项目目标、约束、术语
+- `docs/architecture.md` — 架构边界与 invariant
+- `docs/cache.md` — provider cache 工程（prefix invariant / CACHE_SCHEMA_VERSION）
+- `docs/data-model.md` — SQLite schema
+- `docs/testing.md` — 测试策略与规范命令
+- `docs/engineering/development-guide.md` — 日常开发流程
+- `docs/engineering/debugging-guide.md` — 结构化日志与 Debug impact
+- `docs/engineering/documentation-guide.md` — 文档写作规范
+- `docs/engineering/code-review-2608.md` — 2026-08 全面 review 结论与 Pi 能力审计
+- `docs/runbooks/daemon.md` — daemon 运维
+- `docs/user-guide/` — 双语用户指南
 
-两条指令冲突时，停下报告冲突，不要自行裁决。
+动手前只读与受影响边界相关的章节，不要把无关文档塞进上下文。
 
-## 3. 动手前（非平凡改动）
+## 3. 硬约束
 
-1. 读 `docs/handoff.md` 和相关需求。
-2. 只读理解受影响边界所必需的架构 / cache / data-model 章节，不要把无关文档塞进上下文。
-3. **任何新功能或行为改动必须读 `docs/engineering/debugging-guide.md`，在REQ/PLAN写清Debug impact。**
-4. 先搜现有模式，再考虑引入新模式。
-5. 确定覆盖本次改动的验证命令（`docs/testing.md`）。
-6. 多文件、跨边界、改持久格式或行为变化的工作：先建 `docs/plans/active/PLAN-*.md` 再实现。
+- **Cache invariant**：永不改写已存在的 provider prefix；动态内容只以新 suffix 追加。cache-visible 协议（system prompt shape、persona 序列化、tool schema 与顺序、消息 / 摘要序列化 grammar、sticker catalog block）任一变化：bump `CACHE_SCHEMA_VERSION`、更新 `test/cache.test.ts` golden、同步 `docs/cache.md`。
+- Secret 不进日志、测试 fixture、commit；`.env` 不入库。
+- daemon 生产模块只用 `src/observability/log.ts` 结构化日志；不记正文 / prompt / response / tool args / 完整 URL 与 path；业务正确性不得依赖日志。
+- 不得为通过验证而削弱测试、类型检查或安全控制（如 run_js sandbox）。
+- 不改 SQLite schema、IPC 协议、消息序列化 grammar，除非有明确需求并同步文档。
+- 配置只有一套：`telegram.config.ts`（业务配置）+ Pi 内部 settings + `.env`（secrets）。禁止引入第二来源。
 
 ## 4. 改动路由
 
-把行为放进拥有该职责的层；不要为解决归属不确定而新建共享抽象。
+行为放进拥有该职责的层；不为归属不清新建共享抽象。归属不清先查 `docs/architecture.md` 和现有调用点。
 
 - Telegram API / 轮询 / normalize → `src/telegram/`
-- schema / 持久化 → `src/db/`（改 schema 必须带 migration 并更新 `docs/data-model.md`）
-- 序列化 grammar / prompt / routing / session 生命周期 / compaction → `src/agent/`
+- schema / 持久化 → `src/db/`（schema 变更必须更新 `docs/data-model.md`）
+- prompt / serialize / routing / runtime / provider-facing 工具 → `src/agent/`（tool description 是 cache-visible，见 `src/agent/tools.ts`）
 - 进程管理 / IPC server → `src/daemon/`、`src/ipc.ts`
-- TUI → `src/tui/`（UI-only 改动不得影响 provider payload，见 `docs/cache.md` invariant 5）
-- 工具（search / run_js / 未来工具）→ `src/tools/`，注册顺序固定在 `src/agent/runtime.ts`
+- TUI → `.pi/extensions/tg-extension.ts` + `src/plugin/timeline.ts`（UI-only 改动不得影响 provider payload）
+- 工具实现（search / run_js）→ `src/tools/`，注册顺序固定在 `src/agent/runtime.ts`
+- 安装向导 → `src/onboarding/`
 
-归属不清时先查 `docs/architecture.md` 和现有调用点。
+## 5. 测试规则
 
-## 5. 硬约束
+- 鼓励 TDD：新行为先写失败测试再实现。脚手架测试在功能稳定后必须删除——`test/` 只保留护长期 invariant / 安全边界的守卫（当前 6 个，见 `docs/testing.md`）。
+- 能确定性复现的 bug 必须有回归测试；agent 行为测可观察轨迹与结果，不断言 prompt 字符串。
+- `bun test` 零外网、零付费调用，由 `bunfig.toml` 的 test preload 机械保证。
 
-- **Cache invariant**：永不改写已存在的 provider prefix；动态内容只以新 suffix 追加；cache-visible 协议（system prompt shape / persona 序列化 / tool schema / tool 顺序 / 消息序列化 grammar / 摘要 grammar）任一变化必须 bump `CACHE_SCHEMA_VERSION`、开新 context epoch、同步 `docs/cache.md`。
-- Secret 不进日志、telemetry、测试 fixture、commit。`.env` 不入库。
-- daemon生产模块只用`src/observability/log.ts`结构化日志；禁止正文/prompt/response/thinking/tool args、完整URL/path/stack，业务正确性不得依赖日志。
-- 不得为了让验证通过而削弱测试、类型检查或安全控制（如 run_js sandbox 限制）。
-- 不改 SQLite 持久格式、IPC 协议、消息序列化 grammar，除非有明确需求 + 兼容方案 + 文档更新。
-- 不做破坏性 git 操作（`reset --hard` / force push / 改写历史）。
-- 提交不夹带无关清理；保留任务范围之外的用户改动。
+## 6. 验证漏斗
 
-## 6. 实现规则
-
-- 满足验收标准的最小改动；复用现有抽象，不过早泛化。
-- **最少机制**：新增抽象、工具、模型调用或动态字段前，先尝试删除一层、复用职责拥有层或 Pi 原生能力、改用确定性代码。未经明确 REQ 不得把单群需求扩成同目录多群/多租户，也不得另建平行框架；权威原则与检查表见 `docs/project.md`、`docs/engineering/development-guide.md`。
-- **任何功能必须评估 cache hit 率与 token 成本影响**：确定性内容进稳定 prefix 而非动态 suffix；能用确定性代码解决的不花 LLM token；每 turn 新增 token 有界（细则见 `docs/engineering/development-guide.md` 第三节）。
-- Provider-facing 工具的参数、调用方法、错误/终止语义只在 `src/agent/tools.ts` 的 tool description / parameter schema 维护；persona 与共享 system protocol 只描述环境和行为，不复制工具参数表或调用示例。改 tool description 也属于 cache-visible protocol，必须 bump schema 并更新 golden。
-- 行为变化与机械重构尽量分开提交。
-- 行为变化加 / 更新测试；能确定性复现的 bug 必须有回归测试。
-- Agent / LLM 行为测可观察的轨迹与结果，不断言 prompt 字符串。
-- 新功能必须按debug指南覆盖成功、合法no-op/沉默与至少一个失败边界；优先复用现有identity/telemetry，事件和诊断查询必须有界。
-- Provider context 必须有界：不把无界历史、日志、工具输出塞进模型可见内容。
-- 注释只写非显然的理由，不复述语法。
-- 接口、invariant、工作流、架构边界变化时同步更新文档。
-
-## 7. 验证漏斗（由便宜到贵）
-
-1. `bun test <相关文件>` → `bun test`（unit + replay，不触网络）
+1. `bun test <相关文件>` → `bun test`
 2. `bun run check`（tsc --noEmit）
-3. 相关 e2e 脚本（`scripts/e2e-*.ts`，需 `.env`，触真实服务）
-4. 真实群观察 / 长运行 smoke（跨边界或稳定性改动才需要）
-
-`bun test` 必须在存在真实 `.env` 时仍为零外网、零付费 API 调用；`bunfig.toml` 的 test preload 会机械拒绝非 loopback fetch。真实 TinyFish / provider / Telegram 验证只能作为用户明确授权的 opt-in e2e 或一次性脚手架，完成后删除脚手架，不得放进自动测试或按 key 存在与否自动启用。
+3. `bun run docs:check`（文档站构建 + 链接检查）
+4. opt-in e2e：`scripts/e2e-*.ts`（需 `.env`，触真实服务，用户明确授权才跑）
 
 规范命令以 `docs/testing.md` 为准；仓库已有脚本时不要猜底层命令。
 
-## 8. 完成定义
+## 7. 提交规范
 
-任务不算完成，直到：
+- 原子提交：一个行为变化一个 commit；提交前只显式暂存本任务路径，禁止 `git add -A`。
+- 提交自动 GPG 签名；签名失败停下诊断，不得绕过。不做破坏性 git 操作（reset --hard / force push / 改写历史）。
+- subject：英文祈使句、首字母大写、≤72 字符、描述具体代码结果；纯机械变更末尾加 `Work-Type: mechanical`。
+- 提交前跑覆盖本次改动的测试。
 
-- 验收标准全部满足；相关测试通过；`bun run check` 通过。
-- diff 不含无关改动。
-- 契约或工作流变化已同步文档。
-- Debug impact已按`docs/engineering/debugging-guide.md`验证，`bun run debug`能区分该功能的关键边界或明确说明为何现有证据已足够。
-- `docs/devlog.md` 追加一条（含 cache impact 评估：NONE / INTENTIONAL + 理由）。
-- `docs/handoff.md` 更新为最新状态。
-- 明确报告未验证区域、遗留风险与假设。
+## 8. 已知坑
 
-## 9. 提交与追溯
+- `bun test` 强制 UTC：涉时间序列化的测试必须 pin TZ（参考 `test/cache.test.ts`，生产为 Asia/Singapore）。
+- Bun `socket.write` 返回字节数且可能部分写入：必须编码成 Uint8Array 后按字节偏移排队写（参考 `src/ipc.ts`）。
+- `.env` 是 `key: value` 冒号格式，由 `src/config.ts` 自解析，不是 dotenv 的 `KEY=value`。
+- Pi 四包精确锁定 registry `0.84.1`；升级必须同一原子提交更新 manifest、lock 并做兼容性验证。
+- sticker / alias 的 short_id 用 rowid 分配，不用 COUNT+1（并发 / 删除下撞号）。
+- `streamFunction` 猴补丁（`src/agent/runtime.ts`）是唯一的 Pi 私有缝，升级 Pi 时必须验证（见 `docs/engineering/code-review-2608.md`）。
 
-- 用户授权提交后，**大任务默认拆成多个小的原子提交**，并先在 PLAN 中拆成 commit-sized tasks；除非整个任务确实只有一个不可再分的行为结果，不得做单个巨型提交。一个 task 只产生一个可独立审查、可独立回滚且通过目标验证的行为变化。测试与该行为必需的文档属于同一 commit；机械重构、无关清理、不同需求不得混入。
-- 每个 task 完成后立即提交，不得把多个已完成 task 留到最后压成一个大 commit。提交前只显式暂存本 task 路径/patch（脏工作树禁止 `git add -A`），检查 `git diff --cached` 与 `git status --short`，并先跑该 task 的目标测试；整项任务结束再跑全量验证。
-- 所有授权提交必须签名（repo 已配 `scripts/git-gpg.sh` 为 `gpg.program`）；签名失败时停下诊断，不得改成 unsigned commit。不得用 amend/rebase 把已完成的原子提交重新揉在一起，除非用户明确要求改写历史。
-- Commit subject 采用 `<Imperative verb> <concrete code outcome>`：英文祈使句、首字母大写、无句号、建议不超过 72 字符；描述代码结果，不写空泛的 “update/fix stuff”，不把 REQ/PLAN 标题当 subject。可选 body 解释非显然的 why / invariant / 验证，subject 与 body、body 与 trailer 之间各空一行。
-- 有对应 REQ 的 commit 末尾必须写 `Requirement:`；有 active PLAN task 的必须写 `Task:`；纯机械且无 REQ 的 commit 用 `Work-Type: mechanical`。精确格式、示例与查询命令见 `docs/engineering/traceability.md`。
+## 9. 指南更新规则
 
-## 10. 已知坑
-
-- `bun test` 强制 UTC：涉及时间序列化的测试必须 pin TZ（参考 `test/cache.test.ts`，生产为 Asia/Singapore）。
-- Bun `socket.write` 返回**字节数**且可能部分写入：必须 TextEncoder 编码成 Uint8Array 后按字节偏移排队写（参考 `src/ipc.ts`）。
-- `.env` 是 `key: value` 冒号格式，由 `src/config.ts` 自己解析，不是 dotenv 的 `KEY=value`；首选 ignored `telegram.config.ts`，legacy `bots.config.json` 仍兼容，两份默认文件不得并存。
-- Pi 依赖精确锁定 registry `0.84.1`；`bun run pi` 缺依赖时会先执行 frozen-lockfile bootstrap。开发 sibling `../pi` 不参与解析，升级四个 Pi package 时必须同一原子提交更新 manifest、lock 与兼容性测试。
-- sticker short_id 用 rowid 分配，不要用 COUNT+1（并发/删除下撞号）。
-
-## 11. 指南更新规则
-
-单次失误不加规则。新增 / 修改规则须满足：非显然、会复发、可执行、足够稳定、放在最窄适用范围。能机械强制的规则优先做成测试 / lint / schema check，而不是文字。
+单次失误不加规则。新增 / 修改规则须满足：非显然、会复发、可执行。能机械强制的优先做成测试 / lint / schema check，而不是文字。

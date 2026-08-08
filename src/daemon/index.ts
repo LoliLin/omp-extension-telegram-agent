@@ -207,7 +207,7 @@ function route(result: IngestResult): void {
 	const row = db
 		.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
 		.get(result.chatId, result.messageId) as MessageRow | null;
-	if (!row) return; // missing row; is_bot is enforced inside routeMessage (REQ-TEST-0001 R3)
+	if (!row) return; // missing row; is_bot is enforced inside routeMessageDecision
 	const decision = routeMessageDecision(db, row, identities, {
 		secret: config.routerSecret ?? "",
 		probs: config.bots.map((b) => b.routingP),
