@@ -684,3 +684,12 @@
 - IPC增加可忽略`media_ready {fileUniqueId,mediaPath}`；timeline用256项/10分钟cache处理update-before-message/history/重复，disconnect清理。Pi feed只替换所有matching card slot并请求host render，仍完全使用原生`Image`、既有converter/capability/尺寸，没有新entry、自绘协议或高频动画。
 - 目标photo/vision/poller/IPC/timeline/extension/cache为108 pass / 930 assertions；全量383 / 4911、typecheck、cache v5 golden与diff check通过。真实群新photo原卡片smoke留T14，完成前REQ-LIST不勾选。
 - Cache impact: **NONE**——下载、SQLite path、owner socket与Pi TUI均在provider外；0新增vision/LLM call，system/tools/messages/summary、epoch与每turn token逐字节不变。
+
+## 2026-08-08 (79) — 用既有search tool有界读取网页
+
+- 重新核对TinyFish现行官方参考并纠正调查草案：Search只发送`query`，移除旧`num_results`；Fetch精确发送单URL与`format/links/image_links`，不伪造当前未列出的recency、TTL或per-URL timeout字段。`search`仍是`send, search, run_js`中的第二项，query旧调用兼容，query/url双填或空填在网络前固定失败。
+- Fetch只接受≤2048字符public HTTP(S)，拒绝userinfo、localhost/`.local`、loopback/private/link-local/CGNAT/metadata与IPv6 ULA；本机不做DNS/GET。请求50秒、response 1 MiB、正文8,000字符，固定untrusted前后边界和截断标记；HTTP/timeout/oversize/JSON/单URL错误全部折叠到allowlisted category。
+- runtime event/details不再记录search query；fetch只记录stage/hostname/chars/truncated，失败只多固定category。29个local tests / 76 assertions覆盖精确协议、安全表、0-network validation、三tool顺序与privacy。一次性真实search及公开page fetch只做shape/bounds断言并通过，随即删除脚手架；`bunfig.toml` preload现在对全部unit/replay机械拒绝非loopback fetch，真实`.env`存在也不消耗额度。
+- `CACHE_SCHEMA_VERSION` 5→6，tools hash由`631bf05405d1`变为`09d2e154259d`；system中英模板、message serialization、compaction与catalog hash不变。daemon下次启动检测版本后全bot只开一个新epoch。
+- 验证：全量409 pass / 4981 assertions（37 files，外网guard生效）、`bun run check`、cache v6 golden、双语mdBook 18 Markdown/98 links与21 HTML/620 links、diff check全部通过。
+- Cache impact: **INTENTIONAL**——稳定prefix只增加既有search的url字段与短说明；不新增tool或eager fetch。未调用时没有动态token/网络成本；显式fetch单次最多把8,000字符加入当前tool suffix。

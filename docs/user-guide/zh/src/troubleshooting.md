@@ -61,6 +61,13 @@ bun run pi --version
 
 若新photo持续只有label，先在脱敏日志中查`media_cache_ready/skip/error`的固定category与queue数字，再检查文件是否超过1 MiB、terminal图像能力和当前项目Pi版本。Pi根据当前capability选择Kitty/iTerm2/native fallback；不要手写terminal escape或绕过Pi组件。稳定复现时只记录terminal、tmux状态、媒体种类、固定outcome和“是否有本地path”，不要附带token、绝对path或私人图片本体。
 
+## 搜索或网页读取失败
+
+- 确认对应bot的`tools.search`为true，`.env`中存在`tinyfish_key_env`选中的key，然后受控restart。
+- `invalid_url`表示目标不是允许的public HTTP(S) URL，或包含userinfo/local/private/link-local地址；不要通过关闭校验来访问内网。
+- `*_timeout`、`*_http_*`、`*_response_too_large`和`fetch_*`是固定类别。它们只影响当前turn；不会后台重试或换URL。
+- 排查时只记录固定category与hostname。不要粘贴API key、signed URL的path/query/fragment或网页正文。
+
 ## 仍无法恢复
 
 收集以下非敏感信息：

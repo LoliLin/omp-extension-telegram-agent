@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：REQ-UI-0014 durable photo readiness已实现并通过383项全量回归；REQ-LIST保持未勾选，等T14真实群新photo smoke。下一步实现TinyFish，再调查/正式化editor多bot selector，最后总验收。
+2026-08-08：REQ-SEARCH-0001已实现，本地29项与一次性真实search/fetch均通过；真实脚手架已删除，`bun test`全局拒绝外网，最终409/4981通过。cache 5→6只有tools协议变化，待behavior/completion commits。UI-0014仍等真实群photo smoke；下一步正式化两个raw notes。
 
 ## 已完成
 
@@ -43,7 +43,8 @@
 25. **已实现 `REQ-ROUTE-0002`（`a1321f1`）**：production loader + readonly SQLite只返回identity/trigger code，100,000连续id property锁0.66/0.34互斥；报告匿名拆分assignment、partial lifecycle、run与public。验收快照重放2,046 probability为67.06/32.94%，started为66.74/33.26%，public为52.05/47.95%，确认采样正常而口径不同。
 26. **已完成 `REQ-PLAT-0002`（`0859490` + `f30e22c` + `c95c695` + `f4ff63b`）**：项目不再拥有provider secret；Pi defaults/auth与单shared runtime覆盖chat和vision，fresh `/tg config`只收Telegram配置。当前credential的DeepSeek text与Luna low image真实smoke只输出聚合并通过。
 27. **已完成 `REQ-VISION-0001`（`f4ff63b` + `6efd768` + `8b2d410`）**：动态media在首次provider提交前最多两路完成同一次Luna low识别，catalog保持后台且当前session prefix不变；匿名photo/static-sticker真实gate通过并且reasoning=0。
-28. **已实现 `REQ-UI-0014`（待本behavior commit hash）**：poller durable/broadcast后排photo，最多2 active/128 pending，启动最新100；precache与vision共享一次下载，≤1 MiB文件hash命名、0600原子安装。`media_ready`经owner socket只重建匹配Pi卡片，失败保留label且无身份/path日志。真实群新photo留T14。
+28. **已实现 `REQ-UI-0014`（`50eec13`）**：poller durable/broadcast后排photo，最多2 active/128 pending，启动最新100；precache与vision共享一次下载，≤1 MiB文件hash命名、0600原子安装。`media_ready`经owner socket只重建匹配Pi卡片，失败保留label且无身份/path日志。真实群新photo留T14。
+29. **已实现 `REQ-SEARCH-0001`（behavior hash待本commit）**：保留三tool顺序，`search`严格query/url二选一；Fetch只接受public HTTP(S)，50秒/1 MiB/8,000字符和untrusted boundary固定，event不含query/path/body/key。29个local tests与一次性真实shape smoke通过；脚手架已删除，test preload即使有`.env`也只放行loopback。cache schema 5→6。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 

@@ -23,7 +23,7 @@
 
 ## 需求
 
-- **R1:** TinyFish 真实调用移出 `bun test`：迁到 e2e 脚本或加 env gate（无 key 时 skip 并打印提示）。
+- **R1:** TinyFish 真实调用彻底移出 `bun test`；测试preload在任何`.env`状态下阻断非loopback fetch。真实调用只允许用户明确授权的opt-in e2e或一次性脚手架，验证后删除，不得按key存在自动启用。
 - **R2:** cache golden 增加：tool schema 序列化 hash（含顺序）与 compaction 摘要 prompt grammar hash；任一漂移即测试失败。
 - **R3:** 「bot 消息不触发」下沉到 `routeMessage` 内部判断（单一权威点），或至少加一条 daemon 层路由测试；两种方案开工时择一。
 - **R4:** e2e 脚本按断言结果决定 exit code；`e2e-compaction.ts` 轮询 compaction 事件（带超时）替代固定 sleep。
@@ -32,7 +32,7 @@
 
 ## 验收标准
 
-- **AC1:** 无网络、无 `.env` 环境下 `bun test` 全绿。
+- **AC1:** 无`.env`时`bun test`全绿；存在真实`.env`时也机械拒绝外网并保持全绿、零付费调用。
 - **AC2:** 手动改动任一 tool 的 description 或调整注册顺序，golden 测试失败；改回后恢复绿。
 - **AC3:** 构造 is_bot=true 的消息进路由层，任何配置下都不产生 trigger（测试锁定）。
 - **AC4:** `e2e-compaction.ts` 在 compaction 未发生时 exit≠0；正常时 exit=0 且耗时不含固定 sleep。
@@ -42,7 +42,7 @@
 ## 约束
 
 - Cache impact: **NONE**（只加测试与脚本修复，不改 provider payload；R2 是锁定现状而非改变现状）。
-- 不得为了让 AC1 通过而删除有价值的测试——网络用例是迁移 / gate，不是删除。
+- 不得为了让 AC1 通过而删除协议覆盖；真实网络用例改为loopback fake，付费smoke只保留脱敏结果记录，不保留自动调用。
 
 ## 例子与边界 case
 

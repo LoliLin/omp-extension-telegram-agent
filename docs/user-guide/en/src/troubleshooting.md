@@ -61,6 +61,13 @@ A new photo first shows its media label, then the daemon downloads it in the bac
 
 If a new photo remains label-only, inspect only the fixed `media_cache_ready/skip/error` category and queue number in redacted logs, then check the 1 MiB limit, terminal image capability, and project Pi version. Pi still selects Kitty, iTerm2, or native text fallback. Do not add terminal escapes or bypass Pi components. Record terminal type, tmux state, media kind, fixed outcome, and whether a local path exists—never a token, absolute path, or private image contents.
 
+## Search or page retrieval fails
+
+- Confirm that the bot has `tools.search: true`, that `.env` contains the key selected by `tinyfish_key_env`, and then perform a controlled restart.
+- `invalid_url` means the target is not an allowed public HTTP(S) URL or contains userinfo or a local/private/link-local address. Never disable the guard to access an internal service.
+- `*_timeout`, `*_http_*`, `*_response_too_large`, and `fetch_*` are fixed categories. They affect only the current turn; there is no background retry or URL substitution.
+- Retain only the fixed category and hostname when diagnosing. Never paste the API key, a signed URL's path/query/fragment, or page contents.
+
 ## Still unable to recover
 
 Collect only non-sensitive evidence:

@@ -69,10 +69,10 @@ export default defineConfig({
 `tools`：
 
 - `send`：允许 agent 发 Telegram Rich Message / sticker；
-- `search`：需要 `.env` 中由 `tinyfish_key_env` 指定的 TinyFish key；
+- `search`：启用同一个TinyFish工具的有界网页检索与单页读取，需要 `.env` 中由 `tinyfish_key_env` 指定的TinyFish key；
 - `run_js`：启用受限的确定性计算工具。
 
-首次向导把 search 关闭。启用前把 TinyFish credential 加入 `.env`；它与 Pi 模型认证无关。
+首次向导把 search 关闭。启用前把 TinyFish credential 加入 `.env`（默认key名为`tiny_fish_api_key`）；它与 Pi 模型认证无关。启用后agent可显式搜索，或在回答确实需要页面内容时读取一个public HTTP(S) URL；不会自动抓取群里的每条链接，也不支持登录态、cookie或private/local地址。
 
 ## Routing 与管理命令
 

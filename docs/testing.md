@@ -16,6 +16,7 @@
 - Agent 行为测可观察轨迹与结果，不断言 prompt 字符串。
 - provider cache 相关改动必须跑 `test/cache.test.ts` golden；golden 失败是报警，先查原因，不要随手更新。
 - 涉时间序列化的测试必须 pin TZ（bun test 强制 UTC，参考 test/cache.test.ts）。
+- `bun test`即使检测到真实`.env`也不得调用外网或付费API；`bunfig.toml` preload只放行loopback fake upstream。真实服务只能用明确opt-in e2e/一次性脚手架，不能按credential存在自动启用。
 - 不得为了通过而删除或削弱断言。
 
 ## 失败诊断
@@ -54,7 +55,8 @@ bun run scripts/benchmark-vision.ts --photo <local.jpg> --sticker <local.webp> -
 | deterministic routing property tests | ✅ | 2026-08-07 33/33 + 真实群双 bot 实况 |
 | probability busy/cooldown scheduler（REQ-ROUTE-0001） | ✅ | 2026-08-08 46 targeted：fake monotonic clock + 100-message burst；A/B 独立并发、busy/cooldown fast-skip、不改投、不设 pending、不补抽、1999/2000 ms deadline、explicit coalesce/bypass、0ms override；另锁 `routing_p=[0,0]` 的“我叫小雨”→B/name→explicit busy/cooldown path；cache golden 不变。 |
 | 脱敏routing审计（REQ-ROUTE-0002） | ✅ unit + current deployment replay | 2026-08-08 `test/router.test.ts` + `test/analyze-routing.test.ts` 覆盖100,000连续id互斥0.66/0.34、duplicate canonical、probability/mention/reply/name/bot、started/busy/cooldown、empty/1/N-bot、override、missing/truncated/unknown log、readonly拒写与privacy denylist。验收快照只读重放2,046个probability样本为1,372/674（67.06/32.94%）；daemon partial started 580/289（66.74/33.26%），public 406/374（52.05/47.95%），口径分离。 |
-| run_js sandbox isolation | ✅ | 2026-08-07 REQ-SEC-0001 加固后 66/66（含逃逸回归向量）+ 真实 TinyFish 调用 |
+| run_js sandbox isolation | ✅ | 2026-08-07 REQ-SEC-0001 加固后覆盖逃逸回归向量；真实TinyFish测试已从该文件删除。 |
+| TinyFish query/fetch（REQ-SEARCH-0001） | ✅ offline + one-time smoke | 2026-08-08 `test/search.test.ts` 29 pass / 76 assertions：现行query请求与本地1,000/5/120/200上限、精确单URL POST、50秒/1 MiB/8,000字符、untrusted boundary、public URL/IP table（含非十进制IPv4与IPv4-mapped IPv6）、0-network invalid/dual/empty、三tool顺序与telemetry denylist。一次性真实search/`example.com` fetch只断言shape/bounds并通过，随后删除脚手架；永久测试由preload机械阻断外网，`.env`存在也不消耗额度。cache schema 5→6且只有version/tools hash变化。 |
 | flush/compaction 状态机（REQ-AGENT-0001） | ✅ | 2026-08-07 test/flush.test.ts + test/search.test.ts：慢 vision 并发触发不重复序列化、send 失败不标 exposed 可重试、compaction 失败/中止/空摘要不错切 epoch、exposure 与 kept tail（N≠40）对齐、search 10s 超时与响应护栏、send 先校验后发 |
 | ingestion/poller 可靠性（REQ-TG-0001） | ✅ | 2026-08-07 test/ingest.test.ts + test/poller.test.ts：二次编辑 revision 全链（v1 按原始 date、v2 按首次 edit_date 作 key）、ingest 失败不推进 offset 且重放无重复、setBotState 失败走 backoff poller 存活、stop 发生在长轮询期间则丢弃返回批次、401 fail-fast |
 | vision lazy/cache | ✅ | 2026-08-07 真实群 sticker/photo 语义正确，双 bot file_id 映射 |

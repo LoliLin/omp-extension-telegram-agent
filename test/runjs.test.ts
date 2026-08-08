@@ -3,8 +3,6 @@
 
 import { describe, expect, test } from "bun:test";
 import { runJs } from "../src/tools/run-js.ts";
-import { tinyFishSearch } from "../src/tools/search.ts";
-import { loadConfig } from "../src/config.ts";
 
 describe("run_js normal computation", () => {
 	test("arithmetic", async () => {
@@ -182,27 +180,4 @@ describe("run_js escape regression", () => {
 		expect(r.ok).toBe(false);
 		expect(r.output).toContain("spawn");
 	});
-});
-
-// REQ-TEST-0001 R1: the real TinyFish API call must NOT run as part of `bun test` — unit
-// tests are offline. It moves behind an env gate: without a usable .env the suite is skipped
-// with a hint (offline / no-key environments stay green).
-let hasKey = false;
-try {
-	hasKey = (loadConfig(process.cwd()).tinyfishApiKey ?? "") !== "";
-} catch {
-	hasKey = false;
-}
-if (!hasKey) console.warn("[runjs.test] no tiny_fish_api_key (.env): real-api tinyfish tests skipped (REQ-TEST-0001 R1)");
-
-describe.skipIf(!hasKey)("tinyfish search (real api)", () => {
-	test("returns trimmed results", async () => {
-		const config = loadConfig(process.cwd());
-		const hits = await tinyFishSearch(config.tinyfishApiKey, "telegram bot api sendSticker");
-		expect(hits.length).toBeGreaterThan(0);
-		expect(hits.length).toBeLessThanOrEqual(5);
-		expect(hits[0].title.length).toBeGreaterThan(0);
-		expect(hits[0].url).toMatch(/^https?:/);
-		expect(hits[0].snippet.length).toBeLessThanOrEqual(200);
-	}, 30000);
 });

@@ -60,6 +60,12 @@ Pi's native footer renders `↑/↓/R/W/CH/$/context/model`. Lifetime values cov
 - Photo and sticker vision runs lazily only when a real bot run needs media context; opening the UI never adds a vision call.
 - Inline image visibility follows Pi terminal capabilities and local media preparation. Text, media labels, and vision descriptions remain readable fallbacks.
 
+## Web search and link reading
+
+After enabling `tools.search` for a bot and configuring a TinyFish key, the agent can use one tool on demand: a query returns at most five compact results, while a URL reads one public HTTP(S) page. Group links are never fetched eagerly; retrieval happens only when the answer needs page contents.
+
+Page text is capped at 8,000 characters and enclosed in a fixed untrusted-content boundary. Instructions in a page do not become agent instructions. Authenticated URLs, localhost, and private or link-local targets are rejected before the request. Events and logs retain only hostname, character count, and fixed outcome categories—not the URL path/query/fragment or page body.
+
 ## Daemon commands in Pi
 
 ```text

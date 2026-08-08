@@ -111,12 +111,13 @@ describe("minimal design and one-directory deployment boundary (REQ-DOC-0002)", 
 		expect(readFileSync(resolve("README.en.md"), "utf8")).toContain("operations.md#why-working-directories-must-be-isolated");
 	});
 
-	test("retains all six bounded cost mechanisms in both languages", () => {
+	test("retains all seven bounded cost mechanisms in both languages", () => {
 		for (const language of ["zh", "en"]) {
 			const cost = readFileSync(resolve(`docs/user-guide/${language}/src/design-cost.md`), "utf8");
-			expect(cost.match(/^## [1-6]\. /gm)).toHaveLength(6);
+			expect(cost.match(/^## [1-7]\. /gm)).toHaveLength(7);
 			expect(cost).toMatch(/不承诺固定节省百分比|promises no fixed savings percentage/);
 			expect(cost).toMatch(/一个动态字段|dynamic field/);
+			expect(cost).toMatch(/网页只按需读取|Pages are retrieved only on demand/);
 		}
 	});
 });

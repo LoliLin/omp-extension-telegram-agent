@@ -78,6 +78,8 @@
 3. 相关 e2e 脚本（`scripts/e2e-*.ts`，需 `.env`，触真实服务）
 4. 真实群观察 / 长运行 smoke（跨边界或稳定性改动才需要）
 
+`bun test` 必须在存在真实 `.env` 时仍为零外网、零付费 API 调用；`bunfig.toml` 的 test preload 会机械拒绝非 loopback fetch。真实 TinyFish / provider / Telegram 验证只能作为用户明确授权的 opt-in e2e 或一次性脚手架，完成后删除脚手架，不得放进自动测试或按 key 存在与否自动启用。
+
 规范命令以 `docs/testing.md` 为准；仓库已有脚本时不要猜底层命令。
 
 ## 8. 完成定义

@@ -2,7 +2,7 @@
 
 本项目不承诺固定节省百分比。provider价格、群活跃度、persona长度与模型cache行为都会变化；实际效果以Pi footer、`/tg status`和SQLite lifetime telemetry为准。
 
-项目的“极简”是最少机制而不是最少保障：优先少一个状态、接口、网络请求和provider-visible byte，同时保留transaction、timeout、脱敏、测试与可观察性。下面六项就是这一哲学在现有系统里的具体实现，不是未来平台功能清单。
+项目的“极简”是最少机制而不是最少保障：优先少一个状态、接口、网络请求和provider-visible byte，同时保留transaction、timeout、脱敏、测试与可观察性。下面七项就是这一哲学在现有系统里的具体实现，不是未来平台功能清单。
 
 ## 1. 确定性 routing 先决定是否调用模型
 
@@ -34,7 +34,13 @@ compaction本身有辅助模型成本，因此不是每轮在线优化器。阈�
 
 权威流程见[架构的 Vision 章节](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md)。
 
-## 6. UI 与 telemetry 走side channel
+## 6. 网页只按需读取且结果有界
+
+搜索与读取网页复用一个tool，不增加第四项稳定schema。query只返回最多5条短结果；url只有模型明确需要时才发出一次网络请求，正文最多8,000字符。群链接不会eager fetch，所以未使用网页能力的turn没有额外网络请求或动态token。
+
+页面正文是不可信数据，URL安全和日志脱敏在确定性代码中完成，不用额外模型调用。单次fetch仍会产生TinyFish请求并把有界正文加入当前动态context，实际成本取决于调用频率与页面长度。
+
+## 7. UI 与 telemetry 走side channel
 
 Pi native feed、assistant partial、footer、`/tg status`和Telegram control使用本地IPC/SQLite/control plane。它们可观察运行状态，但不进入persona或主provider context。
 

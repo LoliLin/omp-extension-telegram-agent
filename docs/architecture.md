@@ -58,6 +58,7 @@
 - 唤醒：`session.sendUserMessage(serialized)`，一次 flush 一批（burst 由 pendingTrigger 合并，不走 SDK 队列）
 - 群消息序列化为固定紧凑 grammar（见 docs/cache.md），append-only
 - tools 固定为 `send`、`search`、`run_js`（Phase 6 起），禁用 coding agent 默认文件工具。`src/agent/tools.ts` 是 provider-facing 用法唯一权威；persona/protocol 不复制参数。`send(message?,sticker?,reply_to?)` 是唯一公开通道，`message` 为 Telegram Rich Markdown（普通文本是其子集，首版禁止HTML/raw block/remote media）；完整成功返回固定 `ok`，远端 committed/partial/unknown 的退化路径返回固定 `no_retry`，两者都用 `terminate:true` 阻止 follow-up provider call，sent ids 只留本地 details/event。
+- `search(query?|url?)`复用同一TinyFish tool且强制二选一：query只发送现行`query`并在本地保留≤5条短结果；url只允许≤2048字符的public HTTP(S)，本机不做DNS/GET，提交一个URL到Fetch API。fetch请求、响应和provider正文分别固定为一页、≤1 MiB、≤8,000字符/50秒，结果套固定untrusted boundary；网页正文不获得指令权。事件只记录stage、hostname、hits/chars/truncated与固定错误category，不记录query、URL path/query/fragment、正文或key。群消息不会触发eager fetch。
 - local assistant text（未调 send）→ agent_events + TUI，不进群
 
 ## run_js sandbox 威胁模型（REQ-SEC-0001）

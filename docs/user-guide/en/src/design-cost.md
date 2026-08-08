@@ -2,7 +2,7 @@
 
 The project promises no fixed savings percentage. Provider pricing, group activity, persona length, and model cache behavior all vary. Measure your deployment through Pi's footer, `/tg status`, and retained SQLite telemetry.
 
-“Minimal” means fewer mechanisms, not fewer safeguards: minimize state, interfaces, network requests, and provider-visible bytes while preserving transactions, timeouts, redaction, tests, and observability. The six mechanisms below are the current expression of that philosophy, not a roadmap for a general platform.
+“Minimal” means fewer mechanisms, not fewer safeguards: minimize state, interfaces, network requests, and provider-visible bytes while preserving transactions, timeouts, redaction, tests, and observability. The seven mechanisms below are the current expression of that philosophy, not a roadmap for a general platform.
 
 ## 1. Deterministic routing decides whether to call a model
 
@@ -34,7 +34,13 @@ Photos and stickers enter canonical SQLite first. Vision runs only when a real b
 
 See the [Vision architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md).
 
-## 6. UI and telemetry use side channels
+## 6. Pages are retrieved only on demand and stay bounded
+
+Search and page reading share one tool instead of adding a fourth stable schema entry. A query returns at most five compact results. A URL creates one request only when the model explicitly needs it, and page text is capped at 8,000 characters. Turns that do not use the feature add no retrieval request or dynamic page tokens.
+
+Deterministic code handles the untrusted-content boundary, URL safety, and log redaction without another model call. A fetch still consumes one TinyFish request and adds bounded text to the current dynamic context, so actual cost depends on call frequency and page length.
+
+## 7. UI and telemetry use side channels
 
 The Pi-native feed, assistant partials, footer, `/tg status`, and Telegram controls use local IPC, SQLite, and the deterministic control plane. They remain outside personas and main provider context.
 

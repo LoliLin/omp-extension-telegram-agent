@@ -60,6 +60,12 @@ Pi 原生 footer 显示 `↑/↓/R/W/CH/$/context/model`。lifetime 来自 SQLit
 - 照片与 sticker 的视觉描述只在真实 bot run 需要时按需生成；UI 本身不会额外触发 vision provider。
 - inline image 是否可见取决于 Pi terminal capability与本地媒体准备；文字、media label和视觉描述仍是可读 fallback。
 
+## 网页搜索与链接读取
+
+为当前bot启用`tools.search`并配置TinyFish key后，agent可按需调用同一个工具：用query取得最多5条短结果，或读取一条public HTTP(S)链接。群里的链接不会被自动抓取；只有回答需要页面正文时才显式调用。
+
+网页正文最多进入8,000字符并带有固定“不可信网页内容”边界。页面里的命令不会成为agent指令；登录态、userinfo、localhost、private/link-local地址会在请求前拒绝。事件和日志只保留hostname、字符数和固定结果类别，不保留URL path/query/fragment或正文。
+
 ## Pi 内 daemon 命令
 
 ```text

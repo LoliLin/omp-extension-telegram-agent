@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 5; // v5: send.message is Telegram Rich Markdown; tool schema is the sole authority
+export const CACHE_SCHEMA_VERSION = 6; // v6: search tool supports bounded TinyFish page fetches
 
 // Fixed shared protocol block, appended after the persona. Never reorder.
 const PROTOCOL = `

@@ -84,7 +84,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13j4** — 用真实behavior hashes记录PLAT-0002完成并在REQ-LIST勾选；validates: PLAT-0002 traceability；commit: completion record
 - [x] **T13k2** — 用T13k1a–T13k1c真实commit hash记录VISION-0001完成并在REQ-LIST勾选；validates: VISION-0001 traceability；commit: completion record
 - [x] **T13l** — 增加durable-first photo precache/backfill与`media_ready`原位Pi更新；validates: UI-0014 AC1–AC7；commit: native photo readiness（真实群smoke与hash在T14记录）
-- [ ] **T13m** — 在既有search tool增加TinyFish fetch/recency、安全边界并bump cache v6；validates: SEARCH-0001 AC1–AC7；commit: bounded web retrieval
+- [x] **T13m** — 按现行官方字段在既有search tool增加TinyFish fetch、安全边界并bump cache v6；validates: SEARCH-0001 AC1–AC7；commit: bounded web retrieval（behavior hash待本commit）
 - [ ] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
 
 ## 每个 commit 的固定流程

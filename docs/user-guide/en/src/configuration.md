@@ -69,10 +69,10 @@ When top-level model fields are omitted, every bot inherits Pi's merged default 
 `tools` controls:
 
 - `send`: Telegram Rich Message and sticker delivery;
-- `search`: requires the TinyFish key selected by `tinyfish_key_env` in `.env`;
+- `search`: enables bounded TinyFish search and single-page retrieval through one tool; it requires the TinyFish key selected by `tinyfish_key_env` in `.env`;
 - `run_js`: constrained deterministic computation.
 
-The first-run wizard disables search. Add the TinyFish credential to `.env` before enabling it; it is unrelated to Pi model authentication.
+The first-run wizard disables search. Before enabling it, add the TinyFish credential to `.env` (the default key name is `tiny_fish_api_key`); it is unrelated to Pi model authentication. Once enabled, the agent can search explicitly or read one public HTTP(S) page when an answer needs its contents. It never eagerly fetches every group link and does not support authenticated, private, or local targets.
 
 ## Routing and administrative commands
 

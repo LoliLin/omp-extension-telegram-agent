@@ -42,8 +42,9 @@ import {
 	type SendComponentOutcome,
 	type SendDegradedOutcome,
 	type SendParams,
+	type SearchParams,
 } from "./tools.ts";
-import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
+import { runTinyFishTool } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
 import {
 	createPiVisionExecutor,
@@ -258,23 +259,13 @@ export class BotRuntime {
 			label: "Search",
 			description: TOOL_DEFS[1].description,
 			parameters: TOOL_DEFS[1].parameters,
-			execute: async (_toolCallId: string, params: { query: string }) => {
-				try {
-					const hits = await tinyFishSearch(this.config.tinyfishApiKey, params.query);
-					this.recordEvent("tool_search", { query: params.query, hits: hits.length });
-					return {
-						content: [{ type: "text" as const, text: formatSearchResults(hits) }],
-						details: { query: params.query, hits: hits.length },
-					};
-				} catch (err) {
-					// structured failure back to the model; never let a hung upstream wedge the turn (R6)
-					const error = err instanceof Error ? err.message : String(err);
-					this.recordEvent("error", { stage: "tool_search", error });
-					return {
-						content: [{ type: "text" as const, text: `search failed: ${error}` }],
-						details: { query: params.query, error },
-					};
-				}
+			execute: async (_toolCallId: string, params: SearchParams) => {
+				const result = await runTinyFishTool(this.config.tinyfishApiKey, params);
+				this.recordEvent(result.event.kind, result.event.payload);
+				return {
+					content: [{ type: "text" as const, text: result.content }],
+					details: result.details,
+				};
 			},
 		};
 		const runJsTool = {
