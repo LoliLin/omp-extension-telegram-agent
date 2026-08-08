@@ -10,13 +10,10 @@ import { BotApi } from "../src/telegram/api.ts";
 import { BotRuntime } from "../src/agent/runtime.ts";
 import { createSharedModelRuntime } from "../src/agent/model-runtime.ts";
 import { selectConfiguredBot } from "./bot-selection.ts";
-import { TelegramControlState } from "../src/telegram/control-state.ts";
 
 const config = loadConfig(process.cwd());
 const bot = selectConfiguredBot(config.bots, process.argv.slice(2));
 const db = openDb(config.dbPath);
-// Match daemon composition exactly before the runtime computes its fingerprint.
-new TelegramControlState(db, config.bots);
 const me = await new BotApi(bot.token).getMe();
 setBotState(db, bot.id, "bot_user_id", String(me.id));
 setBotState(db, bot.id, "bot_username", me.username);

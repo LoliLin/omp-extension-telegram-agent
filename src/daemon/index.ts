@@ -14,7 +14,6 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CACHE_SCHEMA_VERSION } from "../agent/prompt.ts";
 import { ManualSendService } from "./manual-send.ts";
-import { TelegramControlState } from "../telegram/control-state.ts";
 import { parseTelegramControlCommand, TelegramControlCommandService } from "../telegram/control-command.ts";
 import { publishTelegramControlMenus, TelegramControlCoordinator } from "../telegram/control-integration.ts";
 import { createSharedModelRuntime, piAuthSource } from "../agent/model-runtime.ts";
@@ -77,8 +76,6 @@ function runRetentionMaintenance(): void {
 runRetentionMaintenance();
 const retentionTimer = setInterval(runRetentionMaintenance, 24 * 60 * 60 * 1_000);
 retentionTimer.unref?.();
-// Restore effective overrides before BotRuntime captures the shared BotConfig objects.
-const telegramControlState = new TelegramControlState(db, config.bots);
 
 // router secret: stable across restarts, generated once
 if (!config.routerSecret) {
@@ -174,7 +171,7 @@ log.info("media_cache", "startup_scheduled", { scheduled: photoBackfillCount, li
 const telegramControl = new TelegramControlCommandService(
 	db,
 	config.bots,
-	telegramControlState,
+	rootDir,
 	runtimes,
 	config.telegramAdmins,
 );

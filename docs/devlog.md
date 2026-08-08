@@ -765,3 +765,12 @@
 - 验证：全量454 pass / 0 fail / 5179 assertions（45 files，零外网）、typecheck、cache v8 golden 7/7、docs 18 Markdown/98 links与21 HTML/620 links、diff check通过。真实操作只包括用户授权的Telegram identity/catalog/restart与一次未触发模型的空session compact尝试；未调用TinyFish。
 - 签名行为提交：`6afaa8d`（同轮精确reply）、`5891ac0`（结构化日志、provider context诊断与TinyFish恢复）、`6082b8e`（foreground daemon ownership）。
 - Cache impact: **INTENTIONAL（deployment config）**——日志/debug/PID/reply修复本身NONE；A/B重新加入既有`search` schema使fingerprint开新epoch并承担固定tool schema token，但不新增自动tool/LLM调用。新session隔离旧污染，旧文件保留。
+
+## 2026-08-09 (89) — 群内控制命令重做为平级 bot 命令并写穿配置
+
+- 群内控制从单一 `/tg` 入口（help/bots/status/compact/set/reset 子命令）改为 Telegram 平级真命令 `/help`、`/status`、`/compact`、`/set <routing_p|cooldown_ms> <value>`；parser 只认这四个 command token，其余原样放行给其他 bot。命令默认作用于接收 bot，`@username` 后缀定向保留；`/bots`、`/reset`、独立 usage 输出分别并入 `/status` 或被写穿语义覆盖。
+- 删除 DB 覆盖层 `TelegramControlState`（`telegram_override:*` bot_state、共享 BotConfig 改写、daemon 启动恢复）。`/set` 改为写穿 `telegram.config.ts`：config-core 新增 `updateBotConfigField`，按 bot 的 `id:` 锚点限定对象块后替换/插入字段行，复用 `replaceExistingConfigSource` 的原子写入 + 全量 loadConfig 校验，任何一步失败回滚文件；成功后才更新内存 BotConfig。既有 DB 残留的 `telegram_override:*` 行不再读取，留作惰性残留。
+- daemon 启动为每个 bot `setMyCommands` 注册 help/status/compact/set 菜单，失败只记日志。control-integration 的 warn 从拼字符串改为结构化字段；claim/audit/consumeReply 的 agent_events 去重与 provider epoch 排除机制不变。
+- 旧语法与覆盖层的三个测试文件（control-command/control-integration/control-state）随行为一并删除；新行为不补脚手架测试，真实验证由后续 daemon 重启完成。
+- 验证：`bun test` 416 pass / 0 fail / 4939 assertions（39 files，零外网）、`bun run check`、mdBook 18 Markdown/98 links 与 21 HTML/620 links 通过。未重启 daemon，未触真实 Telegram/provider。
+- Cache impact: **NONE**——控制面不进入 provider context；consumeReply 的 epoch 排除、system/persona/tool/serializer/compaction grammar 与 fingerprint 均未改变。

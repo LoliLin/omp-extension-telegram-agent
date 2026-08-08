@@ -319,6 +319,53 @@ export function replaceExistingConfigSource(
 	}
 }
 
+export type BotControlConfigField = "routing_p" | "sampling_cooldown_ms";
+
+/**
+ * Write one numeric bot control field through to the live config file, which stays the only
+ * source of truth (the change survives restarts). Reuses the validated atomic replace: any
+ * failure rolls the file back and throws.
+ */
+export function updateBotConfigField(
+	rootDir: string,
+	botId: string,
+	field: BotControlConfigField,
+	value: number,
+): DeploymentSummary {
+	const root = resolve(rootDir);
+	const { path, source } = readExistingConfigSource(root);
+	const edited = replaceBotFieldValue(source, botId, field, value);
+	return replaceExistingConfigSource(root, path, edited, { confirmed: true }).summary;
+}
+
+/**
+ * Text-edit one bot field inside its object block. Assumes the wizard/example config shape:
+ * each bot is an object literal inside `bots: [...]` anchored by an `id: "X"` line, with
+ * scalar fields rendered one per line.
+ */
+function replaceBotFieldValue(source: string, botId: string, field: BotControlConfigField, value: number): string {
+	const idLine = /^[ \t]*id:[ \t]*["']([A-Za-z0-9_-]+)["'][ \t]*,?[ \t]*$/gm;
+	const anchors = [...source.matchAll(idLine)];
+	const anchor = anchors.filter((match) => match[1] === botId);
+	if (anchor.length !== 1) throw new OnboardingWriteError(`config source must contain exactly one id anchor for bot "${botId}"`);
+	const start = anchor[0]!.index!;
+	const rest = anchors.find((match) => match.index > start);
+	const end = rest?.index ?? source.length;
+	const block = source.slice(start, end);
+	const fieldPattern = new RegExp(`(\\b${field}:[ \t]*)[0-9][0-9_.]*`);
+	const rendered = String(value);
+	if (fieldPattern.test(block)) {
+		return source.slice(0, start) + block.replace(fieldPattern, `$1${rendered}`) + source.slice(end);
+	}
+	// Field absent (e.g. bot-level sampling_cooldown_ms falling back to the global value):
+	// insert it right after the id line, matching its indent.
+	const indent = anchor[0]![0].match(/^[ \t]*/)![0];
+	const lineEnd = block.indexOf("\n");
+	if (lineEnd < 0) throw new OnboardingWriteError(`config source is truncated after the id anchor for bot "${botId}"`);
+	const inserted = `${block.slice(0, lineEnd + 1)}${indent}${field}: ${rendered},\n${block.slice(lineEnd + 1)}`;
+	return source.slice(0, start) + inserted + source.slice(end);
+}
+
 function installAtomically(
 	files: InstallFile[],
 	retirePaths: string[],

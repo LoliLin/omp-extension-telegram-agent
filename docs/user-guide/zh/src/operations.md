@@ -41,18 +41,16 @@ bun run restart
 
 ## Telegram 群内控制
 
-公开只读命令：`/tg help`、`/tg bots`、`/tg status [bot]`。
+公开只读命令：`/help`、`/status`。
 
 `telegram_admins` allowlist 才能运行：
 
 ```text
-/tg compact <bot|all>
-/tg set <bot> routing_p <0..1>
-/tg set <bot> cooldown_ms <0..3600000>
-/tg reset <bot> <routing_p|cooldown_ms>
+/compact
+/set <routing_p|cooldown_ms> <value>
 ```
 
-这些命令由确定性control plane消费，不进入persona/provider context。`compact`会调用现有辅助摘要模型，可能产生费用；busy bot不会被abort。
+命令默认作用于接收消息的 bot，带 `@bot_username` 后缀时定向到对应 bot。这些命令由确定性 control plane 消费，不进入 persona/provider context。`compact` 会调用现有辅助摘要模型，可能产生费用；busy bot 不会被 abort。`set` 写穿 `telegram.config.ts`，新值重启后仍然生效。
 
 ## 真实验证
 

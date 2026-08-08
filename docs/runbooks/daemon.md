@@ -82,19 +82,16 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 下列命令直接发到配置群，由daemon确定性处理；它们不会进入persona或主LLM上下文。Telegram客户端菜单不可见时仍可手工输入：
 
 ```text
-/tg help
-/tg bots
-/tg status [bot]
-/tg compact <bot|all>                       # telegram_admins only
-/tg set <bot> routing_p <0..1>              # telegram_admins only
-/tg set <bot> cooldown_ms <0..3600000>      # telegram_admins only
-/tg reset <bot> <routing_p|cooldown_ms>      # telegram_admins only
+/help
+/status
+/compact                                  # telegram_admins only
+/set <routing_p|cooldown_ms> <value>      # telegram_admins only
 ```
 
-- `/tg@<bot_username> ...`由该suffix bot回复；未知deployment suffix不接管。
-- `set/reset`立即更新effective值并持久化SQLite override；重启后保留，reset恢复文件配置。routing总和超过1时整次拒绝。
-- `compact`只接受bot id或`all`，不接受自定义instructions。busy/stopping bot不会被abort；`all`按配置顺序汇总结果。它会调用既有辅助摘要模型并产生相应费用。
-- 回复始终引用原命令。命令edit只消费、不执行；replay/second-bot副本不会重复mutation或回复。发送结果未知时daemon不自动重试。
+- 命令默认作用于接收消息的 bot；`/<command>@<bot_username>` 由该 suffix bot 定向回复/执行；未知 deployment suffix 不接管。
+- `set` 写穿 `telegram.config.ts`（原子写入 + 全量 loadConfig 校验，任何一步失败回滚文件），成功后立即更新内存 effective 值；重启后仍然生效。routing_p 总和超过 1 时校验失败、整次拒绝。
+- `compact` 只作用于接收/定向的单个 bot，不接受自定义 instructions。busy/stopping bot 不会被 abort。它会调用既有辅助摘要模型并产生相应费用。
+- 回复始终引用原命令。命令 edit 只消费、不执行；replay/second-bot 副本不会重复 mutation 或回复。发送结果未知时 daemon 不自动重试。
 
 ## 新增一个 bot
 

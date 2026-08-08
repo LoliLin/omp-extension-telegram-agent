@@ -4,6 +4,8 @@
 
 ## 当前状态
 
+2026-08-09：群内控制命令已重做（本工作树待提交）：平级 `/help`、`/status`、`/compact`、`/set` 取代单 `/tg` 入口；`/set` 写穿 `telegram.config.ts`（原子写+全量校验+失败回滚），DB `telegram_override:*` 覆盖层已删除、残留行不再读取。真实行为验证待下次 daemon 重启。
+
 2026-08-09：REQ-SEND-0003、REQ-SEARCH-0002、REQ-OBS-0001与REQ-OPS-0003已由签名提交`6afaa8d`、`5891ac0`、`6082b8e`完成。最终唯一daemon PID 40594已ready，A/B都注册`send,search`并处于新context identity。
 
 - HEAD使用cache schema v8：immutable Telegram events、per-bot monotonic cursor、separate visible refs/reply obligations、restore前完整session fingerprint、固定Pi extensions、structured compaction与payload HMAC observer均已集成。

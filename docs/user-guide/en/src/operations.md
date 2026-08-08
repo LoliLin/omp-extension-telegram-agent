@@ -41,18 +41,16 @@ Never start two daemons against one copied database in the same directory.
 
 ## Telegram group controls
 
-Public read commands are `/tg help`, `/tg bots`, and `/tg status [bot]`.
+Public read commands are `/help` and `/status`.
 
 Only `telegram_admins` may run:
 
 ```text
-/tg compact <bot|all>
-/tg set <bot> routing_p <0..1>
-/tg set <bot> cooldown_ms <0..3600000>
-/tg reset <bot> <routing_p|cooldown_ms>
+/compact
+/set <routing_p|cooldown_ms> <value>
 ```
 
-The deterministic control plane consumes these commands outside persona/provider context. `compact` uses the existing auxiliary summarization model and may incur cost. Busy bots are not aborted.
+A command acts on the bot that received it; append `@bot_username` to target a specific bot. The deterministic control plane consumes these commands outside persona/provider context. `compact` uses the existing auxiliary summarization model and may incur cost. Busy bots are not aborted. `set` writes through to `telegram.config.ts`, so the new value survives restarts.
 
 ## Real verification
 
