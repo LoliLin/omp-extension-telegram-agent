@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS raw_updates (
 	json TEXT NOT NULL,
 	PRIMARY KEY (bot_id, update_id)
 );
+CREATE INDEX IF NOT EXISTS idx_raw_updates_received_at ON raw_updates(received_at);
 
 CREATE TABLE IF NOT EXISTS messages (
 	chat_id INTEGER NOT NULL,
@@ -45,6 +46,90 @@ CREATE TABLE IF NOT EXISTS message_revisions (
 	rich_message TEXT,
 	PRIMARY KEY (chat_id, message_id, edit_date)
 );
+
+-- Append-only provider-facing Telegram event log. `messages` remains the latest UI/read
+-- projection; this table is the monotonic ingestion source for agent cursors.
+CREATE TABLE IF NOT EXISTS message_events (
+	ingest_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+	event_key TEXT NOT NULL UNIQUE,
+	chat_id INTEGER NOT NULL,
+	message_id INTEGER NOT NULL,
+	revision INTEGER NOT NULL,
+	kind TEXT NOT NULL, -- message | edit | metadata | media_update
+	event_date INTEGER NOT NULL,
+	payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_message_events_chat_seq ON message_events(chat_id, ingest_seq);
+CREATE INDEX IF NOT EXISTS idx_message_events_message_seq ON message_events(chat_id, message_id, ingest_seq);
+CREATE INDEX IF NOT EXISTS idx_message_events_date ON message_events(event_date);
+
+CREATE TRIGGER IF NOT EXISTS trg_messages_event_insert
+AFTER INSERT ON messages
+BEGIN
+	INSERT OR IGNORE INTO message_events
+		(event_key, chat_id, message_id, revision, kind, event_date, payload_json)
+	VALUES (
+		'message:' || NEW.chat_id || ':' || NEW.message_id,
+		NEW.chat_id, NEW.message_id, 0, 'message', NEW.date,
+		json_object(
+			'chat_id', NEW.chat_id, 'message_id', NEW.message_id, 'date', NEW.date,
+			'thread_id', NEW.thread_id, 'sender_id', NEW.sender_id,
+			'display_name', NEW.display_name, 'username', NEW.username,
+			'sender_tag', NEW.sender_tag, 'sender_chat', NEW.sender_chat,
+			'is_bot', NEW.is_bot, 'text', NEW.text,
+			'caption', NEW.caption, 'entities', NEW.entities, 'rich_message', NEW.rich_message,
+			'reply_to_message_id', NEW.reply_to_message_id,
+			'reply_to_sender_id', NEW.reply_to_sender_id, 'quote', NEW.quote,
+			'forward_origin', NEW.forward_origin, 'edit_date', NEW.edit_date, 'media', NEW.media
+		)
+	);
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_messages_event_edit
+AFTER UPDATE OF text, caption, entities, rich_message, edit_date ON messages
+WHEN NEW.edit_date IS NOT NULL AND NEW.edit_date IS NOT OLD.edit_date
+BEGIN
+	INSERT OR IGNORE INTO message_events
+		(event_key, chat_id, message_id, revision, kind, event_date, payload_json)
+	VALUES (
+		'edit:' || NEW.chat_id || ':' || NEW.message_id || ':' || NEW.edit_date,
+		NEW.chat_id, NEW.message_id, NEW.edit_date, 'edit', NEW.edit_date,
+		json_object(
+			'chat_id', NEW.chat_id, 'message_id', NEW.message_id, 'date', NEW.date,
+			'thread_id', NEW.thread_id, 'sender_id', NEW.sender_id,
+			'display_name', NEW.display_name, 'username', NEW.username,
+			'sender_tag', NEW.sender_tag, 'sender_chat', NEW.sender_chat,
+			'is_bot', NEW.is_bot, 'text', NEW.text,
+			'caption', NEW.caption, 'entities', NEW.entities, 'rich_message', NEW.rich_message,
+			'reply_to_message_id', NEW.reply_to_message_id,
+			'reply_to_sender_id', NEW.reply_to_sender_id, 'quote', NEW.quote,
+			'forward_origin', NEW.forward_origin, 'edit_date', NEW.edit_date, 'media', NEW.media
+		)
+	);
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_messages_event_metadata
+AFTER UPDATE OF reply_to_sender_id ON messages
+WHEN OLD.reply_to_sender_id IS NULL AND NEW.reply_to_sender_id IS NOT NULL
+BEGIN
+	INSERT OR IGNORE INTO message_events
+		(event_key, chat_id, message_id, revision, kind, event_date, payload_json)
+	VALUES (
+		'metadata:' || NEW.chat_id || ':' || NEW.message_id || ':reply-sender',
+		NEW.chat_id, NEW.message_id, 1, 'metadata', CAST(strftime('%s','now') AS INTEGER),
+		json_object(
+			'chat_id', NEW.chat_id, 'message_id', NEW.message_id, 'date', NEW.date,
+			'thread_id', NEW.thread_id, 'sender_id', NEW.sender_id,
+			'display_name', NEW.display_name, 'username', NEW.username,
+			'sender_tag', NEW.sender_tag, 'sender_chat', NEW.sender_chat,
+			'is_bot', NEW.is_bot, 'text', NEW.text,
+			'caption', NEW.caption, 'entities', NEW.entities, 'rich_message', NEW.rich_message,
+			'reply_to_message_id', NEW.reply_to_message_id,
+			'reply_to_sender_id', NEW.reply_to_sender_id, 'quote', NEW.quote,
+			'forward_origin', NEW.forward_origin, 'edit_date', NEW.edit_date, 'media', NEW.media
+		)
+	);
+END;
 
 CREATE TABLE IF NOT EXISTS media (
 	file_unique_id TEXT PRIMARY KEY,
@@ -94,7 +179,22 @@ CREATE TABLE IF NOT EXISTS llm_runs (
 	compaction INTEGER NOT NULL DEFAULT 0,
 	system_hash TEXT,
 	tools_hash TEXT,
-	messages_hash TEXT
+	messages_hash TEXT,
+	provider TEXT,
+	api TEXT,
+	session_id_hash TEXT,
+	cache_retention TEXT,
+	full_payload_hash TEXT,
+	first_divergent_segment TEXT,
+	first_divergent_message_index INTEGER,
+	first_divergent_byte_offset INTEGER,
+	trigger_message_id INTEGER,
+	public_send_count INTEGER NOT NULL DEFAULT 0,
+	vision_calls INTEGER NOT NULL DEFAULT 0,
+	tool_followup_rounds INTEGER NOT NULL DEFAULT 0,
+	input_events INTEGER NOT NULL DEFAULT 0,
+	input_tokens_estimated INTEGER NOT NULL DEFAULT 0,
+	rows_scanned INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_llm_runs_ts ON llm_runs(ts);
 
@@ -104,6 +204,48 @@ CREATE TABLE IF NOT EXISTS bot_state (
 	value TEXT NOT NULL,
 	PRIMARY KEY (bot_id, key)
 );
+
+-- Business consumption is monotonic and independent from Pi compaction/context visibility.
+CREATE TABLE IF NOT EXISTS bot_cursors (
+	bot_id TEXT NOT NULL,
+	chat_id INTEGER NOT NULL,
+	consumed_seq INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	PRIMARY KEY (bot_id, chat_id)
+);
+
+-- Message ids whose full content is genuinely present in the current Pi context generation.
+CREATE TABLE IF NOT EXISTS bot_visible_messages (
+	bot_id TEXT NOT NULL,
+	chat_id INTEGER NOT NULL,
+	message_id INTEGER NOT NULL,
+	context_epoch INTEGER NOT NULL,
+	PRIMARY KEY (bot_id, chat_id, message_id)
+);
+
+-- Exact session identity for a cache-visible context fingerprint. Old session files are retained
+-- but are never resumed when the fingerprint changes.
+CREATE TABLE IF NOT EXISTS bot_session_manifest (
+	bot_id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	session_file TEXT NOT NULL,
+	context_fingerprint TEXT NOT NULL,
+	created_at INTEGER NOT NULL
+);
+
+-- Durable idempotency evidence for insert/enrichment routing windows.
+CREATE TABLE IF NOT EXISTS routing_claims (
+	chat_id INTEGER NOT NULL,
+	message_id INTEGER NOT NULL,
+	bot_id TEXT NOT NULL,
+	route_version INTEGER NOT NULL,
+	reason TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	PRIMARY KEY (chat_id, message_id, bot_id, route_version)
+);
+CREATE INDEX IF NOT EXISTS idx_routing_claims_message ON routing_claims(chat_id, message_id, status);
 
 -- Human direct replies that must enter a specific bot's next provider suffix.
 CREATE TABLE IF NOT EXISTS reply_obligations (

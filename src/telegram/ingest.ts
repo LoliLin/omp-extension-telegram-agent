@@ -2,6 +2,7 @@
 // See docs/data-model.md for dedupe rules.
 
 import type { Database } from "bun:sqlite";
+import { appendMediaUpdateEvents } from "../db/message-events.ts";
 import { createReplyObligation } from "../db/reply-obligations.ts";
 import { extractUpdateMessage, isTargetChat, normalizeMessage, type CanonicalMessage } from "../telegram/normalize.ts";
 
@@ -9,6 +10,8 @@ export interface IngestResult {
 	kind: "inserted" | "edited" | "enriched" | "duplicate" | "ignored";
 	chatId?: number;
 	messageId?: number;
+	/** Immutable routing generation: initial=1, reply metadata enrichment=2, edits=Telegram edit time. */
+	routeVersion?: number;
 }
 
 // first_seen_by for edits that arrive before the original message (started mid-history)
@@ -133,11 +136,17 @@ function insertMessage(db: Database, botId: string, m: CanonicalMessage): Ingest
 					"UPDATE messages SET reply_to_sender_id = ? WHERE chat_id = ? AND message_id = ? AND reply_to_sender_id IS NULL",
 				)
 				.run(m.reply_to_sender_id, m.chat_id, m.message_id);
-			if (enriched.changes > 0) return { kind: "enriched", chatId: m.chat_id, messageId: m.message_id };
+			if (enriched.changes > 0) return { kind: "enriched", chatId: m.chat_id, messageId: m.message_id, routeVersion: 2 };
 		}
 		return { kind: "duplicate", chatId: m.chat_id, messageId: m.message_id };
 	}
-	return { kind: "inserted", chatId: m.chat_id, messageId: m.message_id };
+	if (m.media) {
+		const cached = db
+			.query("SELECT json_extract(vision, '$.text') AS text FROM media WHERE file_unique_id = ?")
+			.get(m.media.file_unique_id) as { text: string | null } | null;
+		if (cached?.text) appendMediaUpdateEvents(db, m.media.file_unique_id, cached.text);
+	}
+	return { kind: "inserted", chatId: m.chat_id, messageId: m.message_id, routeVersion: 1 };
 }
 
 function editMessage(db: Database, m: CanonicalMessage): IngestResult {
@@ -182,7 +191,12 @@ function editMessage(db: Database, m: CanonicalMessage): IngestResult {
 		m.chat_id,
 		m.message_id,
 	);
-	return { kind: "edited", chatId: m.chat_id, messageId: m.message_id };
+	return {
+		kind: "edited",
+		chatId: m.chat_id,
+		messageId: m.message_id,
+		routeVersion: m.edit_date ?? Math.max(3, m.date),
+	};
 }
 
 /** Insert a message we just sent via Bot API (send tool). Dedupes against the later poller echo. */

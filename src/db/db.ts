@@ -38,6 +38,88 @@ function migrate(db: Database): void {
 	if (!runCols.includes("cache_write")) {
 		db.exec("ALTER TABLE llm_runs ADD COLUMN cache_write INTEGER NOT NULL DEFAULT 0");
 	}
+	const runMigrations: ReadonlyArray<readonly [string, string]> = [
+		["provider", "TEXT"],
+		["api", "TEXT"],
+		["session_id_hash", "TEXT"],
+		["cache_retention", "TEXT"],
+		["full_payload_hash", "TEXT"],
+		["first_divergent_segment", "TEXT"],
+		["first_divergent_message_index", "INTEGER"],
+		["first_divergent_byte_offset", "INTEGER"],
+		["trigger_message_id", "INTEGER"],
+		["public_send_count", "INTEGER NOT NULL DEFAULT 0"],
+		["vision_calls", "INTEGER NOT NULL DEFAULT 0"],
+		["tool_followup_rounds", "INTEGER NOT NULL DEFAULT 0"],
+		["input_events", "INTEGER NOT NULL DEFAULT 0"],
+		["input_tokens_estimated", "INTEGER NOT NULL DEFAULT 0"],
+		["rows_scanned", "INTEGER NOT NULL DEFAULT 0"],
+	];
+	for (const [column, sqlType] of runMigrations) {
+		if (!runCols.includes(column)) db.exec(`ALTER TABLE llm_runs ADD COLUMN ${column} ${sqlType}`);
+	}
+	backfillMessageEvents(db);
+}
+
+const MESSAGE_EVENT_BACKFILL_KEY = "message_events_backfill_max_seq";
+
+function messagePayloadSql(prefix: "NEW" | "m"): string {
+	return `json_object(
+		'chat_id', ${prefix}.chat_id,
+		'message_id', ${prefix}.message_id,
+		'date', ${prefix}.date,
+		'thread_id', ${prefix}.thread_id,
+		'sender_id', ${prefix}.sender_id,
+		'display_name', ${prefix}.display_name,
+		'username', ${prefix}.username,
+		'sender_tag', ${prefix}.sender_tag,
+		'sender_chat', ${prefix}.sender_chat,
+		'is_bot', ${prefix}.is_bot,
+		'text', ${prefix}.text,
+		'caption', ${prefix}.caption,
+		'entities', ${prefix}.entities,
+		'rich_message', ${prefix}.rich_message,
+		'reply_to_message_id', ${prefix}.reply_to_message_id,
+		'reply_to_sender_id', ${prefix}.reply_to_sender_id,
+		'quote', ${prefix}.quote,
+		'forward_origin', ${prefix}.forward_origin,
+		'edit_date', ${prefix}.edit_date,
+		'media', ${prefix}.media
+	)`;
+}
+
+/** One-time immutable baseline for databases created before message_events existed. */
+function backfillMessageEvents(db: Database): void {
+	const marker = db.query("SELECT value FROM daemon_state WHERE key = ?").get(MESSAGE_EVENT_BACKFILL_KEY) as
+		| { value: string }
+		| null;
+	if (marker) return;
+	const migrateBaseline = db.transaction(() => {
+		db.exec(`
+			INSERT OR IGNORE INTO message_events
+				(event_key, chat_id, message_id, revision, kind, event_date, payload_json)
+			SELECT 'message:' || m.chat_id || ':' || m.message_id,
+			       m.chat_id, m.message_id, 0, 'message', m.date, ${messagePayloadSql("m")}
+			  FROM messages m
+			 ORDER BY m.date, m.message_id
+		`);
+		const row = db.query("SELECT COALESCE(MAX(ingest_seq), 0) AS seq FROM message_events").get() as { seq: number };
+		const botIds = db.query(`
+			SELECT bot_id FROM bot_state
+			UNION SELECT bot_id FROM raw_updates
+			UNION SELECT bot_id FROM agent_events
+			UNION SELECT bot_id FROM llm_runs
+		`).all() as { bot_id: string }[];
+		const insertCursor = db.query(
+			"INSERT OR IGNORE INTO bot_cursors (bot_id, chat_id, consumed_seq, updated_at) VALUES (?, ?, ?, ?)",
+		);
+		const chatIds = db.query("SELECT DISTINCT chat_id FROM messages").all() as { chat_id: number }[];
+		for (const bot of botIds) {
+			for (const chat of chatIds) insertCursor.run(bot.bot_id, chat.chat_id, row.seq, Date.now());
+		}
+		db.query("INSERT INTO daemon_state (key, value) VALUES (?, ?)").run(MESSAGE_EVENT_BACKFILL_KEY, String(row.seq));
+	});
+	migrateBaseline();
 }
 
 export function getDaemonState(db: Database, key: string): string | null {

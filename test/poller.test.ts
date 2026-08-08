@@ -225,7 +225,7 @@ describe("Poller (REQ-TG-0001)", () => {
 		await running;
 
 		expect(observations).toEqual([{
-			result: { kind: "inserted", chatId: SUPERGROUP, messageId: 700 },
+			result: { kind: "inserted", chatId: SUPERGROUP, messageId: 700, routeVersion: 1 },
 			offset: "8",
 			message: { media: JSON.stringify({ kind: "photo", file_unique_id: "photo-unique", file_id: "photo-file", width: 32, height: 32 }) },
 			media: { kind: "photo", local_path: null },
