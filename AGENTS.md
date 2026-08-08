@@ -95,7 +95,7 @@
 
 ## 9. 提交与追溯
 
-- 用户授权提交后，**大任务必须先在 PLAN 中拆成 commit-sized tasks**：一个 task 只产生一个可独立审查、可独立回滚且通过目标验证的行为变化。测试与该行为必需的文档属于同一 commit；机械重构、无关清理、不同需求不得混入。
+- 用户授权提交后，**大任务默认拆成多个小的原子提交**，并先在 PLAN 中拆成 commit-sized tasks；除非整个任务确实只有一个不可再分的行为结果，不得做单个巨型提交。一个 task 只产生一个可独立审查、可独立回滚且通过目标验证的行为变化。测试与该行为必需的文档属于同一 commit；机械重构、无关清理、不同需求不得混入。
 - 每个 task 完成后立即提交，不得把多个已完成 task 留到最后压成一个大 commit。提交前只显式暂存本 task 路径/patch（脏工作树禁止 `git add -A`），检查 `git diff --cached` 与 `git status --short`，并先跑该 task 的目标测试；整项任务结束再跑全量验证。
 - 所有授权提交必须签名（repo 已配 `scripts/git-gpg.sh` 为 `gpg.program`）；签名失败时停下诊断，不得改成 unsigned commit。不得用 amend/rebase 把已完成的原子提交重新揉在一起，除非用户明确要求改写历史。
 - Commit subject 采用 `<Imperative verb> <concrete code outcome>`：英文祈使句、首字母大写、无句号、建议不超过 72 字符；描述代码结果，不写空泛的 “update/fix stuff”，不把 REQ/PLAN 标题当 subject。可选 body 解释非显然的 why / invariant / 验证，subject 与 body、body 与 trailer 之间各空一行。

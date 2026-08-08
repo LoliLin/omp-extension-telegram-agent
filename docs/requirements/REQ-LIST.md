@@ -58,6 +58,7 @@
 - [x] [REQ-DOC-0001](REQ-DOC-0001.md) README 从用户视角解释平台、配置、使用与边界（P1，commit `37499d0`）
 - [x] [REQ-ONBOARD-0001](REQ-ONBOARD-0001.md) clone → `bun run pi` → `/tg config`、TypeScript 本机配置、提示词隐私与双语 mdBook 用户文档（P1，commits `77a7d34`、`88e75d1`、`5dbf199`、`a0736f8`、`37499d0`、`27aca5a`）
 - [x] [REQ-DOC-0002](REQ-DOC-0002.md) 明确单目录单群与极简省 token 的项目哲学（P1，commit `dfc23b5`）
+- [ ] 重构：[review-260808](review-260808.md)
 
 ## 顺序与依赖
 
