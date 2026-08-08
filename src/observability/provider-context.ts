@@ -7,6 +7,7 @@ import { getSessionManifest } from "../db/message-events.ts";
 import { projectTelegramContext } from "../agent/extensions/context.ts";
 import { buildSystemPrompt } from "../agent/prompt.ts";
 import { TOOL_DEFS } from "../agent/tools.ts";
+import { stickerCatalogPromptBlock } from "../media/sticker-catalog.ts";
 import type { Database } from "bun:sqlite";
 
 function hash(value: string): string {
@@ -67,7 +68,10 @@ export function inspectProviderContext(
 		SELECT provider, api, model, tools_hash AS toolsHash
 		  FROM llm_runs WHERE bot_id = ? ORDER BY id DESC LIMIT 1
 	`).get(botId) as { provider: string | null; api: string | null; model: string | null; toolsHash: string | null } | null;
-	const system = buildSystemPrompt(readFileSync(bot.personaPath, "utf8"));
+	const system = buildSystemPrompt(
+		readFileSync(bot.personaPath, "utf8"),
+		bot.stickerSets.length > 0 ? stickerCatalogPromptBlock(db, bot.id, bot.stickerSets) : "",
+	);
 	const tools = TOOL_DEFS.filter((tool) =>
 		tool.name === "send" ? bot.tools.send : tool.name === "search" ? bot.tools.search : bot.tools.runJs,
 	).map(({ name, description, parameters }) => ({ name, description, parameters }));

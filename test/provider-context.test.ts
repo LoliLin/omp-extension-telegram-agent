@@ -53,6 +53,7 @@ describe("provider context inspection (REQ-SEARCH-0002)", () => {
 				id: "A", name: "A", personaPath, provider: "deepseek", model: "model",
 				reasoningEffort: "medium", cacheRetention: "short",
 				tools: { send: true, search: true, runJs: false },
+				stickerSets: [],
 			}],
 		};
 

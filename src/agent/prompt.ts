@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 8; // v8: structured Telegram context, deltas, assistant policy, shared-prefix-first
+export const CACHE_SCHEMA_VERSION = 9; // v9: fixed sticker catalog pinned into system prompt; per-turn retrieval dropped; generic multi-bot protocol
 
 // Fixed shared protocol is deliberately the first byte of every bot's system prompt so bots in
 // the same provider/cache cohort share the longest possible exact prefix.
@@ -22,11 +22,13 @@ export const SHARED_PROTOCOL = `# 群聊协议
 
 - 未被点名的概率插话可以按人设保持沉默
 - 人类明确 @你、回复你或使用你的配置名称点名时必须回应，不受概率插话的沉默或防刷屏启发式影响
-- 群里还有另一个 AI bot（你的姐妹），她的消息你能看到，但不要替她说话，也不要回复她的消息
+- 群里可能还有其他 bot 或成员；他们的消息你能看到，但不要替他们说话，也不要回复其他 bot 的消息
 `;
 
-export function buildSystemPrompt(personaText: string): string {
-	return `${SHARED_PROTOCOL}\n---\n\n# 人格与回应策略\n\n${personaText.trim()}`;
+export function buildSystemPrompt(personaText: string, stickerCatalog = ""): string {
+	const base = `${SHARED_PROTOCOL}\n---\n\n# 人格与回应策略\n\n${personaText.trim()}`;
+	const catalog = stickerCatalog.trim();
+	return catalog ? `${base}\n\n---\n\n${catalog}` : base;
 }
 
 /**

@@ -16,7 +16,7 @@ import {
 } from "../src/db/message-events.ts";
 import { applyRetention } from "../src/db/retention.ts";
 import { listReplyObligations } from "../src/db/reply-obligations.ts";
-import { stickerCandidatesForTurn } from "../src/media/sticker-catalog.ts";
+import { stickerCatalogPromptBlock } from "../src/media/sticker-catalog.ts";
 import { VisionBudgetExceededError, VisionScheduler } from "../src/media/vision-scheduler.ts";
 
 const CHAT = -1004402809405;
@@ -84,7 +84,7 @@ describe("bounded provider inputs", () => {
 		await expect(scheduler.schedule(CHAT, true, async () => "next-day")).resolves.toBe("next-day");
 	});
 
-	test("reply scans and sticker retrieval stay bounded", () => {
+	test("reply scans and the sticker catalog block stay bounded", () => {
 		for (let id = 1; id <= 70; id++) {
 			insertMessage(id);
 			db.query(`
@@ -95,20 +95,19 @@ describe("bounded provider inputs", () => {
 		expect(listReplyObligations(db, "A", CHAT)).toHaveLength(64);
 
 		db.query(`
-			INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id)
-			VALUES ('sticker-one', 'sticker', '😺', ?, 's1'),
-			       ('sticker-two', 'sticker', '🤝', ?, 's2')
-		`).run(
-			JSON.stringify({ text: "开心猫猫" }),
-			JSON.stringify({ text: "握手合作" }),
-		);
+			INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id)
+			VALUES ('sticker-one', 'sticker', 'cats', '😺', 's1'),
+			       ('sticker-two', 'sticker', 'cats', '🤝', 's2')
+		`).run();
 		db.query(`
 			INSERT INTO media_file_ids (bot_id, file_id, file_unique_id)
 			VALUES ('A', 'file-one', 'sticker-one'), ('A', 'file-two', 'sticker-two')
 		`).run();
-		const candidates = stickerCandidatesForTurn(db, "A", "今天很开心 😺", 1);
-		expect(candidates).toContain("s1 = 😺 开心猫猫");
-		expect(candidates).not.toContain("s2");
+		const block = stickerCatalogPromptBlock(db, "A", ["cats"]);
+		expect(block).toContain("[cats] 😺 s1");
+		expect(block).toContain("[cats] 🤝 s2");
+		// identity-only: no vision text, and other bots' catalogs stay out
+		expect(stickerCatalogPromptBlock(db, "B", ["cats"])).toBe("");
 	});
 
 	test("retention preserves unconsumed and obligated message events", () => {

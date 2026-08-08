@@ -54,8 +54,7 @@ import {
 } from "../media/vision.ts";
 import {
 	ensureStickerCatalog,
-	preRecognizeCatalogVision,
-	stickerCandidatesForTurn,
+	stickerCatalogPromptBlock,
 	stickerCatalogSnapshotHash,
 } from "../media/sticker-catalog.ts";
 import {
@@ -267,27 +266,14 @@ export class BotRuntime {
 	async init(): Promise<void> {
 		const persona = readFileSync(this.bot.personaPath, "utf8");
 		const chatId = Number(`-100${this.config.groupPeerId}`);
-		// Catalog membership remains local. No catalog row is placed in the stable system prefix.
+		// Catalog membership is pinned identity-only into the stable system prefix below.
 		if (this.bot.stickerSets.length > 0) {
 			await ensureStickerCatalog(this.db, this.api, this.bot.id, this.bot.stickerSets);
-			if (this.visionEnabled) {
-				void preRecognizeCatalogVision(
-					this.db,
-					this.api,
-					this.bot.id,
-					this.bot.stickerSets,
-					this.getVisionExecutor(),
-					(fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
-					(telemetry) => this.recordEvent("vision", telemetry),
-					{
-						cacheDir: join(this.config.dataDir, "media"),
-						scheduler: this.visionScheduler ?? undefined,
-						chatId,
-					},
-				);
-			}
 		}
-		const systemPrompt = buildSystemPrompt(persona);
+		const stickerCatalog = this.bot.stickerSets.length > 0
+			? stickerCatalogPromptBlock(this.db, this.bot.id, this.bot.stickerSets)
+			: "";
+		const systemPrompt = buildSystemPrompt(persona, stickerCatalog);
 		this.systemHash = sha256Short(systemPrompt);
 
 		const sendTool = {
@@ -776,7 +762,7 @@ export class BotRuntime {
 			const row = this.db.query("SELECT file_unique_id FROM media WHERE short_id = ?").get(params.sticker) as
 				| { file_unique_id: string }
 				| null;
-			if (!row) throw new Error(`unknown sticker id: ${params.sticker} (use one from the Available stickers list)`);
+			if (!row) throw new Error(`unknown sticker id: ${params.sticker} (use a short_id from the Sticker 目录 in the system prompt)`);
 			stickerFileId = fileIdForBot(this.db, this.bot.id, row.file_unique_id);
 			if (!stickerFileId) {
 				this.recordEvent("error", { stage: "send", code: "candidate_invariant", sticker: params.sticker });
@@ -1129,17 +1115,12 @@ export class BotRuntime {
 			return replyObligationCount(this.db, this.bot.id, chatId) > 0;
 		}
 
-		const stickerBlock = stickerCandidatesForTurn(this.db, this.bot.id, packed.text);
-		const candidateTokens = stickerBlock ? estimateProviderTokensUpperBound(`\n\n${stickerBlock}`) : 0;
-		const suffix = stickerBlock && packed.estimatedTokens + candidateTokens <= suffixBudget
-			? `${packed.text}\n\n${stickerBlock}`
-			: packed.text;
 		const selectedIds = new Set(packed.visibleMessageIds);
 		const delivered = obligations.filter((obligation) => selectedIds.has(obligation.messageId));
 		const details: TelegramContextDetails = {
 			version: TELEGRAM_CONTEXT_VERSION,
 			consumedSeq: highWater,
-			providerText: suffix,
+			providerText: packed.text,
 			visibleMessageIds: packed.visibleMessageIds,
 			events: packed.events.map((event) => ({
 				ingestSeq: event.ingestSeq,
@@ -1152,7 +1133,7 @@ export class BotRuntime {
 		this.currentTriggerMessageId = packed.events.at(-1)?.messageId ?? this.currentTriggerMessageId;
 		this.pendingInputMetrics = {
 			inputEvents: packed.events.length,
-			estimatedTokens: estimateProviderTokensUpperBound(suffix),
+			estimatedTokens: estimateProviderTokensUpperBound(packed.text),
 			rowsScanned,
 			visionCalls: this.pendingInputMetrics.visionCalls,
 		};
@@ -1162,7 +1143,7 @@ export class BotRuntime {
 		for (const messageId of packed.visibleMessageIds) this.visibleMessageIds.add(messageId);
 		try {
 			await this.session.sendCustomMessage(
-				{ customType: TELEGRAM_CONTEXT_TYPE, content: suffix, display: false, details },
+				{ customType: TELEGRAM_CONTEXT_TYPE, content: packed.text, display: false, details },
 				{ triggerTurn: true },
 			);
 		} catch (error) {

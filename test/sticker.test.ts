@@ -1,27 +1,23 @@
 // REQ-STICKER-0001 regression tests: catalog loading (media identity + short_ids + per-bot
-// file_id), deterministic local retrieval, send resolution from the catalog, and the R6
-// position invariant (turn candidates AFTER all messages, never in the stable prefix).
+// file_id), the identity-only catalog block pinned into the stable system prompt, and send
+// resolution from the catalog.
 
 process.env.TZ = "Asia/Singapore";
 
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BotRuntime } from "../src/agent/runtime.ts";
-import { buildSystemPrompt, sha256Short } from "../src/agent/prompt.ts";
+import { buildSystemPrompt } from "../src/agent/prompt.ts";
 import { SEND_SUCCESS_ACK } from "../src/agent/tools.ts";
 import {
 	ensureStickerCatalog,
-	preRecognizeCatalogVision,
-	stickerCandidatesForTurn,
+	stickerCatalogPromptBlock,
 	STICKER_CATALOG_MAX,
 } from "../src/media/sticker-catalog.ts";
 import { TelegramApiError } from "../src/telegram/api.ts";
 import type { AppConfig, BotConfig } from "../src/config.ts";
-import type { MessageRow } from "../src/agent/serialize.ts";
-import type { VisionExecutor } from "../src/media/vision.ts";
 
 const GROUP = 4402809405;
 const CHAT = Number(`-100${GROUP}`);
@@ -125,88 +121,6 @@ describe("ensureStickerCatalog (R1)", () => {
 		const rows = db.query("SELECT file_unique_id, vision FROM media WHERE kind='sticker' ORDER BY rowid").all() as { file_unique_id: string; vision: string | null }[];
 		expect(rows[0]!.vision).toContain("得意的赞同");
 		expect(rows[1]!.vision).toBeNull();
-	});
-
-	test("VISION AC4/AC8: background catalog vision is two-wide and never mutates the stable prompt", async () => {
-		const cacheDir = mkdtempSync(join(tmpdir(), "catalog-vision-test-"));
-		try {
-			const api = fakeApi({ cats: [sticker("c1", "😺"), sticker("c2", "🐱"), sticker("c3", "😸")] });
-			await ensureStickerCatalog(db, api as never, "A", ["cats"]);
-			const promptSnapshot = buildSystemPrompt("fixture persona");
-			const hashSnapshot = sha256Short(promptSnapshot);
-			let active = 0;
-			let peak = 0;
-			const started: number[] = [];
-			const releases = new Map<number, () => void>();
-			const executor: VisionExecutor = {
-				modelRef: "openai-codex/gpt-5.6-luna:low",
-				provider: "openai-codex",
-				model: "gpt-5.6-luna",
-				readinessFailure: null,
-				describe: async (input) => {
-					const id = input.bytes[0]!;
-					started.push(id);
-					active++;
-					peak = Math.max(peak, active);
-					return await new Promise((resolve) => {
-						releases.set(id, () => {
-							active--;
-							resolve({
-								text: `catalog-${id}`,
-								telemetry: {
-									kind: "sticker",
-									sourceBytesBucket: "lt_32_kib",
-									convertedBytesBucket: "unavailable",
-									latencyMs: 1,
-									inputTokens: 1,
-									outputTokens: 1,
-									reasoningTokens: 0,
-									cost: 0,
-									outcome: "ok",
-								},
-							});
-						});
-					});
-				},
-			};
-			const background = preRecognizeCatalogVision(
-				db,
-				{
-					getFile: async (fileId: string) => ({ file_path: `stickers/${fileId}.png` }),
-					downloadFile: async (filePath: string) => new Uint8Array([Number(filePath.match(/c(\d)/)?.[1])]),
-				} as never,
-				"A",
-				["cats"],
-				executor,
-				undefined,
-				undefined,
-				{ cacheDir },
-			);
-			let completed = false;
-			void background.then(() => { completed = true; });
-			for (let attempt = 0; attempt < 100 && started.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 0));
-
-			expect(started).toEqual([1, 2]);
-			expect(peak).toBe(2);
-			expect(completed).toBe(false);
-			expect(sha256Short(promptSnapshot)).toBe(hashSnapshot);
-			expect(promptSnapshot).not.toContain("[未识别]");
-			expect(promptSnapshot).not.toContain("Sticker 目录");
-			releases.get(1)!();
-			releases.get(2)!();
-			for (let attempt = 0; attempt < 100 && started.length < 3; attempt++) await new Promise((resolve) => setTimeout(resolve, 0));
-			expect(started).toEqual([1, 2, 3]);
-			expect(completed).toBe(false);
-			releases.get(3)!();
-			await background;
-
-			const nextPrompt = buildSystemPrompt("fixture persona");
-			expect(nextPrompt).not.toContain("catalog-1");
-			expect(sha256Short(nextPrompt)).toBe(hashSnapshot);
-			expect(sha256Short(promptSnapshot)).toBe(hashSnapshot);
-		} finally {
-			rmSync(cacheDir, { recursive: true, force: true });
-		}
 	});
 
 	test("R5: catalog is capped at STICKER_CATALOG_MAX with truncation flag", async () => {
@@ -354,111 +268,49 @@ describe("send from catalog (R3)", () => {
 	});
 });
 
-describe("dynamic candidates coexistence (R4/R6)", () => {
-	function insertStickerMsg(messageId: number, fileUniqueId: string): void {
-		db.query(
-			`INSERT INTO messages (chat_id, message_id, date, sender_id, display_name, username, is_bot, text, media, first_seen_by)
-			 VALUES (?, ?, ?, 111, 'Alice', 'alice', 0, NULL, ?, 'A')`,
-		).run(CHAT, messageId, 1754600000 + messageId, JSON.stringify({ kind: "sticker", file_unique_id: fileUniqueId, sticker_emoji: "😺" }));
-	}
-
-	function attachFakeSession(rt: BotRuntime): { sent: string[] } {
-		const fake = { sent: [] as string[], listener: null as null };
-		(rt as any).session = {
-			subscribe: () => {},
-			sendCustomMessage: async (message: { content: string }) => { fake.sent.push(message.content); },
-			getContextUsage: () => undefined,
-			sessionManager: {
-				buildContextEntries: () => [],
-				getBranch: () => [],
-				appendCustomEntry: () => "commit",
-			},
-			dispose: async () => {},
-		};
-		return fake;
-	}
-
-	test("R6: dynamic candidates serialize AFTER all messages (suffix tail), never before", async () => {
-		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never, { chatActionSender: async () => true });
-		const fake = attachFakeSession(rt);
-		// set-external stickers seen in context, with vision
-		insertStickerMsg(1, "uq-ext-1");
-		insertStickerMsg(2, "uq-ext-2");
-		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-ext-1', 'sticker', '😺', ?, 's5')").run(
-			JSON.stringify({ model: "m", kind: "sticker", text: "外部 sticker 语义", at: 1 }),
-		);
-		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-ext-2', 'sticker', '😺', ?, 's6')").run(
-			JSON.stringify({ model: "m", kind: "sticker", text: "另一个", at: 1 }),
-		);
-		mapSticker("A", "uq-ext-1");
-		mapSticker("A", "uq-ext-2");
-		(rt as any).ensureBatchVision = async () => {};
-		rt.trigger();
-		await (rt as any).flushPromise;
-		expect(fake.sent.length).toBe(1);
-		const out = fake.sent[0]!;
-		const msgIdx = out.indexOf("#1 ");
-		const catIdx = out.indexOf("Available stickers:");
-		expect(msgIdx).toBeGreaterThanOrEqual(0);
-		expect(catIdx).toBeGreaterThan(msgIdx); // candidates strictly AFTER the message lines
-		expect(out.lastIndexOf("Available stickers:")).toBe(catIdx); // exactly one block, at the tail
-	});
-
-	test("regression: catalog short_ids assigned before vision completes do not crash turn retrieval", () => {
-		// catalog pre-recognition is background: short_id exists, vision is NULL
-		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-cat0', 'sticker', 'cats', '😺', 's9')").run();
-		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-ext0', 'sticker', '😺', ?, 's10')").run(
-			JSON.stringify({ model: "m", kind: "sticker", text: "上下文语义", at: 1 }),
-		);
-		mapSticker("A", "uq-ext0");
-		const block = stickerCandidatesForTurn(db, "A", "上下文语义");
-		expect(block).toContain("s10");
-		expect(block).not.toContain("s9"); // no vision -> not a candidate, and no crash
-	});
-
-	test("R4: relevant catalog and observed stickers share the bounded turn candidate block", async () => {
-		// catalog sticker (from set) + set-external sticker, both with vision
+describe("catalog pinned into the system prompt (R4)", () => {
+	test("catalog block is identity-only, deterministic, and joins the prompt after the persona", () => {
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, vision, short_id) VALUES ('uq-cat', 'sticker', 'cats', '😺', ?, 's1')").run(
 			JSON.stringify({ model: "m", kind: "sticker", text: "目录语义", at: 1 }),
 		);
-		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-ext', 'sticker', '😺', ?, 's2')").run(
-			JSON.stringify({ model: "m", kind: "sticker", text: "上下文语义", at: 1 }),
-		);
 		mapSticker("A", "uq-cat");
-		mapSticker("A", "uq-ext");
-		const block = stickerCandidatesForTurn(db, "A", "目录语义 上下文语义");
-		expect(block).toContain("s2 = 😺 上下文语义");
-		expect(block).toContain("s1 = 😺 目录语义");
-		expect(stickerCandidatesForTurn(db, "A", "完全无关")).toBe("");
+		const block = stickerCatalogPromptBlock(db, "A", ["cats"]);
+		expect(block).toContain("[cats] 😺 s1");
+		expect(block).not.toContain("目录语义"); // vision text never enters the stable prefix
+		expect(stickerCatalogPromptBlock(db, "A", ["cats"])).toBe(block); // restart-stable
+		const prompt = buildSystemPrompt("fixture persona", block);
+		expect(prompt.indexOf("fixture persona")).toBeLessThan(prompt.indexOf("# Sticker 目录"));
+		expect(buildSystemPrompt("fixture persona", block)).toBe(prompt);
 	});
 
-	test("REQ-STICKER-0002: fixed catalogs and dynamic candidates never leak another bot's mappings", () => {
-		const vision = (text: string) => JSON.stringify({ model: "m", kind: "sticker", text, at: 1 });
-		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, vision, short_id) VALUES ('uq-a144', 'sticker', 'setA', '😺', ?, 's144')").run(vision("A 目录"));
+	test("stickers not sendable by this bot produce no prompt section", () => {
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-b-only', 'sticker', 'cats', '🅱️', 's2')").run();
+		mapSticker("B", "uq-b-only");
+		expect(stickerCatalogPromptBlock(db, "A", ["cats"])).toBe("");
+		expect(buildSystemPrompt("fixture persona", "")).not.toContain("Sticker 目录");
+	});
+
+	test("REQ-STICKER-0002: fixed catalogs never leak another bot's mappings", () => {
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-a144', 'sticker', 'setA', '😺', 's144')").run();
 		for (const id of [241, 242, 243, 244]) {
-			db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, vision, short_id) VALUES (?, 'sticker', 'setB', '🐱', ?, ?)").run(
+			db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES (?, 'sticker', 'setB', '🐱', ?)").run(
 				`uq-b${id}`,
-				vision(`B 目录 ${id}`),
 				`s${id}`,
 			);
 		}
-		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-shared', 'sticker', '🤝', ?, 's300')").run(vision("双方可用"));
-		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-a-only', 'sticker', '🅰️', ?, 's301')").run(vision("仅 A 可用"));
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-shared', 'sticker', 'setS', '🤝', 's300')").run();
 
 		mapSticker("A", "uq-a144");
 		for (const id of [241, 242, 243, 244]) mapSticker("B", `uq-b${id}`);
 		mapSticker("A", "uq-shared");
 		mapSticker("B", "uq-shared");
-		mapSticker("A", "uq-a-only");
 
-		const turn = "A 目录 B 目录 双方可用 仅 A 可用 🐱 🤝 🅰️";
-		const aCandidates = stickerCandidatesForTurn(db, "A", turn);
-		const bCandidates = stickerCandidatesForTurn(db, "B", turn);
-		expect(aCandidates).toContain("s300");
-		expect(aCandidates).toContain("s301");
-		for (const id of [241, 242, 243, 244]) expect(aCandidates).not.toContain(`s${id}`);
-		expect(bCandidates).toContain("s300");
-		expect(bCandidates).not.toContain("s144");
-		expect(bCandidates).not.toContain("s301");
+		const aBlock = stickerCatalogPromptBlock(db, "A", ["setA", "setS"]);
+		const bBlock = stickerCatalogPromptBlock(db, "B", ["setB", "setS"]);
+		expect(aBlock).toContain("s144");
+		expect(aBlock).toContain("s300");
+		for (const id of [241, 242, 243, 244]) expect(aBlock).not.toContain(`s${id}`);
+		expect(bBlock).toContain("s300");
+		expect(bBlock).not.toContain("s144");
 	});
 });

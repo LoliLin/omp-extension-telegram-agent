@@ -10,11 +10,13 @@
 4. 已消费位置与当前可见性分离：`bot_cursors.consumed_seq` 只单调前进，`bot_visible_messages` 可在成功 compaction 或 session 轮换时替换。
 5. 只有完整 context fingerprint 相同且 manifest 指向的 session 文件存在时才恢复 session。cache-visible 身份改变必须在 restore 前创建新 session/context epoch。
 6. UI、IPC、日志、operator command 与本地媒体准备不得改变 provider payload。
-7. provider 输入和工具输出必须有界；不能把 raw update、Rich Message JSON、完整 sticker 目录或无界历史塞入 context。
+7. provider 输入和工具输出必须有界；不能把 raw update、Rich Message JSON 或无界历史塞入 context。sticker catalog 以 ≤`STICKER_CATALOG_MAX` 条 identity-only 行的形式固定进 prefix，不含 vision 文本。
 
 ## CACHE_SCHEMA_VERSION
 
-当前：**8**。
+当前：**9**。
+
+v9 合并以下有意的 provider-visible 变化：固定 sticker catalog 以 identity-only 形式（set + emoji + short_id，不含 vision 文本）固化进 system prompt、删除每轮 top-K 检索 suffix 与 catalog vision 回填，shared protocol 去掉双 bot 硬编码假设，send/search/run_js description 打磨。fingerprint 的 catalog snapshot 同步改为只 hash identity 字段，异步 vision 回填不再令前缀失效。
 
 v8 合并以下有意的 provider-visible 变化：共享 protocol 置于 persona 前、`telegram_context_v2` 结构化消息、immutable edit/metadata/media delta、动态 sticker top-K，以及 unpublished assistant prose 的 `[no_send]` 持久化策略。
 
@@ -33,7 +35,7 @@ cache-visible protocol 包括：
 ## Provider payload 结构
 
 ```text
-system: SHARED_PROTOCOL + separator + persona
+system: SHARED_PROTOCOL + separator + persona [+ separator + identity-only sticker catalog]
 messages: structured Telegram projection + assistant/tool/summary entries
 tools: [{ name, description, parameters }] in fixed order
 ```
@@ -60,12 +62,12 @@ tools: [{ name, description, parameters }] in fixed order
 - `telegram_context_v2.details` 同时保存 `consumedSeq`、本 entry 的 event refs、`visibleMessageIds` 与固定 provider projection。
 - session 写入成功或启动 reconcile 能从 structured details 证明写入后，SQLite cursor 才前进。provider 失败不会靠文本猜测状态。
 
-## 有界 suffix 与 sticker 候选
+## 有界 suffix 与 sticker catalog
 
 - runtime 每轮最多索引读取 256 条近期 event，并额外读取最多 64 条 direct-reply obligation event；不扫描整张 `messages` 表。
 - reply obligation 优先打包；普通 event 从最新端选择后恢复时间顺序。默认 suffix 上限 12,000 tokens，单 event 上限 4,096 tokens，并为输出、reasoning 与 tool follow-up 预留空间。
 - 普通溢出 event 可以被 cursor 消费但不标 visible；reply obligation 只有在结构化 commit marker 证明交付后才删除。
-- sticker catalog 永不进入 system prompt。每轮从本地可发送 mapping 中按当前 suffix 检索，最多追加 8 个候选；不命中或预算不足时不追加。
+- sticker catalog 在启动时同步进 DB 后以 identity-only block（每行 set + emoji + short_id，按 set 名 + rowid 排序）固化在 system prompt 尾部；prefix 由配置 + DB catalog 唯一决定，重启间稳定。catalog 内容变化通过 fingerprint 的 identity snapshot 开新 epoch。模型按 short_id 发送，无每轮检索 suffix。
 - page fetch 先受 8,000 字符本地护栏约束，再受 2,048 provider tokens 上限约束；query 与工具失败输出同样有界。
 
 ## Vision 与 provider boundary
@@ -100,14 +102,15 @@ Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确�
 
 | 项目 | 值 |
 | --- | --- |
-| schema | `8` |
-| zh system | `71aa33e82b4d` |
-| en system | `57e3746bcf4d` |
+| schema | `9` |
+| zh system | `0dadcaf37061` |
+| en system | `fabd0ba82eab` |
 | legacy message serializer | `68a17d6e5c05` |
 | immutable event serializer | `4a57de738bf9` |
-| tools | `280868a5b3a9` |
+| tools | `8e125a32e3f6` |
 | compaction prompt | `045a5241fdd7` |
 | extension order | `e04f7032d531` |
 | context protocol | `a9ca6974ac5f` |
+| sticker catalog block | exact-string lock（identity-only grammar） |
 
 测试必须 pin `TZ=Asia/Singapore`；`bun test` 自身强制 UTC。若 hash 有意变化，先解释 cache impact，再更新 version 与 golden；不要只改 expected value。

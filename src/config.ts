@@ -493,6 +493,7 @@ export interface DebugDeploymentIdentity {
 		reasoningEffort: string | null;
 		cacheRetention: string;
 		tools: BotToolsConfig;
+		stickerSets: string[];
 	}>;
 }
 
@@ -523,6 +524,7 @@ export function loadDebugDeploymentIdentity(rootDir: string): DebugDeploymentIde
 				search: tools.search !== false,
 				runJs: tools.run_js === true,
 			},
+			stickerSets: Array.isArray(bot.sticker_sets) ? bot.sticker_sets.filter((s): s is string => typeof s === "string") : [],
 		};
 	});
 	const botIds = bots.map((bot) => bot.id);

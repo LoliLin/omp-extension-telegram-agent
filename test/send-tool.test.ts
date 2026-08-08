@@ -97,7 +97,7 @@ describe("send tool contract (REQ-SEND-0001)", () => {
 		expect(messageSchema.description).toContain("不要为了样式包裹整段粗体");
 		expect(messageSchema.maxLength).toBe(4096);
 		expect((TOOL_DEFS[0].parameters.properties.reply_to as { description?: string }).description).toContain("当前可见消息行");
-		expect((TOOL_DEFS[0].parameters.properties.sticker as { description?: string }).description).toContain("Available stickers");
+		expect((TOOL_DEFS[0].parameters.properties.sticker as { description?: string }).description).toContain("Sticker 目录");
 	});
 
 	test("personas and shared protocol do not duplicate send invocation syntax", () => {

@@ -1,21 +1,14 @@
 // Fixed sticker catalog per bot (REQ-STICKER-0001).
 // Each bot can configure Telegram sticker set names; at startup the sets are fetched, media
-// identity + per-bot file_id persisted, short_ids assigned (same s<rowid> namespace as the
-// dynamic candidates), and background vision started through the shared lazy cache.
-// Catalog identities remain persistent, but retrieval is a bounded local top-K dynamic suffix;
-// catalog bytes no longer inflate or invalidate the stable system prefix (cache schema v8).
+// identity + per-bot file_id persisted, and short_ids assigned from rowids. The catalog is
+// serialized identity-only (set + emoji + short_id, no vision text) into the stable system
+// prompt, so the prefix is fully determined by config + DB catalog and stays stable across
+// restarts (cache schema v9). Photo/foreground vision is unrelated and lives in vision.ts.
 
 import type { Database } from "bun:sqlite";
 import { errorCategory, log } from "../observability/log.ts";
 import { createHash } from "node:crypto";
 import type { BotApi } from "../telegram/api.ts";
-import {
-	ensureVision,
-	type EnsureVisionOptions,
-	type VisionExecutor,
-	type VisionTelemetrySink,
-	type VisionUpdateSink,
-} from "./vision.ts";
 
 export const STICKER_CATALOG_MAX = 120; // bounded local inventory and startup work
 
@@ -44,16 +37,15 @@ export async function fetchStickerSet(api: BotApi, setName: string): Promise<Cat
 }
 
 /**
- * Load the catalog for one bot (blocking part): persist media identity + per-bot file_id,
- * assign short_ids. A failed set (bad name / network) logs and is skipped — startup must
- * not be blocked. Returns the number of catalog stickers and how many lack vision yet.
+ * Load the catalog for one bot: persist media identity + per-bot file_id, assign short_ids.
+ * A failed set (bad name / network) logs and is skipped — startup must not be blocked.
  */
 export async function ensureStickerCatalog(
 	db: Database,
 	api: BotApi,
 	botId: string,
 	sets: string[],
-): Promise<{ total: number; sendable: number; missingMapping: number; truncated: boolean; pendingVision: number }> {
+): Promise<{ total: number; sendable: number; missingMapping: number; truncated: boolean }> {
 	let total = 0;
 	let truncated = false;
 	for (const setName of sets) {
@@ -83,7 +75,7 @@ export async function ensureStickerCatalog(
 				s.file_id,
 				s.file_unique_id,
 			);
-			// short_id from rowid: stable, unique, race-free — same namespace as dynamic candidates
+			// short_id from rowid: stable, unique, race-free
 			const row = db.query("SELECT rowid FROM media WHERE file_unique_id = ?").get(s.file_unique_id) as
 				| { rowid: number }
 				| null;
@@ -121,150 +113,46 @@ export async function ensureStickerCatalog(
 			bot_id: botId, catalog: counts.catalog_rows, sendable, missing_file_id: missingMapping,
 		});
 	}
-	const pendingVision = db
-		.query(
-			`SELECT COUNT(*) c FROM media
-			 WHERE kind = 'sticker' AND sticker_set IN (SELECT value FROM json_each(?))
-			   AND EXISTS (
-			     SELECT 1 FROM media_file_ids f
-			      WHERE f.bot_id = ? AND f.file_unique_id = media.file_unique_id
-			   )
-			   AND vision IS NULL`,
-		)
-		.get(JSON.stringify(sets), botId) as { c: number };
-	return { total, sendable, missingMapping, truncated, pendingVision: pendingVision.c };
+	return { total, sendable, missingMapping, truncated };
+}
+
+interface CatalogRow {
+	sticker_set: string | null;
+	sticker_emoji: string | null;
+	short_id: string;
+}
+
+/** Sendable catalog stickers for this bot in its configured sets, deterministically ordered. */
+function catalogRows(db: Database, botId: string, sets: readonly string[]): CatalogRow[] {
+	return db.query(`
+		SELECT sticker_set, sticker_emoji, short_id
+		  FROM media m
+		 WHERE kind = 'sticker' AND short_id IS NOT NULL
+		   AND sticker_set IN (SELECT value FROM json_each(?))
+		   AND EXISTS (
+		     SELECT 1 FROM media_file_ids f
+		      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
+		   )
+		 ORDER BY sticker_set, rowid
+	`).all(JSON.stringify([...sets]), botId) as CatalogRow[];
 }
 
 /**
- * Background vision pre-recognition (REQ-STICKER-0001 R1). NOT awaited during startup:
- * Pi vision calls are slow (minutes for a full set) and must not hold the poller offline.
- * Unrecognized stickers serialize as [未识别] in this prompt snapshot; background results
- * persist for UI and a future restart. Bounded concurrency; errors are safely categorized.
+ * Identity-only catalog block for the stable system prompt: one line per sticker
+ * (set + emoji + short_id), no vision description text. Deterministic for a given
+ * config + DB catalog, so the prefix stays stable across restarts. Empty string when
+ * the bot has no sendable catalog stickers.
  */
-export function preRecognizeCatalogVision(
-	db: Database,
-	api: BotApi,
-	botId: string,
-	sets: string[],
-	executor: VisionExecutor,
-	onVision?: VisionUpdateSink,
-	onTelemetry?: VisionTelemetrySink,
-	options: Pick<EnsureVisionOptions, "cacheDir" | "monotonicNow" | "scheduler" | "chatId"> = {},
-): Promise<void> {
-	const pending = db
-		.query(
-			`SELECT file_unique_id FROM media
-			 WHERE kind = 'sticker' AND sticker_set IN (SELECT value FROM json_each(?))
-			   AND EXISTS (
-			     SELECT 1 FROM media_file_ids f
-			      WHERE f.bot_id = ? AND f.file_unique_id = media.file_unique_id
-			   )
-			   AND vision IS NULL`,
-		)
-		.all(JSON.stringify(sets), botId) as { file_unique_id: string }[];
-	if (pending.length === 0) return Promise.resolve();
-	log.info("sticker_catalog", "vision_backfill_started", { bot_id: botId, pending: pending.length, concurrency: Math.min(2, pending.length) });
-	const workers = Math.min(2, pending.length);
-	let next = 0;
-	let doneCount = 0;
-	return (async () => {
-		await Promise.all(
-			Array.from({ length: workers }, async () => {
-				while (next < pending.length) {
-					const fid = pending[next++]!.file_unique_id;
-					try {
-						await ensureVision(db, api, botId, fid, executor, {
-							onPersist: onVision,
-							onTelemetry,
-							...options,
-						});
-					} catch {
-						log.error("sticker_catalog", "vision_failed", { bot_id: botId, category: "request_failed" });
-					}
-					doneCount++;
-					if (doneCount % 10 === 0) {
-						log.info("sticker_catalog", "vision_progress", { bot_id: botId, completed: doneCount, total: pending.length });
-					}
-				}
-			}),
-		);
-	})();
+export function stickerCatalogPromptBlock(db: Database, botId: string, sets: readonly string[]): string {
+	const rows = catalogRows(db, botId, sets);
+	if (rows.length === 0) return "";
+	const lines = rows.map((row) => `- [${row.sticker_set ?? ""}] ${row.sticker_emoji ?? ""} ${row.short_id}`);
+	return `# Sticker 目录\n\n你可以用 send 的 sticker 参数发送以下 sticker（填 short_id，不得编造其他 id）：\n\n${lines.join("\n")}`;
 }
 
-interface StickerCandidateRow {
-	rowid: number;
-	short_id: string;
-	sticker_emoji: string | null;
-	vision: string;
-}
-
-function searchTerms(value: string): Set<string> {
-	const normalized = value.normalize("NFKC").toLocaleLowerCase();
-	const terms = new Set(normalized.match(/[\p{L}\p{N}]{2,}|\p{Extended_Pictographic}/gu) ?? []);
-	for (const run of normalized.match(/[\p{Script=Han}]{2,}/gu) ?? []) {
-		for (const char of run) terms.add(char);
-		for (let index = 0; index + 1 < run.length; index++) terms.add(run.slice(index, index + 2));
-	}
-	return terms;
-}
-
-/** Local deterministic retrieval; candidates are a bounded dynamic suffix, never system prefix. */
-export function stickerCandidatesForTurn(
-	db: Database,
-	botId: string,
-	turnText: string,
-	limit = 8,
-): string {
-	if (limit <= 0 || !turnText.trim()) return "";
-	const queryTerms = searchTerms(turnText);
-	if (queryTerms.size === 0) return "";
-	const rows = db.query(`
-		SELECT rowid, short_id, sticker_emoji, vision
-		  FROM media m
-		 WHERE kind = 'sticker'
-		   AND short_id IS NOT NULL
-		   AND json_extract(vision, '$.text') IS NOT NULL
-		   AND EXISTS (
-		     SELECT 1 FROM media_file_ids f
-		      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
-		   )
-		 ORDER BY rowid DESC
-		 LIMIT 512
-	`).all(botId) as StickerCandidateRow[];
-	const ranked = rows
-		.map((row) => {
-			const description = (JSON.parse(row.vision) as { text?: string }).text?.replace(/\s+/g, " ").trim() ?? "";
-			const terms = searchTerms(`${row.sticker_emoji ?? ""} ${description}`);
-			let score = 0;
-			for (const term of queryTerms) {
-				if (terms.has(term)) score += term.length > 1 ? 3 : 1;
-			}
-			if (row.sticker_emoji && turnText.includes(row.sticker_emoji)) score += 12;
-			return { row, description, score };
-		})
-		.filter((candidate) => candidate.score > 0)
-		.sort((left, right) => right.score - left.score || right.row.rowid - left.row.rowid)
-		.slice(0, Math.min(8, limit));
-	if (ranked.length === 0) return "";
-	return `Available stickers:\n${ranked.map(({ row, description }) =>
-		`${row.short_id} = ${row.sticker_emoji ?? ""} ${description.slice(0, 60)}`.trim()
-	).join("\n")}`;
-}
-
-/** Fingerprint only local catalog/config state; plaintext descriptions never leave this hash. */
+/** Fingerprint the exact identity state that shapes the prompt block; vision text never participates. */
 export function stickerCatalogSnapshotHash(db: Database, botId: string, sets: readonly string[]): string {
-	const rows = db.query(`
-		SELECT short_id, sticker_set, sticker_emoji,
-		       COALESCE(json_extract(vision, '$.text'), '') AS description
-		  FROM media m
-		 WHERE kind = 'sticker' AND short_id IS NOT NULL
-		   AND EXISTS (
-		     SELECT 1 FROM media_file_ids f
-		      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
-		   )
-		 ORDER BY rowid
-	`).all(botId);
 	return createHash("sha256")
-		.update(JSON.stringify({ sets: [...sets], rows }))
+		.update(JSON.stringify({ sets: [...sets], rows: catalogRows(db, botId, sets) }))
 		.digest("hex");
 }

@@ -774,3 +774,11 @@
 - 旧语法与覆盖层的三个测试文件（control-command/control-integration/control-state）随行为一并删除；新行为不补脚手架测试，真实验证由后续 daemon 重启完成。
 - 验证：`bun test` 416 pass / 0 fail / 4939 assertions（39 files，零外网）、`bun run check`、mdBook 18 Markdown/98 links 与 21 HTML/620 links 通过。未重启 daemon，未触真实 Telegram/provider。
 - Cache impact: **NONE**——控制面不进入 provider context；consumeReply 的 epoch 排除、system/persona/tool/serializer/compaction grammar 与 fingerprint 均未改变。
+
+## 2026-08-08 (90) — sticker catalog 固化进 system prompt，删除每轮检索
+
+- 回滚 sticker top-K 检索：固定 catalog 以 identity-only block（每行 set + emoji + short_id，按 set 名 + rowid 排序，不含 vision 文本）序列化进 system prompt 尾部，prefix 由配置 + DB catalog 唯一决定、重启间稳定。删除 `stickerCandidatesForTurn` 每轮 suffix 注入与 `preRecognizeCatalogVision` 异步回填；照片/foreground vision（`src/media/vision.ts`、`ensureBatchVision`）完整保留。
+- fingerprint 的 `stickerCatalogSnapshotHash` 改为只 hash identity 字段（与 prompt block 同一查询），catalog 变化仍开新 epoch，但 vision 回填不再令 fingerprint 漂移。`ensureStickerCatalog` 返回值去掉 `pendingVision`。
+- 同一 bump 顺带清理：SHARED_PROTOCOL 去掉"另一个 AI bot（你的姐妹）"双 bot 硬编码，改为通用表述；send/search/run_js description 打磨（sticker 参数指向 system prompt 的 Sticker 目录；search/run_js 说清何时用/何时不用）；`DebugDeploymentIdentity` 增加 `stickerSets` 使 `bun run debug` 的 system hash 与 runtime 一致。
+- 验证：`bun test` 414 pass / 0 fail / 4930 assertions（39 files，零外网）、`bun run check` 通过；cache golden 失败项逐一确认为本次有意变更后更新。未重启 daemon，未触真实 provider/Telegram。
+- Cache impact: **INTENTIONAL**——`CACHE_SCHEMA_VERSION` 8→9；system prompt 尾部新增 catalog block、shared protocol 与 tool description 变化；golden zh/en/system 与 tools hash 更新并新增 catalog block exact-string lock。收益：suffix 不再每轮 miss，fingerprint 不再随 vision 回填漂移。
