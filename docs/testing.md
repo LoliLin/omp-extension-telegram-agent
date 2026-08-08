@@ -63,6 +63,7 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | deployment-wide受控重启（REQ-OPS-0002） | ✅ unit + real CLI/Pi | 2026-08-08 controller/extension/config/timeline targeted覆盖严格signal→全PID/pid/socket释放→单spawn→socket connect、stopped/stale/foreign/malformed/timeout/early-exit/starting、并发control lock、credential redaction、同仓库孤儿枚举与shell decoy、Pi A/all filter+footer原位重连及snapshot去重。真实running/stopped/Pi三路径完成；现场回收孤儿PID 9316后跨30秒无新409，SQLite与live stream保留；cache v5不变。 |
 | 测试体系修复（REQ-TEST-0001） | ✅ | 2026-08-07：TinyFish 真实调用迁到 env gate（无 .env 时 skip）；cache golden 补 tools hash（7b1983d95e25，与 Phase 6 历史一致）+ compaction summary prompt hash；is_bot 判断下沉到 routeMessage 单一权威点（daemon 前置判断移除）；e2e 脚本按断言 exit code（compaction 未发生 exit≠0、轮询替代固定 sleep、e2e-agent 无 run 完成 exit≠0、manual 版 epoch 未推进 exit≠0）；analyze 脚本同步真实 compaction/回落（60 runs 回放：3 次真实 compaction 正确识别、幻影 0）；盲区补测：run_js 代码长度上限/同步异常、serialize vision 替换/(edited)/text+media/跨天分隔、ingest forward_origin/sender_chat |
 | 配置体系（REQ-CONF-0001） | ✅ | 2026-08-07 test/config.test.ts：bots.config.json 任意数量 bot / persona 外置绝对路径 / 单 bot 与三 bot 配置 / 重复 id / 坏 token_env / Σp>1 / 不可读 persona 逐条报错 / peer id 归一化；真实项目配置对真实 .env 可加载；cache golden 逐字节不变 |
+| provider 配置（REQ-PLAT-0001 T11） | ✅ | 2026-08-08 deployment/per-bot `provider + model + api_key_env`、DeepSeek零迁移alias、跨provider fail-closed、每bot隔离Pi runtime；DeepSeek/Anthropic catalog与fake auth routing通过，cache v5不变。 |
 | 固定 sticker set（REQ-STICKER-0001） | ✅ | 2026-08-07 test/sticker.test.ts 10 条：catalog 加载（media/short_id/file_id）、确定性序列化（含 [未识别]）、120 上限截断、坏 set 名不阻塞、send 解析 catalog id、动态候选排除 catalog sticker + 位置锁定在消息之后、visionless short_id 不崩；golden：目录块 hash 锁定（CACHE_SCHEMA_VERSION=2）；真实群冒烟：双 set 下载（114+98 个 sticker）vision 后台预识别 |
 | sticker per-bot 可发送性（REQ-STICKER-0002） | ✅ unit / ⏳ real smoke | 2026-08-08 `test/sticker.test.ts` 用 A:s144 与 B:s241–s244 复现生产泄漏，锁 fixed/dynamic/shared/A-only mapping；部分 set fetch、candidate invariant preflight 与 cache v3 golden 一并覆盖。真实群各 bot 自身目录发送留到总验收。 |
 | Pi 原生 transcript（REQ-UI-0001/2/4） | ✅ | 2026-08-08：package discovery/version guard、TUI-only custom entry、restore 不重连、单例 attach/more/detach、filter/cleanup、原生 `Image`；生产代码无手写 viewport/`handleInput()`/ANSI；真实 Pi fullscreen attach/more/detach smoke 通过。611 行是 `19819c9` 完成 UI-0004 时的基线，后续 compose/vision/footer 功能独立追踪，不把新增需求误算为旧 hack。 |
@@ -79,7 +80,7 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |
 | threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ⏳ Phase 9 | - |
-| 当前全量回归 | ✅ | 2026-08-08 `bun test`：302 pass / 0 fail / 4298 assertions；`bun run check` 通过；cache v5 golden 6/6 |
+| 当前全量回归 | ✅ | 2026-08-08 `bun test`：308 pass / 0 fail / 4311 assertions；`bun run check` 通过；cache v5 golden 6/6 |
 
 ## 已知 flaky
 

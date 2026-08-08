@@ -17,7 +17,7 @@ const FIXTURE_LOCK = join(import.meta.dir, "fixtures/daemon/index.ts");
 // the parsed file — tests must clear the real keys so the temp .env is authoritative.
 const ENV_KEYS = [
 	"teleram_hastuyuki_bot", "telegram_kosamerobot", "telegram_group_peer_id",
-	"deepseek_api_key", "tiny_fish_api_key", "auxiliary_visual_model", "router_secret",
+	"deepseek_api_key", "anthropic_api_key", "alternate_deepseek_key", "tiny_fish_api_key", "auxiliary_visual_model", "router_secret",
 	"bots_config",
 ];
 const savedEnv = new Map<string, string | undefined>();
@@ -185,12 +185,80 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 		try {
 			const config = loadConfig(dir);
 			const a = config.bots[0]!;
+			expect([a.provider, a.model, a.apiKeyEnv, a.providerApiKey]).toEqual([
+				"deepseek", "custom-model", "deepseek_api_key", "sk-test",
+			]);
 			expect(a.routingP).toBe(0.3);
 			expect(a.samplingCooldownMs).toBe(0);
 			expect(a.model).toBe("custom-model");
 			expect(a.compactionThreshold).toBe(999);
 			expect(a.compactionKeepRecent).toBe(20000); // default
 			expect(a.tools).toEqual({ send: true, search: false, runJs: true });
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("PLAT AC5: deployment and per-bot provider/model/auth env resolve independently", () => {
+		const globalDir = makeEnvDir(VALID_BOTS, { anthropic_api_key: "sk-ant-test" }, {
+			provider: "anthropic",
+			model: "claude-sonnet-4-6",
+			api_key_env: "anthropic_api_key",
+		});
+		const mixedDir = makeEnvDir([
+			{ ...VALID_BOTS[0], api_key_env: "alternate_deepseek_key" },
+			{
+				...VALID_BOTS[1],
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+				api_key_env: "anthropic_api_key",
+			},
+		], { anthropic_api_key: "sk-ant-test", alternate_deepseek_key: "sk-ds-alt" });
+		try {
+			const globalBots = loadConfig(globalDir).bots;
+			expect(globalBots.map((bot) => [bot.provider, bot.model, bot.apiKeyEnv, bot.providerApiKey])).toEqual([
+				["anthropic", "claude-sonnet-4-6", "anthropic_api_key", "sk-ant-test"],
+				["anthropic", "claude-sonnet-4-6", "anthropic_api_key", "sk-ant-test"],
+			]);
+			const mixedBots = loadConfig(mixedDir).bots;
+			expect(mixedBots.map((bot) => [bot.provider, bot.model, bot.apiKeyEnv, bot.providerApiKey])).toEqual([
+				["deepseek", "deepseek-v4-flash", "alternate_deepseek_key", "sk-ds-alt"],
+				["anthropic", "claude-sonnet-4-6", "anthropic_api_key", "sk-ant-test"],
+			]);
+		} finally {
+			rmSync(globalDir, { recursive: true, force: true });
+			rmSync(mixedDir, { recursive: true, force: true });
+		}
+	});
+
+	test("PLAT R2: provider overrides require explicit model/auth env and missing secrets fail closed", () => {
+		const missingShapeDir = makeEnvDir([{ ...VALID_BOTS[0], provider: "anthropic" }]);
+		const missingSecretDir = makeEnvDir([
+			{
+				...VALID_BOTS[0],
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+				api_key_env: "anthropic_api_key",
+			},
+		]);
+		try {
+			expect(() => loadConfig(missingShapeDir)).toThrow(/api_key_env[\s\S]*model/);
+			expect(() => loadConfig(missingSecretDir)).toThrow(/anthropic_api_key.*empty or missing/);
+		} finally {
+			rmSync(missingShapeDir, { recursive: true, force: true });
+			rmSync(missingSecretDir, { recursive: true, force: true });
+		}
+	});
+
+	test("PLAT R8: deepseek_key_env remains a zero-migration alias", () => {
+		const dir = makeEnvDir(VALID_BOTS, { alternate_deepseek_key: "sk-legacy" }, {
+			deepseek_key_env: "alternate_deepseek_key",
+		});
+		try {
+			expect(loadConfig(dir).bots.map((bot) => [bot.provider, bot.apiKeyEnv, bot.providerApiKey])).toEqual([
+				["deepseek", "alternate_deepseek_key", "sk-legacy"],
+				["deepseek", "alternate_deepseek_key", "sk-legacy"],
+			]);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

@@ -5,7 +5,7 @@ import { loadConfig } from "../src/config.ts";
 import { openDb, getBotState, setBotState } from "../src/db/db.ts";
 import { BotApi } from "../src/telegram/api.ts";
 import { BotRuntime } from "../src/agent/runtime.ts";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { createBotModelRuntime } from "../src/agent/model-runtime.ts";
 
 const config = loadConfig(process.cwd());
 const db = openDb(config.dbPath);
@@ -23,8 +23,7 @@ db.query(
 	 VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'test')`,
 ).run(chatId, syntheticId, Math.floor(Date.now() / 1000), 999000001, "Tester", "tester_human", "[test] 小雪在吗？看到的话吱一声");
 
-process.env.DEEPSEEK_API_KEY = config.deepseekApiKey;
-const modelRuntime = await ModelRuntime.create();
+const modelRuntime = await createBotModelRuntime(config.bots[0]);
 const rt = new BotRuntime(db, config.bots[0], config, modelRuntime);
 await rt.init();
 

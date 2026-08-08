@@ -3,7 +3,8 @@
 // Two sources:
 //   1. `bots.config.json` (project root, or env `bots_config` path) — declarative bot list:
 //      arbitrary number of bots, persona paths (abs / ~ / relative to project root), per-bot
-//      model & routing & tool switches. NO secrets here: tokens are referenced by env key name.
+//      provider/model/auth-env, routing & tool switches. NO secrets here: credentials are
+//      referenced by env key name.
 //   2. `.env` (`key: value` colon format) — secrets and API keys only.
 //
 // Validation collects ALL errors and throws ConfigError listing each one (REQ-OPS-0001 R2
@@ -38,7 +39,10 @@ export interface BotConfig {
 	personaPath: string; // resolved absolute path
 	routingP: number; // probability a plain human message triggers this bot (cumulative thresholds)
 	samplingCooldownMs: number; // probability-only cooldown after a completed run (REQ-ROUTE-0001)
+	provider: string;
 	model: string;
+	apiKeyEnv: string; // env key name only; safe for diagnostics
+	providerApiKey: string; // resolved secret; never log or persist
 	reasoningEffort: string;
 	compactionThreshold: number;
 	compactionKeepRecent: number;
@@ -52,7 +56,6 @@ export interface AppConfig {
 	dbPath: string;
 	groupPeerId: number;
 	bots: BotConfig[];
-	deepseekApiKey: string;
 	tinyfishApiKey: string;
 	auxiliaryVisualModel: string;
 	routerSecret: string | null; // generated+persisted by daemon if absent
@@ -98,7 +101,9 @@ export interface RawBotConfig {
 	persona_path?: unknown;
 	routing_p?: unknown;
 	sampling_cooldown_ms?: unknown;
+	provider?: unknown;
 	model?: unknown;
+	api_key_env?: unknown;
 	reasoning_effort?: unknown;
 	compaction_threshold?: unknown;
 	compaction_keep_recent?: unknown;
@@ -113,7 +118,9 @@ export interface RawConfig {
 	tinyfish_key_env?: unknown;
 	deepseek_key_env?: unknown;
 	auxiliary_visual_model?: unknown;
+	provider?: unknown;
 	model?: unknown;
+	api_key_env?: unknown;
 	reasoning_effort?: unknown;
 	compaction_threshold?: unknown;
 	compaction_keep_recent?: unknown;
@@ -144,6 +151,26 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 		errors.push(`[config] bots: must be a non-empty array`);
 	}
 	const botList = (Array.isArray(raw.bots) ? raw.bots : []) as RawBotConfig[];
+	const envKeyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+	for (const key of ["provider", "model"] as const) {
+		const value = raw[key];
+		if (value !== undefined && (typeof value !== "string" || value.trim() === "")) {
+			errors.push(`[config] ${key}: expected a non-empty string, got ${JSON.stringify(value)}`);
+		}
+	}
+	for (const key of ["api_key_env", "deepseek_key_env"] as const) {
+		const value = raw[key];
+		if (value !== undefined && (typeof value !== "string" || !envKeyPattern.test(value))) {
+			errors.push(`[config] ${key}: expected an environment key name, got ${JSON.stringify(value)}`);
+		}
+	}
+	const deploymentProvider = typeof raw.provider === "string" && raw.provider.trim() ? raw.provider.trim() : "deepseek";
+	if (deploymentProvider !== "deepseek" && raw.api_key_env === undefined) {
+		errors.push(`[config] api_key_env: required for deployment provider "${deploymentProvider}"`);
+	}
+	if (deploymentProvider !== "deepseek" && raw.model === undefined) {
+		errors.push(`[config] model: required for deployment provider "${deploymentProvider}"`);
+	}
 	const seen = new Map<string, number>();
 	for (let i = 0; i < botList.length; i++) {
 		const b = botList[i] ?? {};
@@ -186,6 +213,22 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 		const cooldown = b.sampling_cooldown_ms;
 		if (cooldown !== undefined && (typeof cooldown !== "number" || !Number.isFinite(cooldown) || cooldown < 0)) {
 			errors.push(`[config] ${at}.sampling_cooldown_ms: expected finite number >= 0, got ${JSON.stringify(cooldown)}`);
+		}
+		for (const key of ["provider", "model"] as const) {
+			const value = b[key];
+			if (value !== undefined && (typeof value !== "string" || value.trim() === "")) {
+				errors.push(`[config] ${at}.${key}: expected a non-empty string, got ${JSON.stringify(value)}`);
+			}
+		}
+		if (b.api_key_env !== undefined && (typeof b.api_key_env !== "string" || !envKeyPattern.test(b.api_key_env))) {
+			errors.push(`[config] ${at}.api_key_env: expected an environment key name, got ${JSON.stringify(b.api_key_env)}`);
+		}
+		const botProvider = typeof b.provider === "string" && b.provider.trim() ? b.provider.trim() : deploymentProvider;
+		if (botProvider !== deploymentProvider && b.api_key_env === undefined) {
+			errors.push(`[config] ${at}.api_key_env: required when overriding provider to "${botProvider}"`);
+		}
+		if (botProvider !== deploymentProvider && b.model === undefined) {
+			errors.push(`[config] ${at}.model: required when overriding provider to "${botProvider}"`);
 		}
 		for (const key of ["compaction_threshold", "compaction_keep_recent"] as const) {
 			const v = b[key];
@@ -297,14 +340,16 @@ export function loadConfig(rootDir: string): AppConfig {
 	const dataDir = join(rootDir, "data");
 	const groupPeerId = normalizePeerId(String(raw.group_peer_id ?? ""));
 	if (!Number.isFinite(groupPeerId)) errors.push(`[config] group_peer_id: required (bare positive peer id, see .env.example)`);
-	const deepseekKeyEnv = typeof raw.deepseek_key_env === "string" ? raw.deepseek_key_env : "deepseek_api_key";
 	const tinyfishKeyEnv = typeof raw.tinyfish_key_env === "string" ? raw.tinyfish_key_env : "tiny_fish_api_key";
 	const routerSecretEnv = typeof raw.router_secret_env === "string" ? raw.router_secret_env : "router_secret";
-	const deepseekApiKey = needEnv(deepseekKeyEnv, `deepseek_key_env "${deepseekKeyEnv}"`);
 	const tinyfishApiKey = needEnv(tinyfishKeyEnv, `tinyfish_key_env "${tinyfishKeyEnv}"`);
-
-	if (errors.length > 0) throw new ConfigError(errors);
-
+	const defaultProvider = typeof raw.provider === "string" ? raw.provider.trim() : "deepseek";
+	// Existing configs keep their exact DeepSeek behavior; the generic key wins when present.
+	const defaultApiKeyEnv = typeof raw.api_key_env === "string"
+		? raw.api_key_env
+		: typeof raw.deepseek_key_env === "string"
+			? raw.deepseek_key_env
+			: "deepseek_api_key";
 	const defaultModel = typeof raw.model === "string" ? raw.model : "deepseek-v4-flash";
 	const defaultEffort = typeof raw.reasoning_effort === "string" ? raw.reasoning_effort : "medium";
 	const defaultThreshold = num("compaction_threshold", 128000, 1, Number.MAX_SAFE_INTEGER);
@@ -315,9 +360,11 @@ export function loadConfig(rootDir: string): AppConfig {
 		? raw.telegram_admins.map((value) => normalizeTelegramAdmin(value)!)
 		: [];
 
-	const bots: BotConfig[] = botList.map((b) => {
+	const bots: BotConfig[] = botList.map((b, index) => {
 		const tokenEnv = b.token_env as string;
 		const toolsRaw = (b.tools ?? {}) as Record<string, unknown>;
+		const provider = typeof b.provider === "string" ? b.provider.trim() : defaultProvider;
+		const apiKeyEnv = typeof b.api_key_env === "string" ? b.api_key_env : defaultApiKeyEnv;
 		return {
 			id: b.id as string,
 			name: typeof b.name === "string" && b.name ? b.name : (b.id as string),
@@ -325,7 +372,10 @@ export function loadConfig(rootDir: string): AppConfig {
 			personaPath: resolvePath(rootDir, b.persona_path as string),
 			routingP: typeof b.routing_p === "number" ? b.routing_p : 0,
 			samplingCooldownMs: typeof b.sampling_cooldown_ms === "number" ? b.sampling_cooldown_ms : defaultSamplingCooldown,
+			provider,
 			model: typeof b.model === "string" ? b.model : defaultModel,
+			apiKeyEnv,
+			providerApiKey: needEnv(apiKeyEnv, `bots[${index}].api_key_env "${apiKeyEnv}"`),
 			reasoningEffort: typeof b.reasoning_effort === "string" ? b.reasoning_effort : defaultEffort,
 			compactionThreshold: typeof b.compaction_threshold === "number" ? b.compaction_threshold : defaultThreshold,
 			compactionKeepRecent: typeof b.compaction_keep_recent === "number" ? b.compaction_keep_recent : defaultKeepRecent,
@@ -338,12 +388,13 @@ export function loadConfig(rootDir: string): AppConfig {
 		};
 	});
 
+	if (errors.length > 0) throw new ConfigError(errors);
+
 	return {
 		dataDir,
 		dbPath: typeof raw.db_path === "string" ? resolvePath(rootDir, raw.db_path) : join(dataDir, "agent.db"),
 		groupPeerId,
 		bots,
-		deepseekApiKey,
 		tinyfishApiKey,
 		auxiliaryVisualModel: typeof raw.auxiliary_visual_model === "string" ? raw.auxiliary_visual_model : "",
 		routerSecret: env[routerSecretEnv] || null,

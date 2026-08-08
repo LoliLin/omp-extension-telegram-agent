@@ -282,8 +282,8 @@ export class BotRuntime {
 		const tools = [sendTool, searchTool, runJsTool];
 		this.toolsHash = toolsHash(); // full protocol hash; filtered per-bot hash computed below
 
-		const model = this.modelRuntime.getModel("deepseek", this.bot.model);
-		if (!model) throw new Error(`model not found: deepseek/${this.bot.model}`);
+		const model = this.modelRuntime.getModel(this.bot.provider, this.bot.model);
+		if (!model) throw new Error(`model not found: ${this.bot.provider}/${this.bot.model}`);
 		this.model = model;
 
 		// Custom compaction: chat-oriented summary (state, not replay), threshold from config.

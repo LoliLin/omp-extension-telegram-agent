@@ -62,7 +62,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10m2** — 实现entity-driven `/tg` parser、权限/输出/串行mutation服务及BotRuntime安全manual compact/consume接口；validates: CMD-0001 AC1/AC2/AC4/AC6；commit: deterministic command service
 - [x] **T10m3** — 接入poller/daemon、canonical reply/broadcast/exposure与best-effort菜单，锁一次执行和零provider context；validates: CMD-0001 AC5/AC8；commit: Telegram control integration
 - [x] **T10m4** — 用行为commit hash记录CMD-0001完成并在REQ-LIST勾选；validates: CMD-0001 traceability；commit: completion record
-- [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
+- [x] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
 - [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification
 - [ ] **T13a** — 将 Pi dependencies/lock 改为可获取版本并增加 `bun run pi` 幂等 bootstrap/fresh-clone fixture；validates: ONBOARD-0001 AC1；commit: portable launcher
 - [ ] **T13b** — 加入 typed `telegram.config.ts` loader/legacy JSON兼容；从 HEAD 取消跟踪真实persona并提供默认忽略与通用中英模板；validates: ONBOARD-0001 AC3/AC6；commit: typed config and prompt privacy

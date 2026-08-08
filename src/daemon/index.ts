@@ -10,7 +10,6 @@ import { dispatchRoutingDecision, routeMessageDecision, type BotIdentity } from 
 import { IpcServer } from "./ipc-server.ts";
 import { acquirePidLock, releasePidLock } from "./pid.ts";
 import type { MessageRow } from "../agent/serialize.ts";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,6 +18,7 @@ import { ManualSendService } from "./manual-send.ts";
 import { TelegramControlState } from "../telegram/control-state.ts";
 import { parseTelegramControlCommand, TelegramControlCommandService } from "../telegram/control-command.ts";
 import { publishTelegramControlMenus, TelegramControlCoordinator } from "../telegram/control-integration.ts";
+import { createBotModelRuntime } from "../agent/model-runtime.ts";
 
 const rootDir = process.cwd();
 const config = loadConfig(rootDir);
@@ -42,7 +42,7 @@ if (!config.routerSecret) {
 }
 
 // resolve bot identities (getMe) so we can recognize own messages and mentions
-console.log(`[daemon] bot list: ${config.bots.map((b) => `${b.id} (${b.name}) persona=${b.personaPath} model=${b.model}`).join(", ")}`); // no tokens
+console.log(`[daemon] bot list: ${config.bots.map((b) => `${b.id} (${b.name}) persona=${b.personaPath} model=${b.provider}/${b.model}`).join(", ")}`); // no tokens or API keys
 const botApis = new Map(config.bots.map((bot) => [bot.id, new BotApi(bot.token)] as const));
 for (const bot of config.bots) {
 	const me = await botApis.get(bot.id)!.getMe();
@@ -51,11 +51,10 @@ for (const bot of config.bots) {
 	console.log(`[daemon] bot ${bot.id} (${bot.name}) = @${me.username} (${me.id})`);
 }
 
-// agent runtimes (one Pi AgentSession per bot)
-process.env.DEEPSEEK_API_KEY = config.deepseekApiKey;
-const modelRuntime = await ModelRuntime.create();
+// One Pi ModelRuntime + AgentSession per bot keeps provider credentials isolated.
 const runtimes = new Map<string, BotRuntime>();
 for (const bot of config.bots) {
+	const modelRuntime = await createBotModelRuntime(bot);
 	const rt = new BotRuntime(db, bot, config, modelRuntime);
 	await rt.init();
 	runtimes.set(bot.id, rt);

@@ -52,7 +52,7 @@
 
 ## Agent（Phase 3）
 
-- 每 bot 一个 `createAgentSession()`：独立 SessionManager（sessionDir 分开）、独立 DefaultResourceLoader（`systemPromptOverride` = persona）、共享一个 ModelRuntime
+- 每 bot 一个 `createAgentSession()`：独立 SessionManager（sessionDir 分开）、独立 DefaultResourceLoader（`systemPromptOverride` = persona）与独立 Pi `ModelRuntime`。runtime 通过 `setRuntimeApiKey(provider, key)` 注入仅驻内存的 bot credential，因此同一 provider 的不同 key 不会串号。
 - 触发/flush 是 BotRuntime 本地持有的串行状态机（REQ-AGENT-0001）：`idle →(trigger) flushing →(drain) idle`；`flushing` 在进入 flush 时同步置位（不等 SDK 事件），在途期间的 trigger 只合并为 `pendingTrigger`，flush 循环结束后统一再跑一轮（burst 合并）；flush 全链路 try/catch，失败只落 agent_events `error`（stage=flush），消息保持未曝光由后续 trigger 重试；消息只在 `sendUserMessage` 成功后 markExposed；daemon shutdown 时 `stop()` 有界（30s）等待在途 flush 再 dispose
 - 唤醒：`session.sendUserMessage(serialized)`，一次 flush 一批（burst 由 pendingTrigger 合并，不走 SDK 队列）
 - 群消息序列化为固定紧凑 grammar（见 docs/cache.md），append-only
@@ -122,8 +122,8 @@
 
 ## 配置（REQ-CONF-0001 重构后）
 
-- **`bots.config.json`**（项目根，env `bots_config` 可改路径）：声明式 bot 列表——全局 `group_peer_id` / `router_secret_env` / `deepseek_key_env` / `tinyfish_key_env` / `auxiliary_visual_model` / `db_path` / 默认 `model` / `reasoning_effort` / `compaction_threshold` / `compaction_keep_recent` / `sampling_cooldown_ms` / `telegram_admins`（默认空；正整数user id或规范化`@username`）；每 bot `id`（`[A-Za-z0-9_-]+` 唯一；大写 A/B 兼容历史数据）/ `name`（显示与名字触发，缺省=id）/ `token_env`（env key 名，值在 .env）/ `persona_path`（绝对路径 / `~` / 相对项目根，可指仓库外）/ `routing_p`（累积阈值，Σ≤1），可选覆盖 model / reasoning_effort / compaction_threshold / compaction_keep_recent / sampling_cooldown_ms / tools（`{send, search, run_js}` 布尔开关，send 关 = 纯观察 bot）
-- **`.env`**（`key: value` 冒号格式，自解析）+ `.env.example`：只放 secret（bot tokens / deepseek / tinyfish / router_secret / gpg passphrase）
+- **`bots.config.json`**（项目根，env `bots_config` 可改路径）：声明式 bot 列表——全局 `group_peer_id` / `router_secret_env` / `provider` / `model` / `api_key_env` / `tinyfish_key_env` / `auxiliary_visual_model` / `db_path` / `reasoning_effort` / `compaction_threshold` / `compaction_keep_recent` / `sampling_cooldown_ms` / `telegram_admins`（默认空；正整数user id或规范化`@username`）；每 bot `id`（`[A-Za-z0-9_-]+` 唯一；大写 A/B 只是普通合法 id）/ `name`（显示与名字触发，缺省=id）/ `token_env`（env key 名，值在 .env）/ `persona_path`（绝对路径 / `~` / 相对项目根，可指仓库外）/ `routing_p`（累积阈值，Σ≤1），可选覆盖 `provider` / `model` / `api_key_env` / reasoning / compaction / cooldown / tools（`{send, search, run_js}` 布尔开关，send 关 = 纯观察 bot）。跨 provider 覆盖必须同时显式给 model 与 api_key_env；同 provider 可只换 key。缺省仍是 `deepseek` + `deepseek-v4-flash` + `deepseek_api_key`，`deepseek_key_env` 继续作为零迁移 alias。
+- **`.env`**（`key: value` 冒号格式，自解析）+ `.env.example`：只放 secret（bot tokens / provider API keys / tinyfish / router_secret / gpg passphrase）；配置与日志只引用 env key 名，绝不输出值。
 - **启动期校验（REQ-OPS-0001 R2 + REQ-CONF-0001 R6 合并框架）**：JSON schema 校验（id 唯一合法、token_env 在 .env 存在、persona 文件可读、routing_p ∈[0,1] 且 Σ≤1、数值有限>0）+ env 数值检查；peer id 归一化（`-1004402809405` / `-4402809405` / `4402809405` → 裸正数）；校验失败收集**全部**错误一次性抛出（ConfigError 逐条点名），不静默 NaN
 - **进程管理（REQ-OPS-0001/0002）**：daemon 最早时机 `openSync(wx)` 排他pid锁，退出只删除仍属于自己的pid file。CLI controller把start/restart共用同一detached spawn与readiness：先按同仓库cwd/绝对entry验证PID，枚举并优雅停止该deployment的pid owner与孤儿进程，等待所有PID/pid file/socket消失后才spawn；新socket必须真实connect且新PID身份有效才是ready。restart另有可回收control lock，foreign PID与命令文本decoy绝不signal。Pi只异步委托CLI，保留原transcript并以原filter/footer更换IPC client；跨client snapshot按canonical identity去重，compose/pending send按unknown outcome/no-retry关闭。
 - 模型相关数值（contextWindow/价格/threshold/reserve）放 `config/models.json`（Phase 8）

@@ -1,6 +1,6 @@
 # REQ-PLAT-0001: 收口为通用、快速、简洁的可配置 bot 平台
 
-- **Status:** Proposed（2026-08-08 已完成代码库调查，未实现）
+- **Status:** In Progress（T11 provider/model/auth runtime 已实现；T12 scripts/composition 与最终文档待完成）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「当前平台想做通用快速简洁的 bot 聊天机器人；全面 review 基于固定两个机器人的设计，提高通用可配置性」
 - **依赖:** REQ-CONF-0001
@@ -85,5 +85,12 @@ REQ-CONF-0001 已把核心 daemon 从 A/B 数组重构为任意 bot 配置，但
 
 ## 追溯
 
-- Plans: 实现前建立
+- Plans: `PLAN-20260808-complete-new-reqs` T11–T12
 - Commits: 从 `Requirement:` git trailer 查
+
+## 实施进度（2026-08-08）
+
+- T11：deployment/per-bot `provider + model + api_key_env` 已接入；跨 provider override 必须显式给 model/auth env，同 provider 可独立换 key。既有缺省与 `deepseek_key_env` alias 保持 DeepSeek deployment 零迁移。
+- 每 bot 独立 Pi `ModelRuntime`，credential 只通过 `setRuntimeApiKey` 驻内存注入；production lookup 使用配置的 provider/model，启动日志不含 key/value。
+- DeepSeek/Anthropic catalog 与 fake auth routing、配置 fail-closed、现有真实配置、cache v5 golden均通过；全量 308 tests / 4311 assertions 与 typecheck 通过。
+- Cache/token impact：**NONE**。system/tool/message/summary grammar 与 context epoch 不变，每 turn 新增 0 token/call。

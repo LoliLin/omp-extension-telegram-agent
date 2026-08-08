@@ -525,3 +525,10 @@
 - BotApi新增`setMyCommands`，daemon并行best-effort为每bot发布同一`/tg`菜单；任一失败不阻塞polling。poller允许async observer但其异常发生在durable offset之后，只记脱敏错误，不把update当ingest failure重放。
 - fake Poller→`/tg@beta_bot set A ...`→B BotApi→canonical DB→fake IPC锁定重复update只执行一次、A override立即变化、命令/回复各一行且所有runtime消费；另锁菜单payload/failure、500单次发送、reply marker跨epoch。command/cache targeted 45/374；全量302/4298、typecheck、cache v5 golden与diff check通过。真实群smoke并入T14。
 - Cache impact: **NONE**——control command/reply由claim marker永久排除provider suffix，未改system/tool/message/summary grammar或context epoch；普通聊天0新增token/call，只有显式compact沿用现有aux summary成本。
+
+## 2026-08-08 (59) — 泛型化每 bot 的 Pi provider 与认证
+
+- config新增可继承的`provider + model + api_key_env`：deployment可给默认值，单bot可覆盖；跨provider覆盖必须同时显式给model/auth env，同provider可只换credential。既有配置继续缺省为`deepseek/deepseek-v4-flash/deepseek_api_key`，`deepseek_key_env`保留零迁移alias；缺secret、空provider/model与坏env key一次性fail-closed。
+- daemon不再写全局`DEEPSEEK_API_KEY`或固定`getModel("deepseek", ...)`。每bot创建隔离Pi `ModelRuntime`，以当前Pi公开`setRuntimeApiKey()`只注入内存credential，再按配置provider/model preflight；同provider不同key不会串号。e2e runtime构造也复用同一入口，启动日志只显示provider/model。
+- Context7、当前本地Pi源码与catalog交叉确认API；DeepSeek/Anthropic builtin lookup、双provider fake auth routing、未知model preflight、真实ignored配置与legacy alias均有回归。相关71 tests / 529 assertions、全量308 / 4311、typecheck、cache v5 golden与diff check通过；e2e `--bot`与N-bot composition留T12。
+- Cache impact: **NONE**——provider选择是确定性启动配置；既有system/tool/message/summary grammar、session、DB、routing与context epoch逐字节不变，每turn新增0 token/call。
