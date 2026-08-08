@@ -1,6 +1,6 @@
 # REQ-PLAT-0002: 复用 Pi 的模型设置与认证
 
-- **Status:** In progress（2026-08-08 T13j1/T13j2 已实现；无密钥向导与 shared vision runtime 待完成）
+- **Status:** In progress（2026-08-08 T13j1–T13j3 已实现；shared vision runtime 待完成）
 - **Priority:** P0
 - **Source:** 用户新增 REQ-LIST：「直接复用 Pi 的配置，不要在项目配置里填写 API key；已经用 Pi 登录 DeepSeek 和 Codex」
 - **依赖:** REQ-PLAT-0001、REQ-ONBOARD-0001

@@ -8,11 +8,11 @@
 
 ## 三步启动
 
-1. 准备 Telegram supergroup ID、至少一个 BotFather token，以及当前 Pi model catalog 支持的 provider/model credential。每只 bot 都要加入目标群并关闭 BotFather privacy mode，才能看到普通群消息。
-2. 安装 [Bun](https://bun.sh/)，clone 本仓库后运行 `bun run pi`。launcher 会在需要时按 lockfile 安装项目自己的 Pi 0.84.1，不要求相邻的 Pi 源码仓库。
-3. 在 Pi 输入 `/tg config`，选择公开 persona 模板并填写配置。向导验证并原子写入本机文件；daemon 明确 ready 后会自动打开 all-bots feed。
+1. 准备 Telegram supergroup ID 与至少一个 BotFather token。每只 bot 都要加入目标群并关闭 BotFather privacy mode，才能看到普通群消息。
+2. 安装 [Bun](https://bun.sh/)，clone 本仓库后运行 `bun run pi`。先用 Pi 原生 `/login` 登录模型 provider，再用 `/model` 选择默认模型；项目直接复用这份 Pi 设置与认证。
+3. 在 Pi 输入 `/tg config`，确认显示的 Pi 模型、选择公开 persona 模板并填写 Telegram 配置。向导验证并原子写入本机文件；daemon 明确 ready 后会自动打开 all-bots feed。
 
-> Pi 当前的原生 `input` dialog 没有密码遮罩。provider key 和 Telegram token 输入时会显示，请使用私密终端，不要录屏或共享屏幕。secret 只写入被 Git 忽略的 `.env`。
+> Pi 当前的原生 `input` dialog 没有密码遮罩。向导中的 Telegram token 输入时会显示，请使用私密终端，不要录屏或共享屏幕。模型认证只由 Pi 管理，`/tg config` 不会再次询问或保存 provider key。
 
 完整准备步骤见[中文安装与首配](docs/user-guide/zh/src/getting-started.md)。
 
@@ -62,7 +62,7 @@ cp personas/template.zh.md personas/friend.local.md
 ```
 
 - `telegram.config.ts`：受信本机 TypeScript，保存非 secret schema 与 env key 名；可写注释并获得类型提示。
-- `.env`：本项目自己的 `key: value` 冒号格式，只保存 token/API key/router secret。
+- `.env`：本项目自己的 `key: value` 冒号格式，只保存 Telegram token、可选 TinyFish key 与 router secret；模型 credential 不在这里。
 - `personas/*.local.md`：本机 persona；默认被 Git 忽略。
 - `bots.config.json`：只读兼容旧 deployment；新配置优先使用 TypeScript。
 
@@ -70,7 +70,8 @@ cp personas/template.zh.md personas/friend.local.md
 
 ## 出错时
 
-- `/tg config` 写入后 daemon 未 ready：配置会保留。运行 `/tg status-daemon`，检查 `data/daemon.log`，修正 credential/network 后运行 `/tg restart`。
+- `/tg config` 在写入前报告 Pi model 未就绪：退出向导，用 Pi `/login`、`/model` 修复后重试；不会留下配置文件。
+- `/tg config` 写入后 daemon 未 ready：配置会保留。运行 `/tg status-daemon`，检查 `data/daemon.log`，修正 Telegram/network 后运行 `/tg restart`。
 - `unknown bot id`：使用 `/tg ` 的动态补全或检查 `telegram.config.ts` 中的 `id`。
 - `restart already in progress`：等待当前受控 restart 完成，不要并发启动第二个 daemon。
 - Telegram `409`：通常表示同一 token 有重复 poller；按[daemon runbook](docs/runbooks/daemon.md)执行受控 restart。

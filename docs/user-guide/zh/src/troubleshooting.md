@@ -23,6 +23,7 @@ bun run pi --version
 - `bots_config` missing/invalid：创建指定 `.ts`/`.json` source，或从 `.env` / process移除override后重试。
 - 同时存在默认TS与legacy JSON：保留一份，或用明确override选择；不要按mtime猜。
 - 已有文件：选择validate/editor，或明确确认backup-replace；取消不会改字节。
+- Pi model preflight：退出向导，用 Pi `/login`、`/model` 修复后重试；deployment 文件尚未写入。
 
 ## 配置有效但 daemon 未 ready
 
@@ -31,7 +32,7 @@ bun run pi --version
 /tg restart
 ```
 
-再检查 `data/daemon.log`。常见原因是Telegram token/provider key错误、网络不可达、model不在Pi catalog或bot未加入目标群。有效配置会保留；不需要重新粘贴secret。
+再检查 `data/daemon.log`。常见原因是Telegram token错误、网络不可达、Pi login/default model已变化、model不在Pi catalog或bot未加入目标群。有效配置会保留；不需要重新粘贴token。
 
 ## `daemon starting` 很久
 

@@ -23,41 +23,41 @@ For every bot:
 
 Never paste a token into the group, an issue, logs, or Git. Give every bot a distinct token environment-key name.
 
-## 3. Prepare a provider
+## 3. Prepare the Pi model
 
-You need:
+In the project Pi session:
 
-- a provider ID and model ID present in the current Pi model catalog;
-- that provider's API key;
-- the name to use in `.env`, such as `llm_api_key`.
+1. Run `/login` and complete Pi's native provider authentication.
+2. Run `/model` and select the default chat model and reasoning level.
 
-The wizard suggests `deepseek` / `deepseek-v4-flash`, but you may select another installed Pi catalog entry. First setup uses `tools.search: false`, so a TinyFish key is not required.
+The Telegram project reads Pi's merged global/project model settings and Pi auth store. It does not copy model credentials into this repository. First setup uses `tools.search: false`, so a TinyFish key is not required.
 
 ## 4. Run `/tg config`
 
 `/tg config` remains available in Pi help and completion when configuration is missing or invalid. The daemon does not need to be running.
 
-The wizard asks for:
+Before opening input dialogs, the wizard locally preflights the displayed `provider/model:thinking` against Pi's catalog and authentication. It makes no model request. The wizard then asks for:
 
 1. a Chinese or English public persona template;
 2. the Telegram supergroup ID;
-3. provider ID, model ID, provider environment-key name, and API key;
-4. local bot ID, Telegram display name, token environment-key name, and BotFather token;
-5. final write confirmation.
+3. local bot ID, Telegram display name, token environment-key name, and BotFather token;
+4. final write confirmation.
 
-Pi's current native `input` dialog does not mask passwords. API keys and tokens remain visible while entered. Use a private terminal and do not record or share the screen. The wizard never places these values in notifications, process arguments, the Pi session, or provider context.
+Pi's current native `input` dialog does not mask passwords. The BotFather token remains visible while entered. Use a private terminal and do not record or share the screen. The wizard never places it in notifications, process arguments, the Pi session, or provider context. Provider authentication stays in Pi and is never requested here.
 
 Pressing Esc at any step leaves no partial deployment. After confirmation, the wizard atomically creates:
 
-- `.env`: credentials, mode 0600, ignored by Git;
-- `telegram.config.ts`: environment-key references only, mode 0600, ignored by Git;
+- `.env`: the Telegram token, mode 0600, ignored by Git;
+- `telegram.config.ts`: Telegram deployment fields with Pi model settings inherited, mode 0600, ignored by Git;
 - `personas/<bot-id>.local.md`: local persona, mode 0600, ignored by Git.
 
 ## 5. Confirm readiness
 
 The wizard validates the complete deployment with the production loader, then invokes the controlled daemon restart. Pi opens the all-bots feed only when the command exits successfully and explicitly reports `daemon ready`.
 
-When credentials or networking prevent readiness, the validated files remain and the UI does not claim a connection. Run:
+If Pi has no valid default model or authentication, the preflight stops before any dialog or write. Use Pi `/login` and `/model`, then run `/tg config` again.
+
+When Telegram credentials or networking prevent readiness, the validated files remain and the UI does not claim a connection. Run:
 
 ```text
 /tg status-daemon

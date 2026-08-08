@@ -24,16 +24,11 @@ import {
 	type FirstRunDraft,
 } from "../src/onboarding/config-core.ts";
 
-const PROVIDER_SECRET = "NOT_A_REAL_PROVIDER_KEY_FOR_TESTS";
 const TELEGRAM_SECRET = "123456:THIS_IS_A_TEST_TOKEN_NOT_VALID";
 
 function draft(overrides: Partial<FirstRunDraft> = {}): FirstRunDraft {
 	const base: FirstRunDraft = {
 		groupPeerId: "-1001234567890",
-		provider: "deepseek",
-		model: "deepseek-v4-flash",
-		apiKeyEnv: "llm_api_key",
-		providerApiKey: PROVIDER_SECRET,
 		bot: {
 			id: "friend",
 			name: "Mochi",
@@ -52,12 +47,33 @@ function draft(overrides: Partial<FirstRunDraft> = {}): FirstRunDraft {
 function makeRoot(): string {
 	const root = mkdtempSync(join(tmpdir(), "tg-onboarding-"));
 	mkdirSync(join(root, "src"));
+	mkdirSync(join(root, ".pi"));
 	writeFileSync(join(root, "src/config-schema.ts"), readFileSync("src/config-schema.ts", "utf8"));
+	writeFileSync(join(root, ".pi/settings.json"), JSON.stringify({
+		defaultProvider: "deepseek",
+		defaultModel: "deepseek-v4-flash",
+		defaultThinkingLevel: "medium",
+	}));
 	return root;
 }
 
 function clean(root: string): void {
 	rmSync(root, { recursive: true, force: true });
+}
+
+function textFilesUnder(path: string): string[] {
+	if (!statSync(path).isDirectory()) return [path];
+	return readdirSync(path, { withFileTypes: true }).flatMap((entry) => {
+		const child = join(path, entry.name);
+		return entry.isDirectory() ? textFilesUnder(child) : [child];
+	});
+}
+
+function forbiddenProviderKeyHits(paths: readonly string[]): string[] {
+	const forbidden = /api_key_env|deepseek_key_env|providerApiKey|setRuntimeApiKey/;
+	return paths.flatMap((path) => readFileSync(path, "utf8").split(/\r?\n/).flatMap((line, index) =>
+		forbidden.test(line) ? [`${path}:${index + 1}:${line.trim()}`] : []
+	));
 }
 
 describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
@@ -76,15 +92,14 @@ describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
 				bots: [{ id: "friend", name: "Mochi", provider: "deepseek", model: "deepseek-v4-flash" }],
 			});
 			const configSource = readFileSync(join(root, "telegram.config.ts"), "utf8");
-			expect(configSource).toContain('api_key_env: "llm_api_key"');
 			expect(configSource).toContain('token_env: "telegram_bot_token"');
-			expect(configSource).not.toContain(PROVIDER_SECRET);
+			expect(configSource).not.toMatch(/\b(provider|model|reasoning_effort|api_key_env)\s*:/);
 			expect(configSource).not.toContain(TELEGRAM_SECRET);
 			expect(statSync(join(root, ".env")).mode & 0o777).toBe(0o600);
+			expect(readFileSync(join(root, ".env"), "utf8")).toBe(`telegram_bot_token: ${TELEGRAM_SECRET}\n`);
 			const loaded = loadConfig(root);
 			expect(loaded.bots[0]!.tools.search).toBe(false);
 			expect(loaded.tinyfishApiKey).toBe("");
-			expect(events.join("\n")).not.toContain(PROVIDER_SECRET);
 			expect(events.join("\n")).not.toContain(TELEGRAM_SECRET);
 		} finally {
 			clean(root);
@@ -105,12 +120,12 @@ describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
 		}
 	});
 
-	test("AC4: invalid peer, token, provider, model, and persona fail before filesystem writes", () => {
+	test("AC4: invalid peer, bot identity, token, and persona fail before filesystem writes", () => {
 		const cases: Array<[string, FirstRunDraft]> = [
 			["group_peer_id", draft({ groupPeerId: "not-a-peer" })],
 			["bot.token", draft({ bot: { ...draft().bot, token: "invalid" } })],
-			["provider", draft({ provider: "bad provider!" })],
-			["model", draft({ model: "" })],
+			["bot.id", draft({ bot: { ...draft().bot, id: "bad bot!" } })],
+			["bot.token_env", draft({ bot: { ...draft().bot, tokenEnv: "bad env!" } })],
 			["bot.persona", draft({ bot: { ...draft().bot, personaText: "  " } })],
 		];
 		for (const [field, value] of cases) {
@@ -165,7 +180,6 @@ describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
 			writeFileSync(envPath, `${readFileSync(envPath, "utf8")}unrelated_local_key: keep-me\n`);
 			const previousConfig = readFileSync(join(root, "telegram.config.ts"), "utf8");
 			const replacement = draft({
-				providerApiKey: "NOT_A_REAL_REPLACEMENT_PROVIDER_KEY",
 				bot: {
 					...draft().bot,
 					name: "Nori",
@@ -185,7 +199,8 @@ describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
 			expect(readFileSync(join(root, "telegram.config.ts.bak-replace"), "utf8")).toBe(previousConfig);
 			const env = readFileSync(envPath, "utf8");
 			expect(env).toContain("unrelated_local_key: keep-me");
-			expect(env.match(/^llm_api_key:/gm)).toHaveLength(1);
+			expect(env.match(/^telegram_bot_token:/gm)).toHaveLength(1);
+			expect(env).not.toContain("llm_api_key");
 			expect(loadConfig(root).bots[0]!.name).toBe("Nori");
 		} finally {
 			clean(root);
@@ -227,5 +242,23 @@ describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
 			"# comment\nmanaged: old\nunrelated: keep\nmanaged: stale\n",
 			{ managed: "new", added: "value" },
 		)).toBe("# comment\nmanaged: new\nunrelated: keep\n\nadded: value\n");
+	});
+
+	test("PLAT-0002 AC5: production onboarding, examples, and user steps have no project provider-key surface", () => {
+		const userSurface = [
+			".env.example",
+			"telegram.config.example.ts",
+			"bots.config.example.json",
+			"README.md",
+			"README.en.md",
+			"docs/runbooks/daemon.md",
+			...textFilesUnder("docs/user-guide"),
+			...textFilesUnder("src/onboarding"),
+		];
+		expect(forbiddenProviderKeyHits(userSurface)).toEqual([]);
+
+		const productionHits = forbiddenProviderKeyHits(textFilesUnder("src"));
+		expect(productionHits.length).toBeGreaterThan(0);
+		expect(productionHits.every((hit) => hit.startsWith("src/config.ts:") && /api_key_env|deepseek_key_env/.test(hit))).toBe(true);
 	});
 });

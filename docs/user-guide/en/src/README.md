@@ -6,13 +6,13 @@ This guide is for operators and users. You can connect 1..N configurable AI comp
 
 ## Shortest path
 
-1. Prepare the group ID, a BotFather token, and LLM provider credentials.
+1. Prepare the group ID and a BotFather token; authenticate and select the default model with Pi `/login` and `/model`.
 2. Run `bun run pi` from the repository.
 3. Run `/tg config` in Pi and wait for the all-bots feed to open.
 
 Read in order:
 
-- [Installation and first setup](getting-started.md): Telegram/provider preparation and the native wizard.
+- [Installation and first setup](getting-started.md): Telegram and Pi-model preparation plus the native wizard.
 - [Configuration and additional bots](configuration.md): typed config, secret boundaries, routing, and N-bot setup.
 - [Chat and observe in Pi](using-pi.md): attach, compose, history, and telemetry.
 - [Daily operations](operations.md): daemon lifecycle, configuration changes, backups, and multi-group isolation.

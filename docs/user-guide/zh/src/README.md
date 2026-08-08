@@ -6,13 +6,13 @@
 
 ## 最短路径
 
-1. 准备群 ID、BotFather token 与 LLM provider credential。
+1. 准备群 ID 与 BotFather token，并用 Pi `/login`、`/model`完成模型登录与默认选择。
 2. 在仓库中运行 `bun run pi`。
 3. 在 Pi 执行 `/tg config`，完成后等待 all-bots feed 自动打开。
 
 按顺序阅读：
 
-- [安装与首次配置](getting-started.md)：Telegram/provider 准备与原生向导。
+- [安装与首次配置](getting-started.md)：Telegram与Pi模型准备、原生向导。
 - [配置与添加 bot](configuration.md)：typed config、secret 边界、routing 和 N-bot。
 - [在 Pi 中聊天和观察](using-pi.md)：attach、compose、history 与 telemetry。
 - [日常运维](operations.md)：daemon、配置变更、备份与多群隔离。

@@ -25,9 +25,12 @@ import {
 	type TelegramExtensionOptions,
 } from "../.pi/extensions/tg-extension.ts";
 import { loadConfig } from "../src/config.ts";
+import { PiModelConfigurationError } from "../src/agent/model-runtime.ts";
 import type { BotStats, SendMessageResult, TimelineItem } from "../src/ipc.ts";
 import { writeFirstRunDeployment } from "../src/onboarding/config-core.ts";
 import {
+	PiOnboardingPreflightError,
+	preflightPiDefaultModel,
 	WIZARD_ACTION_CANCEL,
 	WIZARD_ACTION_EDIT,
 	WIZARD_ACTION_REPLACE,
@@ -289,6 +292,11 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}, dialogs: Fa
 			clients.push(client);
 			return client;
 		},
+		piModelPreflight: async () => ({
+			provider: "deepseek",
+			model: "deepseek-v4-flash",
+			thinkingLevel: "medium",
+		}),
 		...overrides,
 	});
 	return {
@@ -336,19 +344,21 @@ function makeOnboardingRoot(): string {
 	const root = mkdtempSync(join(tmpdir(), "tg-native-config-"));
 	mkdirSync(join(root, "src"), { recursive: true });
 	mkdirSync(join(root, "personas"), { recursive: true });
+	mkdirSync(join(root, ".pi"), { recursive: true });
 	writeFileSync(join(root, "src/config-schema.ts"), readFileSync(join(import.meta.dir, "../src/config-schema.ts"), "utf8"));
 	writeFileSync(join(root, "personas/template.zh.md"), readFileSync(join(import.meta.dir, "../personas/template.zh.md"), "utf8"));
 	writeFileSync(join(root, "personas/template.en.md"), readFileSync(join(import.meta.dir, "../personas/template.en.md"), "utf8"));
+	writeFileSync(join(root, ".pi/settings.json"), JSON.stringify({
+		defaultProvider: "deepseek",
+		defaultModel: "deepseek-v4-flash",
+		defaultThinkingLevel: "medium",
+	}));
 	return root;
 }
 
 function onboardingInputs(): string[] {
 	return [
 		"-1001234567890",
-		"deepseek",
-		"deepseek-v4-flash",
-		"llm_api_key",
-		ONBOARD_PROVIDER_SECRET,
 		"friend",
 		"Mochi",
 		"telegram_bot_token",
@@ -442,7 +452,6 @@ describe("native Pi Telegram extension", () => {
 
 			expect(loadConfig(root).bots.map((bot) => ({ id: bot.id, name: bot.name }))).toEqual([{ id: "friend", name: "Mochi" }]);
 			expect(processCalls).toEqual([{ command: "bun", args: ["run", "src/main.ts", "restart"], cwd: root }]);
-			expect(JSON.stringify(processCalls)).not.toContain(ONBOARD_PROVIDER_SECRET);
 			expect(JSON.stringify(processCalls)).not.toContain(ONBOARD_TELEGRAM_SECRET);
 			expect(host.entries).toHaveLength(1);
 			expect(host.clients).toHaveLength(1);
@@ -451,13 +460,23 @@ describe("native Pi Telegram extension", () => {
 			expect(host.getFooter()).toBeInstanceOf(FooterComponent);
 			expect((await host.complete("attach "))?.map((item) => item.value)).toEqual(["attach friend"]);
 			expect(host.dialogCalls.map((call) => call.kind)).toEqual([
-				"select", "input", "input", "input", "input", "input", "input", "input", "input", "input", "confirm",
+				"select", "input", "input", "input", "input", "input", "confirm",
+			]);
+			expect(host.dialogCalls.filter((call) => call.kind === "input").map((call) => call.title)).toEqual([
+				"Telegram supergroup id",
+				"Local bot id",
+				"Bot display name",
+				"Name for the Telegram token in .env",
+				"Telegram bot token (Pi native input is visible)",
 			]);
 			const transcript = host.notifies.map((item) => item.text).join("\n");
+			expect(transcript).toContain("Pi model ready: deepseek/deepseek-v4-flash:medium");
 			expect(transcript).toContain("daemon ready");
 			expect(transcript).toContain("Opening the all-bots feed");
-			expect(transcript).not.toContain(ONBOARD_PROVIDER_SECRET);
 			expect(transcript).not.toContain(ONBOARD_TELEGRAM_SECRET);
+			const configSource = readFileSync(join(root, "telegram.config.ts"), "utf8");
+			expect(configSource).not.toMatch(/\b(provider|model|reasoning_effort|api_key_env)\s*:/);
+			expect(readFileSync(join(root, ".env"), "utf8")).toBe(`telegram_bot_token: ${ONBOARD_TELEGRAM_SECRET}\n`);
 			expect(host.statusUpdates.at(-1)).toEqual({ key: "telegram-config", text: undefined });
 		} finally {
 			rmSync(root, { recursive: true, force: true });
@@ -465,14 +484,14 @@ describe("native Pi Telegram extension", () => {
 	});
 
 	test("config cancellation at every Pi dialog leaves every target absent", async () => {
-		for (let abortAt = 0; abortAt <= 10; abortAt++) {
+		for (let abortAt = 0; abortAt <= 6; abortAt++) {
 			const root = makeOnboardingRoot();
 			let processCalls = 0;
 			try {
 				const inputs = onboardingInputs();
 				const dialogs: FakeDialogAnswers = abortAt === 0
 					? { selects: [undefined] }
-					: abortAt <= 9
+					: abortAt <= 5
 						? { selects: [WIZARD_TEMPLATE_EN], inputs: [...inputs.slice(0, abortAt - 1), undefined] }
 						: { selects: [WIZARD_TEMPLATE_EN], inputs, confirms: [false] };
 				const host = makeHost({
@@ -491,10 +510,69 @@ describe("native Pi Telegram extension", () => {
 				expect(existsSync(join(root, "personas/friend.local.md"))).toBe(false);
 				expect(host.entries).toHaveLength(0);
 				expect(host.notifies.at(-1)?.text).toContain("no files were changed");
-				expect(host.notifies.map((item) => item.text).join("\n")).not.toContain(ONBOARD_PROVIDER_SECRET);
 				expect(host.notifies.map((item) => item.text).join("\n")).not.toContain(ONBOARD_TELEGRAM_SECRET);
 			} finally {
 				rmSync(root, { recursive: true, force: true });
+			}
+		}
+	});
+
+	test("config preflights Pi defaults/auth before dialogs and leaves zero files on failure", async () => {
+		const root = makeOnboardingRoot();
+		let processCalls = 0;
+		try {
+			const host = makeHost({
+				rootDir: root,
+				piModelPreflight: async () => {
+					throw new PiOnboardingPreflightError("unauthenticated_provider");
+				},
+				processRunner: async () => {
+					processCalls++;
+					return { status: 0, stdout: "daemon ready", stderr: "" };
+				},
+			});
+
+			await host.command("config");
+
+			expect(host.dialogCalls).toHaveLength(0);
+			expect(processCalls).toBe(0);
+			for (const path of [".env", "telegram.config.ts", "personas/friend.local.md"]) {
+				expect(existsSync(join(root, path))).toBe(false);
+			}
+			const transcript = host.notifies.map((item) => item.text).join("\n");
+			expect(transcript).toContain("unauthenticated_provider");
+			expect(transcript).toContain("/login");
+			expect(transcript).toContain("/model");
+			expect(transcript).toContain("No files were changed");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("production onboarding preflight composes Pi defaults with catalog/auth validation", async () => {
+		const preflighted: Array<{ provider: string; model: string }> = [];
+		const selected = await preflightPiDefaultModel(
+			"/fixture",
+			() => ({ provider: "openai-codex", model: "gpt-5.6-luna", thinkingLevel: "low" }),
+			async (bots) => { preflighted.push(...bots); },
+		);
+		expect(selected).toEqual({ provider: "openai-codex", model: "gpt-5.6-luna", thinkingLevel: "low" });
+		expect(preflighted).toEqual([{ provider: "openai-codex", model: "gpt-5.6-luna" }]);
+
+		for (const [defaults, expected] of [
+			[{ provider: undefined, model: undefined, thinkingLevel: "medium" as const }, "missing_default"],
+			[{ provider: "deepseek", model: "missing", thinkingLevel: "medium" as const }, "unknown_model"],
+		] as const) {
+			try {
+				await preflightPiDefaultModel(
+					"/fixture",
+					() => defaults,
+					async () => { throw new PiModelConfigurationError("unknown_model", "deepseek", "missing"); },
+				);
+				throw new Error("expected Pi onboarding preflight to fail");
+			} catch (error) {
+				expect(error).toBeInstanceOf(PiOnboardingPreflightError);
+				expect((error as PiOnboardingPreflightError).category).toBe(expected);
 			}
 		}
 	});
@@ -505,10 +583,6 @@ describe("native Pi Telegram extension", () => {
 		try {
 			writeFirstRunDeployment(root, {
 				groupPeerId: "-1001234567890",
-				provider: "deepseek",
-				model: "deepseek-v4-flash",
-				apiKeyEnv: "llm_api_key",
-				providerApiKey: ONBOARD_PROVIDER_SECRET,
 				bot: {
 					id: "friend",
 					name: "Mochi",
@@ -553,10 +627,6 @@ describe("native Pi Telegram extension", () => {
 		try {
 			writeFirstRunDeployment(customRoot, {
 				groupPeerId: "-1001234567890",
-				provider: "deepseek",
-				model: "deepseek-v4-flash",
-				apiKeyEnv: "llm_api_key",
-				providerApiKey: ONBOARD_PROVIDER_SECRET,
 				bot: {
 					id: "friend",
 					name: "Mochi",

@@ -47,7 +47,7 @@
 
 ## 主要约束
 
-- 模型是部署配置：每 bot 可选择Pi catalog中的provider/model/auth；架构不得依赖具体模型、context window或价格
+- 模型选择是部署配置：每 bot 可选择Pi catalog中的provider/model，认证由共享Pi runtime/auth store统一提供；架构不得依赖具体模型、context window或价格
 - 当前 compaction threshold = 128K tokens（provisional default，靠 telemetry 验证，不做在线 optimizer）
 - Telegram 不承担历史恢复职责，SQLite 是事实来源
 - Bot-to-Bot：彼此消息进共同 transcript 可被看到，但**不互相触发**（trigger 只来自满足 routing 条件的 human 消息）
@@ -71,7 +71,7 @@
 ## 部署边界
 
 - 一份 deployment 对应一个 Telegram supergroup 与 1..N bots。
-- 每个 bot 的 token、persona、provider/model/auth、routing 与 tools 都来自配置；生产代码不依赖固定 id 或名字。
+- 每个 bot 的 token、persona、可选provider/model选择、routing与tools来自配置；provider认证只来自Pi。生产代码不依赖固定id或名字。
 - 一个工作目录只有一个`group_peer_id`，而SQLite history/exposure、agent sessions、poller offsets/router secret、PID/control lock/Unix socket都没有第二层deployment namespace。
 - 因此在同一目录并行切换`bots_config`可能混入跨群history/context、推进错误offset或争抢同一进程资源。配置文件不同不构成隔离。
 - 第二个群必须使用独立checkout/worktree，并隔离`.env`、config/persona、Telegram bot tokens、data/DB、sessions、PID/lock/socket。当前不支持同目录多群。

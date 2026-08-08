@@ -4,10 +4,8 @@ export default defineConfig({
 	// Telegram supergroup id. Bare, negative, and -100-prefixed forms are accepted.
 	group_peer_id: 1234567890,
 
-	// Optional Pi model selection. Authentication stays in Pi; no provider key belongs here.
-	provider: "deepseek",
-	model: "deepseek-v4-flash",
-	reasoning_effort: "medium",
+	// Chat model, reasoning level, and authentication inherit Pi's current settings.
+	// Advanced deployments may select another authenticated Pi provider/model here.
 
 	// Deterministic local behavior. These defaults keep context and background work bounded.
 	compaction_threshold: 128_000,

@@ -6,8 +6,8 @@
 
 | 文件 | 保存什么 | 是否提交 |
 | --- | --- | --- |
-| `telegram.config.ts` | 群、bot、provider/model、env key、routing、tools | 否 |
-| `.env` | Telegram/provider/TinyFish token 与 router secret | 否 |
+| `telegram.config.ts` | 群、bot、可选 Pi 模型选择、routing、tools | 否 |
+| `.env` | Telegram/TinyFish token 与 router secret | 否 |
 | `personas/*.local.md` | 真实 deployment persona | 否 |
 | `telegram.config.example.ts` | public typed schema example | 是 |
 | `personas/template.*.md` | public generic persona templates | 是 |
@@ -16,7 +16,6 @@
 
 ```text
 telegram_bot_token: 123456:REPLACE_WITH_BOTFATHER_TOKEN
-llm_api_key: REPLACE_WITH_PROVIDER_KEY
 router_secret: REPLACE_WITH_RANDOM_LOCAL_SECRET
 ```
 
@@ -27,9 +26,6 @@ import { defineConfig } from "./src/config-schema.ts";
 
 export default defineConfig({
   group_peer_id: 1234567890,
-  provider: "deepseek",
-  model: "deepseek-v4-flash",
-  api_key_env: "llm_api_key",
   bots: [{
     id: "friend",
     name: "Mochi",
@@ -64,11 +60,11 @@ export default defineConfig({
 
 `routing_p: 0` 只关闭普通消息的概率抽样；mention、直接 reply 和配置名称仍是明确触发。所有 bot 的 `routing_p` 总和必须 `<= 1`，配置顺序决定确定性概率桶顺序。
 
-每个 bot 的 Telegram poller、agent session、state、provider runtime 与 telemetry 都隔离；共享的是目标群与 canonical SQLite history。
+每个 bot 的 Telegram poller、agent session、模型选择、state 与 telemetry 都隔离；共享的是一个 Pi model runtime/auth snapshot、目标群与 canonical SQLite history。
 
-## Provider 与 tools override
+## Pi 模型与 tools override
 
-deployment 顶层的 `provider`、`model`、`api_key_env` 是默认值。单 bot 可覆盖；如果切换到不同 provider，必须同时显式填写这三个字段，避免 credential 串用。同 provider 只换 credential 时可只覆盖 `api_key_env`。
+省略顶层模型字段时，所有 bot 继承 Pi 合并后的默认 provider、model 与 thinking level。高级 deployment 可在顶层或单 bot 用 `provider` + `model` 选择另一个 catalog entry；切换 provider 时两者必须同时填写。`reasoning_effort` 也可作为选择覆盖。认证始终来自 Pi，不来自本配置或 `.env`。改变 Pi login/default model 后执行受控 restart。
 
 `tools`：
 
@@ -76,7 +72,7 @@ deployment 顶层的 `provider`、`model`、`api_key_env` 是默认值。单 bot
 - `search`：需要 `.env` 中由 `tinyfish_key_env` 指定的 TinyFish key；
 - `run_js`：启用受限的确定性计算工具。
 
-首次向导把 search 关闭。先补 credential，再显式开启；不要把 API key 直接写进 TypeScript。
+首次向导把 search 关闭。启用前把 TinyFish credential 加入 `.env`；它与 Pi 模型认证无关。
 
 ## Routing 与管理命令
 

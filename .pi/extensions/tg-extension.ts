@@ -14,7 +14,10 @@ import * as Tui from "@earendil-works/pi-tui";
 import { loadConfig, type BotConfig } from "../../src/config.ts";
 import { redactDaemonLog } from "../../src/daemon/control.ts";
 import type { AgentStreamFrame, BotStats, EvtItem, MsgItem, TimelineItem } from "../../src/ipc.ts";
-import { runNativeConfigWizard } from "../../src/onboarding/config-wizard.ts";
+import {
+	runNativeConfigWizard,
+	type PiModelPreflight,
+} from "../../src/onboarding/config-wizard.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
 	mediaFileRevision,
@@ -379,6 +382,7 @@ export interface TelegramExtensionOptions {
 	idFactory?: () => string;
 	requestIdFactory?: () => string;
 	mediaCache?: NativeMediaCache;
+	piModelPreflight?: PiModelPreflight;
 }
 
 export function supportsPiVersion(value: string): boolean {
@@ -1038,6 +1042,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				try {
 					const result = await runNativeConfigWizard(ctx.ui, {
 						rootDir,
+						preflightPiModel: options.piModelPreflight,
 						restartDaemon: async () => {
 							closeCompose(ctx.ui);
 							active?.detach("configuration changed; waiting for daemon readiness");

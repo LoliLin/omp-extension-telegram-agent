@@ -23,41 +23,41 @@ bun run pi
 
 不要把 token 发进群、issue、日志或 Git。每只 bot 必须有自己的 token env key。
 
-## 3. 准备 provider
+## 3. 准备 Pi 模型
 
-你需要：
+在项目 Pi 会话中：
 
-- Pi 当前 model catalog 中存在的 provider ID 和 model ID；
-- 对应 provider API key；
-- 一个准备写入 `.env` 的 key 名，例如 `llm_api_key`。
+1. 运行 `/login`，完成 Pi 原生 provider 登录。
+2. 运行 `/model`，选择默认聊天模型与 reasoning level。
 
-默认向导示例是 `deepseek` / `deepseek-v4-flash`。你可以选择其他已安装 Pi catalog 支持的 provider/model。首次向导默认 `tools.search: false`，所以不需要先申请 TinyFish key。
+Telegram 项目读取 Pi 合并后的 global/project 模型设置与 Pi auth store，不把模型 credential 复制进本仓库。首次向导默认 `tools.search: false`，所以不需要先申请 TinyFish key。
 
 ## 4. 运行 `/tg config`
 
 配置文件缺失或无效时，`/tg config` 仍会出现在 Pi 帮助和补全中，不需要先启动 daemon。
 
-向导依次要求：
+向导打开输入框前，会先在本地用 Pi catalog/auth 预检并显示 `provider/model:thinking`；这不会调用模型。随后依次要求：
 
 1. 中文或 English public persona template；
 2. Telegram supergroup ID；
-3. provider ID、model ID、provider env key 名与 API key；
-4. 本机 bot ID、Telegram 显示名、token env key 名与 BotFather token；
-5. 最终写入确认。
+3. 本机 bot ID、Telegram 显示名、token env key 名与 BotFather token；
+4. 最终写入确认。
 
-Pi 当前原生 `input` dialog 没有密码遮罩。API key 与 token 输入时可见；请使用私密终端，不要录屏或共享屏幕。向导不会把值写进 notification、进程参数、Pi session 或 provider context。
+Pi 当前原生 `input` dialog 没有密码遮罩。BotFather token 输入时可见；请使用私密终端，不要录屏或共享屏幕。向导不会把它写进 notification、进程参数、Pi session 或 provider context。provider 认证留在 Pi 中，这里不会再次询问。
 
 按 Esc 取消任一步都不会留下半份配置。确认后会原子写入：
 
-- `.env`：credential，mode 0600，Git ignored；
-- `telegram.config.ts`：只引用 env key，mode 0600，Git ignored；
+- `.env`：Telegram token，mode 0600，Git ignored；
+- `telegram.config.ts`：Telegram deployment 字段，模型设置继承 Pi，mode 0600，Git ignored；
 - `personas/<bot-id>.local.md`：本机 persona，mode 0600，Git ignored。
 
 ## 5. 确认 ready
 
 向导先用 production loader 验证完整配置，再执行受控 daemon restart。只有命令退出成功并明确报告 `daemon ready` 时，Pi 才打开 all-bots feed。
 
-如果 credential 或网络导致 readiness 失败，已验证文件会保留，界面不会声称已连接。按顺序执行：
+如果 Pi 缺少有效默认模型或认证，预检会在任何 dialog 和写入前停止。先用 Pi `/login`、`/model` 修复，再运行 `/tg config`。
+
+如果 Telegram credential 或网络导致 readiness 失败，已验证文件会保留，界面不会声称已连接。按顺序执行：
 
 ```text
 /tg status-daemon

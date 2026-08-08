@@ -15,17 +15,12 @@ import { defaultConfigPath, loadConfig, normalizePeerId, parseEnvFile, type AppC
 
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const BOT_ID = /^[A-Za-z0-9_-]+$/;
-const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const TELEGRAM_TOKEN = /^\d{5,20}:[A-Za-z0-9_-]{20,}$/;
 const MAX_PERSONA_BYTES = 256 * 1024;
 const PRIVATE_MODE = 0o600;
 
 export interface FirstRunDraft {
 	groupPeerId: string;
-	provider: string;
-	model: string;
-	apiKeyEnv: string;
-	providerApiKey: string;
 	bot: {
 		id: string;
 		name: string;
@@ -121,14 +116,9 @@ export function validateFirstRunDraft(draft: FirstRunDraft): NormalizedDraft {
 	const invalid: string[] = [];
 	const groupPeerIdNumber = normalizePeerId(draft.groupPeerId);
 	if (!Number.isFinite(groupPeerIdNumber)) invalid.push("group_peer_id");
-	if (!PROVIDER_ID.test(draft.provider.trim())) invalid.push("provider");
-	if (!draft.model.trim() || /[\r\n\0]/.test(draft.model)) invalid.push("model");
-	if (!ENV_KEY.test(draft.apiKeyEnv)) invalid.push("api_key_env");
-	if (!draft.providerApiKey || /[\r\n\0]/.test(draft.providerApiKey)) invalid.push("provider_api_key");
 	if (!BOT_ID.test(draft.bot.id)) invalid.push("bot.id");
 	if (!draft.bot.name.trim() || draft.bot.name.length > 64 || /[\r\n\0]/.test(draft.bot.name)) invalid.push("bot.name");
 	if (!ENV_KEY.test(draft.bot.tokenEnv)) invalid.push("bot.token_env");
-	if (draft.bot.tokenEnv === draft.apiKeyEnv) invalid.push("bot.token_env");
 	if (!TELEGRAM_TOKEN.test(draft.bot.token)) invalid.push("bot.token");
 	if (
 		!draft.bot.personaText.trim()
@@ -140,8 +130,6 @@ export function validateFirstRunDraft(draft: FirstRunDraft): NormalizedDraft {
 	return {
 		...draft,
 		groupPeerIdNumber,
-		provider: draft.provider.trim(),
-		model: draft.model.trim(),
 		bot: { ...draft.bot, name: draft.bot.name.trim() },
 		personaRelativePath: `personas/${draft.bot.id}.local.md`,
 	};
@@ -173,10 +161,6 @@ function renderFirstRunConfig(draft: NormalizedDraft): string {
 
 export default defineConfig({
 	group_peer_id: ${value(draft.groupPeerIdNumber)},
-	provider: ${value(draft.provider)},
-	model: ${value(draft.model)},
-	api_key_env: ${value(draft.apiKeyEnv)},
-	reasoning_effort: "medium",
 	compaction_threshold: 128_000,
 	compaction_keep_recent: 20_000,
 	sampling_cooldown_ms: 2_000,
@@ -218,7 +202,6 @@ export function writeFirstRunDeployment(rootDir: string, draft: FirstRunDraft, o
 		existingEnv = ops.readFile(envPath);
 	}
 	const envSource = mergeEnvSource(existingEnv, {
-		[normalized.apiKeyEnv]: normalized.providerApiKey,
 		[normalized.bot.tokenEnv]: normalized.bot.token,
 	});
 	const files: InstallFile[] = [

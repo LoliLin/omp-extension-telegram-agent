@@ -8,11 +8,11 @@ One deployment serves one group. Each bot has its own token, persona, provider/m
 
 ## Start in three steps
 
-1. Prepare a Telegram supergroup ID, at least one BotFather token, and credentials for a provider/model supported by the current Pi model catalog. Add every bot to the target group and disable BotFather privacy mode so it can receive ordinary group messages.
-2. Install [Bun](https://bun.sh/), clone this repository, and run `bun run pi`. The launcher installs the locked project-local Pi 0.84.1 when needed; no sibling Pi source checkout is required.
-3. Enter `/tg config` in Pi, choose a public persona template, and provide the requested values. The wizard validates and atomically writes local files, then opens the all-bots feed only after the daemon reports ready.
+1. Prepare a Telegram supergroup ID and at least one BotFather token. Add every bot to the target group and disable BotFather privacy mode so it can receive ordinary group messages.
+2. Install [Bun](https://bun.sh/), clone this repository, and run `bun run pi`. Use Pi's native `/login` to authenticate a model provider and `/model` to select the default model; this project reuses those Pi settings and credentials.
+3. Enter `/tg config` in Pi, confirm the displayed Pi model, choose a public persona template, and provide the Telegram values. The wizard validates and atomically writes local files, then opens the all-bots feed only after the daemon reports ready.
 
-> Pi's current native `input` dialog does not mask passwords. Provider keys and Telegram tokens remain visible while you enter them. Use a private terminal and do not record or share the screen. Secrets are written only to the Git-ignored `.env` file.
+> Pi's current native `input` dialog does not mask passwords. The Telegram token remains visible while you enter it, so use a private terminal and do not record or share the screen. Model authentication remains owned by Pi; `/tg config` never asks for or stores a provider key.
 
 Read [Installation and first setup](docs/user-guide/en/src/getting-started.md) for the complete preparation flow.
 
@@ -62,7 +62,7 @@ cp personas/template.en.md personas/friend.local.md
 ```
 
 - `telegram.config.ts`: trusted local TypeScript containing non-secret schema and environment-key names, with comments and editor types.
-- `.env`: the project's `key: value` colon format, containing only tokens, API keys, and the router secret.
+- `.env`: the project's `key: value` colon format for Telegram tokens, an optional TinyFish key, and the router secret; model credentials do not belong here.
 - `personas/*.local.md`: local personas, ignored by Git by default.
 - `bots.config.json`: legacy deployment compatibility; prefer TypeScript for new setups.
 
@@ -70,7 +70,8 @@ Read [Configuration](docs/user-guide/en/src/configuration.md) for a minimal one-
 
 ## When something fails
 
-- Daemon not ready after `/tg config`: the valid files remain. Run `/tg status-daemon`, inspect `data/daemon.log`, fix credentials or networking, then run `/tg restart`.
+- Pi model not ready before `/tg config` writes: exit the wizard, use Pi `/login` and `/model`, then retry; no deployment files are created.
+- Daemon not ready after `/tg config`: the valid files remain. Run `/tg status-daemon`, inspect `data/daemon.log`, fix Telegram or networking issues, then run `/tg restart`.
 - `unknown bot id`: use dynamic `/tg ` completion or check the bot `id` in `telegram.config.ts`.
 - `restart already in progress`: wait for the controlled restart instead of starting another daemon.
 - Telegram `409`: another poller probably uses the same token; follow the [daemon runbook](docs/runbooks/daemon.md) for a controlled restart.

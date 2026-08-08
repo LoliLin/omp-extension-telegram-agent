@@ -23,6 +23,7 @@ Confirm you started `bun run pi` from the repository root and package discovery 
 - Missing/invalid `bots_config`: create the selected `.ts`/`.json` source or remove the override from `.env` / the process.
 - Both default TS and legacy JSON exist: retain one or select one explicitly; do not guess by modification time.
 - Existing files: choose validate/editor or explicitly confirm backup-replace. Cancellation preserves bytes.
+- Pi model preflight: leave the wizard, use Pi `/login` and `/model`, then retry. No deployment file was written.
 
 ## Config is valid but the daemon is not ready
 
@@ -31,7 +32,7 @@ Confirm you started `bun run pi` from the repository root and package discovery 
 /tg restart
 ```
 
-Then inspect `data/daemon.log`. Typical causes include an invalid Telegram token/provider key, unreachable network, a model absent from Pi's catalog, or a bot missing from the target group. Valid files remain, so you do not need to paste secrets again.
+Then inspect `data/daemon.log`. Typical causes include an invalid Telegram token, unreachable network, changed Pi login/default-model settings, a model absent from Pi's catalog, or a bot missing from the target group. Valid files remain, so you do not need to paste the token again.
 
 ## `daemon starting` persists
 

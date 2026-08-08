@@ -76,7 +76,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13i1** — 增加只读脱敏routing审计脚本、0.66/0.34 property fixture与双语口径；validates: ROUTE-0002 AC1–AC6；commit: `a1321f1`
 - [x] **T13i2** — 用T13i1真实commit hash记录ROUTE-0002完成并在REQ-LIST勾选；validates: ROUTE-0002 traceability；commit: completion record
 - [x] **T13j1** — 取消项目provider key解析/注入，legacy key字段只接受后丢弃；validates: PLAT-0002 R1/R4/AC3；commit: `0859490`
-- [ ] **T13j2** — 合并Pi global/project defaults、建立单shared runtime与N-bot脱敏preflight；validates: PLAT-0002 R2/R3/R7/R8/AC1/AC2；commit: shared Pi model runtime
+- [x] **T13j2** — 合并Pi global/project defaults、建立单shared runtime与N-bot脱敏preflight；validates: PLAT-0002 R2/R3/R7/R8/AC1/AC2；commit: `f30e22c`
 - [ ] **T13j3** — 删除向导provider/key输入并收口canonical examples、env与双语运维文档；validates: PLAT-0002 R4/R5/AC4/AC5；commit: keyless Pi onboarding
 - [ ] **T13k1** — 用shared Pi Luna low执行同步动态media gate、两路有界并发与匿名基准；validates: VISION-0001 AC1–AC9 + PLAT-0002 R6/AC6；commit: synchronous vision boundary
 - [ ] **T13j4** — 用真实behavior hashes记录PLAT-0002完成并在REQ-LIST勾选；validates: PLAT-0002 traceability；commit: completion record

@@ -2,16 +2,16 @@
 
 ## 配置
 
-- **首选路径**：运行 `bun run pi`，在 Pi 中执行 `/tg config`。向导使用 Pi 原生 dialogs 收集一个 bot 的最小配置，写入 ignored `telegram.config.ts`、`.env` 与 `personas/<id>.local.md`，再走本 runbook 的受控 restart。Pi 当前没有密码输入控件，provider key 与 Telegram token 输入时可见；只在私密终端操作，不要录屏或共享屏幕。
+- **首选路径**：运行 `bun run pi`，先用 Pi `/login` 与 `/model`完成模型认证/默认选择，再执行 `/tg config`。向导在任何写入前本地预检并显示`provider/model:thinking`，随后只收集一个bot的Telegram最小配置，写入ignored `telegram.config.ts`、`.env`与`personas/<id>.local.md`，再走本runbook的受控restart。Pi当前没有密码输入控件，Telegram token输入时可见；只在私密终端操作，不要录屏或共享屏幕。
 - 已有配置重跑 `/tg config` 时可验证、用 Pi editor 编辑项目根 source，或在明确确认后备份并替换默认 source。自定义 `bots_config` source 不会被旁路覆盖；先修复缺失/坏 override。
 - **手工路径**：复制 `telegram.config.example.ts`、`.env.example` 与一个 public persona template，再按下列字段编辑。legacy JSON 只用于兼容。
 - `telegram.config.ts`（项目根，首选）：复制 `telegram.config.example.ts` 后编辑，`defineConfig()` 提供类型与逐字段注释。它会作为受信本机代码执行，不要粘贴来源不明的配置。legacy `bots.config.json` 继续支持；两份默认文件同时存在会拒绝启动。env `bots_config` 可显式指向 `.ts` / `.json`。
   - `group_peer_id`：群的裸正数 peer id（`-100...` 形式会被自动归一化）
-  - deployment 默认模型：`provider` + `model` + `api_key_env`；缺省为 `deepseek` + `deepseek-v4-flash` + `deepseek_api_key`。`api_key_env`只是指向`.env`的key名，不放secret值。
-  - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1），可选覆盖 `provider` / `model` / `api_key_env` / `reasoning_effort` / compaction / cooldown / `tools`（`{send, search, run_js}` 开关）/ `sticker_sets`（Telegram sticker set 名数组）。切换provider时必须同时给model和api_key_env；同provider可只换key。
+  - deployment 默认模型：省略模型字段时继承Pi合并后的provider/model/thinking；高级配置可用`provider` + `model` + 可选`reasoning_effort`选择另一个已认证Pi catalog entry。切换provider必须同时给model；认证始终来自Pi。
+  - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1），可选覆盖 `provider` / `model` / `reasoning_effort` / compaction / cooldown / `tools`（`{send, search, run_js}` 开关）/ `sticker_sets`（Telegram sticker set 名数组）。模型覆盖只是选择，不承载credential。
   - `sampling_cooldown_ms` 默认 2000，可全局设置并由单 bot 覆盖；必须有限且 `>=0`，0 关闭概率冷却。它只影响 probability routing，mention/reply/name 不会被静默吞掉。
   - `telegram_admins`：Telegram群内控制白名单，接受正整数user id或规范化`@username`；推荐固定numeric id。缺省/空数组会拒绝所有`compact/set/reset`，但不影响公开`help/bots/status`。
-- `.env`（`key: value` 冒号格式）：只放 secret——bot tokens、配置引用的provider API keys、`tinyfish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）。只有至少一个bot启用`tools.search`时才强制要求对应TinyFish key；首配默认关闭search，可在补key后编辑配置开启。
+- `.env`（`key: value` 冒号格式）：只放项目拥有的secret——bot tokens、`tinyfish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）。LLM credential由Pi auth store独占。只有至少一个bot启用`tools.search`时才强制要求对应TinyFish key；首配默认关闭search，可在补key后编辑配置开启。
 - 改配置后重启 daemon 生效（无热重载）；本机 persona 除公开模板外默认被 Git 忽略。
 - 一份配置/daemon只对应一个`group_peer_id`。同一checkout的`data/`、pid、socket与DB是共享deployment资源，不能只换`bots_config`并行跑第二个群；多群当前必须使用彼此隔离的工作目录与data目录，不能共享DB/session/socket/pid。
 
@@ -96,7 +96,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 
 这组操作会调用真实provider与Telegram，可能产生费用/群消息；默认测试不会执行。准备一个只用于验收的bot id（下例为`C`）后逐项记录结果：
 
-1. 在`.env`加入C的Telegram token；在配置追加C、独立persona与`routing_p: 0`。若provider不同，同时显式给`provider`、`model`、`api_key_env`。
+1. 在`.env`加入C的Telegram token；在配置追加C、独立persona与`routing_p: 0`。若选择不同Pi provider，同时显式给`provider`与`model`，并先在Pi完成对应登录。
 2. `bun run restart`，确认日志出现C的`getMe` identity及`provider/model`，且A/B/C都只有一个poller，没有409。
 3. `bun run scripts/smoke-pi.ts --bot C`，确认当前配置的Pi provider/model完成一次headless调用。
 4. `bun run scripts/e2e-agent.ts --bot C`，确认真实群出现C的run/send结果；需要compaction验收时再运行`bun run scripts/e2e-compaction-manual.ts --bot C`。
@@ -107,7 +107,8 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 
 ## 故障排查
 
-- `/tg config` 报daemon not ready：已通过production loader的文件会保留。先执行`/tg status-daemon`，查看`data/daemon.log`中的脱敏诊断，修正credential/network后执行`/tg restart`；不要反复覆盖配置。
+- `/tg config` 报Pi model not ready：尚未写文件；退出向导，用Pi `/login`、`/model`修复后重试。
+- `/tg config` 报daemon not ready：已通过production loader的文件会保留。先执行`/tg status-daemon`，查看`data/daemon.log`中的脱敏诊断，修正Telegram/network后执行`/tg restart`；不要反复覆盖配置。
 - `status` 报duplicate/orphan project daemon：运行`restart`；它只处理同仓库真实daemon entry并等待全部退出，避免Telegram long poll 409。
 - malformed pid file与socket同时存在：controller会拒绝猜测；先检查`data/daemon.pid`、`data/daemon.sock`与`ps`，不要手工signal未经身份确认的PID。
 - 面板无数据：尚无 llm_runs（bot 从未被触发）

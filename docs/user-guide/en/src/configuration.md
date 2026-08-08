@@ -6,8 +6,8 @@
 
 | File | Contents | Commit it? |
 | --- | --- | --- |
-| `telegram.config.ts` | Group, bots, provider/model, environment keys, routing, tools | No |
-| `.env` | Telegram/provider/TinyFish tokens and router secret | No |
+| `telegram.config.ts` | Group, bots, optional Pi model selection, routing, tools | No |
+| `.env` | Telegram/TinyFish tokens and router secret | No |
 | `personas/*.local.md` | Real deployment personas | No |
 | `telegram.config.example.ts` | Public typed schema example | Yes |
 | `personas/template.*.md` | Public generic persona templates | Yes |
@@ -16,7 +16,6 @@
 
 ```text
 telegram_bot_token: 123456:REPLACE_WITH_BOTFATHER_TOKEN
-llm_api_key: REPLACE_WITH_PROVIDER_KEY
 router_secret: REPLACE_WITH_RANDOM_LOCAL_SECRET
 ```
 
@@ -27,9 +26,6 @@ import { defineConfig } from "./src/config-schema.ts";
 
 export default defineConfig({
   group_peer_id: 1234567890,
-  provider: "deepseek",
-  model: "deepseek-v4-flash",
-  api_key_env: "llm_api_key",
   bots: [{
     id: "friend",
     name: "Mochi",
@@ -64,11 +60,11 @@ See the repository's `telegram.config.example.ts` for annotated advanced default
 
 `routing_p: 0` disables only probability sampling. Mentions, direct replies, and the configured name remain explicit triggers. The sum of every bot's `routing_p` must be `<= 1`, and configuration order defines deterministic probability-bucket order.
 
-Each bot has an isolated Telegram poller, agent session, state, provider runtime, and telemetry. Bots share only the target group and canonical SQLite history.
+Each bot has an isolated Telegram poller, agent session, model selection, state, and telemetry. Bots share one Pi model runtime/auth snapshot plus the target group and canonical SQLite history.
 
-## Provider and tool overrides
+## Pi model and tool overrides
 
-Top-level `provider`, `model`, and `api_key_env` are deployment defaults. A bot may override them. Switching to a different provider requires all three fields explicitly, preventing credential crossover. A bot using the same provider may override only `api_key_env`.
+When top-level model fields are omitted, every bot inherits Pi's merged default provider, model, and thinking level. Advanced deployments may set top-level or per-bot `provider` and `model` to select another catalog entry; switching provider requires both fields. `reasoning_effort` is also an optional selection override. Authentication always comes from Pi, never this configuration or `.env`. After changing Pi login/default-model settings, perform a controlled restart.
 
 `tools` controls:
 
@@ -76,7 +72,7 @@ Top-level `provider`, `model`, and `api_key_env` are deployment defaults. A bot 
 - `search`: requires the TinyFish key selected by `tinyfish_key_env` in `.env`;
 - `run_js`: constrained deterministic computation.
 
-The first-run wizard disables search. Add the credential before enabling it, and never put the API key directly in TypeScript.
+The first-run wizard disables search. Add the TinyFish credential to `.env` before enabling it; it is unrelated to Pi model authentication.
 
 ## Routing and administrative commands
 

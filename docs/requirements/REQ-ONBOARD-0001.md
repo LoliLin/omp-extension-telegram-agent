@@ -45,22 +45,22 @@
 - **R1 — 可移植启动：** 项目依赖必须从可获取的版本化来源安装，不能要求 `../pi` sibling。新 clone 在已安装 Bun 的前提下运行 `bun run pi` 即可完成必要的幂等依赖准备并启动项目 Pi；显式 `bun install --frozen-lockfile` 仍可作为 CI / 排障路径。
 - **R2 — 无配置也能进入向导：** `/tg config` 必须在 `telegram.config.ts`、legacy JSON、`.env` 或 persona 不存在 / 无效时仍出现在帮助和补全中；它使用 Pi 原生 dialog API，不要求 daemon 已启动，也不进入 provider context。
 - **R3 — 可表达的本机配置：** 首选 ignored `telegram.config.ts`，通过 tracked `defineConfig` helper 提供 schema 类型、默认值说明和注释；example 不含 secret。legacy `bots.config.json` 继续可加载并给出迁移入口，`bots_config` override 明确支持的扩展名。Node/Pi 与 Bun 对同一文件解析结果必须一致。
-- **R4 — 最小首配：** 首次向导收集 deployment group、provider/model/auth env、一个 Telegram bot 的 id/name/token 和 persona template 选择；高级 routing/tools/sticker/compaction 使用有注释的明确默认，可在完成后编辑 config 或重跑向导。
-- **R5 — 安全、原子、可取消：** secret 只写 ignored `.env`，config 只引用 env key；persona 写 ignored deployment 文件。所有目标先在内存中校验，再以同目录临时文件 + rename 原子落盘。取消、validation failure 或写入失败不能留下半份配置；已有 config 默认不覆盖，重跑提供“验证现有 / 用 Pi editor 编辑原文 / 备份后替换”，不得无损承诺无法兑现的自动 merge。
-- **R6 — 完成即就绪：** 向导写入后必须使用生产 loader 做最终校验；成功后通过既有受控进程路径启动 / 重启 daemon，并恢复或建立 all-bots feed。网络 / credential readiness 失败时保留已验证文件，给出可执行诊断，不打印 secret、不伪报成功。
+- **R4 — 最小首配：** 首次向导先显示并本地预检Pi默认provider/model/thinking，再收集deployment group、一个Telegram bot的id/name/token和persona template选择；不重复询问模型认证。高级routing/tools/sticker/compaction使用有注释的明确默认，可在完成后编辑config或重跑向导。
+- **R5 — 安全、原子、可取消：** Telegram token只写ignored `.env`，config只引用其env key并继承Pi模型设置；persona写ignored deployment文件。所有目标先在内存中校验，再以同目录临时文件 + rename原子落盘。取消、validation failure或写入失败不能留下半份配置；已有config默认不覆盖，重跑提供“验证现有 / 用Pi editor编辑原文 / 备份后替换”，不得无损承诺无法兑现的自动merge。
+- **R6 — 完成即就绪：** Pi默认模型/catalog/auth预检失败必须发生在写入前并引导`/login`、`/model`；写入后必须使用生产loader做最终校验，成功后通过既有受控进程路径启动/重启daemon，并恢复或建立all-bots feed。Telegram/network readiness失败时保留已验证文件，给出可执行诊断，不打印secret、不伪报成功。
 - **R7 — 提示词隐私与模板：** 后续 HEAD 不跟踪当前真实部署 persona；`personas/` 默认忽略本地 `.md`，只通过显式 negate 规则跟踪通用中文 / English template 与说明。example config 只引用 template 或用户向导生成的 ignored 文件。代码、测试、文档不得复制实际 persona 内容。
-- **R8 — 双语 README 与用户指南：** README 在首屏提供中文 / English 对等入口、三步 quick start、真实能力和边界，并链接对应用户指南。两个指南按 installation → Telegram/provider 准备 → `/tg config` → Pi 聊天 → 日常运维 → 排障组织；命令与 schema 由代码 / examples 验证。
+- **R8 — 双语 README 与用户指南：** README 在首屏提供中文 / English 对等入口、三步 quick start、真实能力和边界，并链接对应用户指南。两个指南按 installation → Telegram/Pi model 准备 → `/tg config` → Pi 聊天 → 日常运维 → 排障组织；命令与 schema 由代码 / examples 验证。
 - **R9 — 成本设计概览：** 中英用户指南各有一篇大纲式 design 文档，用用户语言解释 deterministic routing、stable provider prefix/cache、bounded context、compaction、lazy media vision、side-channel UI/telemetry 如何减少调用和 token；每节链接 `docs/cache.md` / `docs/architecture.md` 等权威细节，不复制实现全文，也不承诺未经遥测证明的百分比。
 - **R10 — 机器维护入口：** AGENTS.md 保持短，只增加面向 agent / maintainer 的稳定链接；机器维护指南拥有开发循环、REQ/PLAN/原子签名 commit、cache invariant、验证与发布更新流程，并链接现有权威文档而不复制易漂移细节。
 - **R11 — mdBook 与 Pages：** 中文 / English 各自可用 mdBook build；仓库提供本地 build/link-check 命令和 GitHub Actions Pages workflow。workflow 固定依赖版本、最小权限、并发取消和纯静态 artifact；PR 只 build/check，不部署，默认分支成功后才部署。
-- **R12 — 友好失败语义：** 所有 onboarding 错误指出失败字段、保留了什么和下一条安全动作；token/API key 永不出现在 notification、process args、日志、test fixture、GitHub Actions output 或生成站点。
+- **R12 — 友好失败语义：** 所有onboarding错误指出失败字段、保留了什么和下一条安全动作；Telegram token永不出现在notification、process args、日志、test fixture、GitHub Actions output或生成站点，provider key根本不进入项目向导。
 
 ## 验收标准
 
 - **AC1:** 在没有 `../pi`、`node_modules`、`.env`、config 和本地 persona 的隔离 checkout 中，`bun run pi` 能启动并加载 `/tg config`；依赖 lock 可复现，package manifest 无 `file:../pi`。
 - **AC2:** extension host test 在 config loader 抛错时仍列出并 dispatch `config`；TUI fake dialog 可完整走通，取消任一步时目标文件字节不变。
 - **AC3:** `telegram.config.example.ts` 含逐字段注释并通过 typecheck；同一 fixture 经 Bun loader 与项目 Pi 使用的 Node runtime 得到等价 normalized config。legacy JSON fixture 保持通过；双 config 存在时 fail-fast 并列出两个路径。
-- **AC4:** config writer tests 覆盖 fresh write、existing-file deny、validate existing、editor 原文 round-trip、confirmed backup+replace、invalid peer/token/provider/persona、临时 rename failure 与 final `loadConfig()`；成功 secret 文件 mode 为 0600，captured stdout/notifications 不含输入 secret。
+- **AC4:** config writer tests覆盖fresh write、existing-file deny、validate existing、editor原文round-trip、confirmed backup+replace、invalid peer/bot identity/token/persona、临时rename failure与final `loadConfig()`；fresh `.env`只有Telegram token，成功secret文件mode为0600，captured stdout/notifications不含输入secret。
 - **AC5:** 成功向导经 fake process/readiness 与 fake timeline 证明 daemon ready、all-bots feed 重连；启动失败不回滚有效配置、不声称已连接，并给出 `status` / retry 指令。
 - **AC6:** `git ls-files personas` 只返回公开模板 / 说明，`git check-ignore` 能证明任意本地 persona 被忽略；`rg` 审计 examples、tests、README、book 不含当前部署 persona 文本或 credential。完成报告明确既有历史仍含旧文件。
 - **AC7:** 中文和 English README 都能在首屏到达对应 quick start / guide；fresh-user dry run 中无需阅读 `docs/architecture.md` 即可完成首配，内部开发索引退居 maintainer 入口。
@@ -72,9 +72,9 @@
 
 ## 约束
 
-- Cache impact: **NONE**。配置向导、依赖安装、文档与 persona repo hygiene 不改变既有 provider grammar；新用户选择 persona/provider 是显式配置。若实现意外修改 stable prompt/tool/message/summary bytes，必须拆出独立 cache task并 bump schema。
+- Cache impact: **NONE**。配置向导、依赖安装、文档与 persona repo hygiene 不改变既有 provider grammar；新用户选择 persona/Pi model 是显式配置。若实现意外修改 stable prompt/tool/message/summary bytes，必须拆出独立 cache task并 bump schema。
 - Token / 成本: 向导与文档不调用 LLM；runtime 每 turn 新增 0 token。design 文档只解释已有机制。
-- 兼容性: 现有 ignored `.env`、`bots.config.json`、外部 persona path、SQLite/session/data 继续有效。TS 成为新默认但不能破坏 legacy config。
+- 兼容性: 现有ignored `.env`、`bots.config.json`、外部persona path、SQLite/session/data继续有效。TS成为新默认但不能破坏legacy config；旧provider-key字段只由loader接受后丢弃。
 - 安全 / 隐私: secret 只在进程内存和 mode 0600 的 ignored file；任何测试使用明显无效 fixture。TS config 是受信本地代码并必须在用户文档警示；真实 persona 从 HEAD 移除但不暗示历史已净化。
 - 运维: 向导复用 REQ-OPS-0002 的串行 control/readiness，不启动第二个 daemon，不删除 data。
 - 文档: 用户文档与 maintainer 文档分层；一个事实仍只有一个权威来源。
@@ -85,7 +85,7 @@
 - 用户按 Esc 取消 token 后续步骤：`.env`、TypeScript config、persona 都不存在或保持原字节。
 - 已有手写 TypeScript config：选择“编辑”后 Pi editor 收到原文；取消保持原字节，保存后先验证再原子替换，注释不因字段级 rewrite 丢失。
 - 同时存在 TS 与 legacy JSON：daemon / Pi 都拒绝并提示保留哪一份，不按 mtime 猜测。
-- provider credential 错误：文件通过 schema 校验但 readiness 失败；UI 指出认证阶段和重试命令，绝不回显 key。
+- Pi default/auth错误：向导在写文件前以固定category失败，UI引导`/login`与`/model`，项目不接触或回显key。
 - private persona 位于 `~/my-bot/persona.md`：合法且不会因仓库提交被带走。
 - Pages PR 来自 fork：不需要 deployment secret，只执行 build/link check。
 

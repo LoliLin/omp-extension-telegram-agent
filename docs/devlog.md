@@ -628,3 +628,11 @@
 - runtime、OAuth refresh、provider auth/timeout/request与compaction失败统一折叠为固定category；上游body、credential对象和原始错误文本不进入DB或日志。隔离Pi fixture同时覆盖stored API-key和OAuth但断言/输出从不包含值。
 - config/runtime/daemon/flush/Tg targeted 99 pass / 979 assertions；全量352 pass / 4732 assertions、typecheck与cache v5 golden通过。当前deployment无provider调用的只读preflight确认A/B均解析为DeepSeek medium + stored auth。
 - Cache impact: **NONE**——模型选择/认证与runtime生命周期发生在请求边界外；system/tool/message/summary grammar、context epoch和同模型provider-visible bytes不变，每turn新增0 token/call。
+
+## 2026-08-08 (72) — 将首配收口为Pi模型预检与Telegram-only写入
+
+- `/tg config` fresh/replace流程在首个输入dialog前读取Pi合并默认模型并用Pi catalog/auth status做零provider-call预检；成功只显示脱敏`provider/model:thinking`，失败只显示固定category并引导`/login`、`/model`，writer与restart均不执行。
+- `FirstRunDraft`、校验器、renderer与env writer删除provider/model/key输入。生成的typed config省略chat模型字段并继承Pi defaults；fresh `.env`精确只有Telegram token，取消7个dialog中的任一点仍保持三类目标不存在或逐字节不变。
+- canonical TS/legacy examples与中英README、安装、配置、排障、daemon runbook统一为Pi登录/模型选择→Telegram向导路径。机械审计锁定旧provider-key字段只允许留在`src/config.ts`明确legacy loader及历史REQ/测试，不得回到onboarding、examples或用户步骤。
+- onboarding/config/docs/cache targeted 95 pass / 772 assertions；全量355 pass / 4713 assertions、typecheck、cache v5 golden通过。固定mdBook 0.5.4检查18个Markdown/98 links与生成21个HTML/608 links全部通过。
+- Cache impact: **NONE**——只改本地配置输入/文件与用户文档；system/tool/message/summary bytes、context epoch、provider调用和每turn token均不变。向导preflight只读本地metadata，新增0 LLM call。

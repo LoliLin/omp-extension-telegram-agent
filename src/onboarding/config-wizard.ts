@@ -1,6 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { ConfigError, defaultConfigPath, parseEnvFile } from "../config.ts";
+import {
+	createSharedModelRuntime,
+	PiModelConfigurationError,
+	type PiModelConfigurationCategory,
+} from "../agent/model-runtime.ts";
+import {
+	loadPiModelDefaults,
+	PiSettingsConfigurationError,
+	type PiModelDefaults,
+} from "../agent/model-settings.ts";
 import { redactDaemonLog } from "../daemon/control.ts";
 import {
 	OnboardingValidationError,
@@ -38,6 +49,28 @@ export interface DaemonReadiness {
 export interface ConfigWizardDependencies {
 	rootDir: string;
 	restartDaemon(): Promise<DaemonReadiness>;
+	/** Test seam; production resolves and authenticates Pi's merged default model locally. */
+	preflightPiModel?: PiModelPreflight;
+}
+
+export interface PiModelSelection {
+	provider: string;
+	model: string;
+	thinkingLevel: ThinkingLevel;
+}
+
+export type PiModelPreflight = (rootDir: string) => Promise<PiModelSelection>;
+
+export type PiOnboardingPreflightCategory =
+	| "invalid_settings"
+	| "missing_default"
+	| PiModelConfigurationCategory;
+
+export class PiOnboardingPreflightError extends Error {
+	constructor(readonly category: PiOnboardingPreflightCategory) {
+		super(`Pi model preflight failed (${category})`);
+		this.name = "PiOnboardingPreflightError";
+	}
 }
 
 export type ConfigWizardOutcome = "cancelled" | "validated" | "ready" | "configured_not_ready" | "failed";
@@ -146,6 +179,19 @@ export async function runNativeConfigWizard(
 		mode = "backup-replace";
 	}
 
+	let piModel: PiModelSelection;
+	try {
+		piModel = await (dependencies.preflightPiModel ?? preflightPiDefaultModel)(rootDir);
+	} catch (error) {
+		const category = error instanceof PiOnboardingPreflightError ? error.category : "runtime_unavailable";
+		ui.notify(
+			`Pi model is not ready (${category}). No files were changed. Exit this flow, use Pi /login and /model, then run /tg config again.`,
+			"error",
+		);
+		return { outcome: "failed" };
+	}
+	ui.notify(`Pi model ready: ${formatPiModel(piModel)}. Authentication remains in Pi.`, "info");
+
 	let collected: FirstRunDraft | null;
 	try {
 		collected = await collectFirstRunDraft(ui, rootDir);
@@ -158,7 +204,7 @@ export async function runNativeConfigWizard(
 		"Write Telegram configuration?",
 		[
 			`Bot: ${collected.bot.id} (${collected.bot.name})`,
-			`Model: ${collected.provider}/${collected.model}`,
+			`Pi model: ${formatPiModel(piModel)}`,
 			"Files: .env, telegram.config.ts, private persona",
 			mode === "backup-replace" ? "Existing local files will be backed up first." : "No existing local files will be overwritten.",
 		].join("\n"),
@@ -191,14 +237,6 @@ async function collectFirstRunDraft(ui: ConfigWizardUI, rootDir: string): Promis
 	}
 	const groupPeerId = await input(ui, "Telegram supergroup id", "-1001234567890");
 	if (groupPeerId == null) return null;
-	const provider = await input(ui, "LLM provider id", "deepseek", "deepseek");
-	if (provider == null) return null;
-	const model = await input(ui, "LLM model id", provider === "deepseek" ? "deepseek-v4-flash" : "provider model id");
-	if (model == null) return null;
-	const apiKeyEnv = await input(ui, "Name for the provider key in .env", "llm_api_key", "llm_api_key");
-	if (apiKeyEnv == null) return null;
-	const providerApiKey = await input(ui, "Provider API key (Pi native input is visible)", "paste the key; it is written only to ignored .env");
-	if (providerApiKey == null) return null;
 	const botId = await input(ui, "Local bot id", "friend", "friend");
 	if (botId == null) return null;
 	const botName = await input(ui, "Bot display name", "Mochi");
@@ -213,11 +251,34 @@ async function collectFirstRunDraft(ui: ConfigWizardUI, rootDir: string): Promis
 		: personaText.replace("- Name: choose the public display name.", `- Name: ${botName}`);
 	return {
 		groupPeerId,
-		provider,
-		model,
-		apiKeyEnv,
-		providerApiKey,
 		bot: { id: botId, name: botName, tokenEnv, token, personaText },
+	};
+}
+
+/** Local-only catalog/auth validation; it never sends a provider request. */
+export async function preflightPiDefaultModel(
+	rootDir: string,
+	readDefaults: (root: string) => PiModelDefaults = loadPiModelDefaults,
+	preflightModels: (bots: readonly { provider: string; model: string }[]) => Promise<unknown> = createSharedModelRuntime,
+): Promise<PiModelSelection> {
+	let defaults: PiModelDefaults;
+	try {
+		defaults = readDefaults(rootDir);
+	} catch (error) {
+		if (error instanceof PiSettingsConfigurationError) throw new PiOnboardingPreflightError("invalid_settings");
+		throw new PiOnboardingPreflightError("runtime_unavailable");
+	}
+	if (!defaults.provider || !defaults.model) throw new PiOnboardingPreflightError("missing_default");
+	try {
+		await preflightModels([{ provider: defaults.provider, model: defaults.model }]);
+	} catch (error) {
+		if (error instanceof PiModelConfigurationError) throw new PiOnboardingPreflightError(error.category);
+		throw new PiOnboardingPreflightError("runtime_unavailable");
+	}
+	return {
+		provider: defaults.provider,
+		model: defaults.model,
+		thinkingLevel: defaults.thinkingLevel,
 	};
 }
 
@@ -265,6 +326,11 @@ function cancelled(ui: ConfigWizardUI): ConfigWizardResult {
 function formatSummary(prefix: string, summary: DeploymentSummary): string {
 	const bots = summary.bots.map((bot) => `${bot.id} (${bot.name}, ${bot.provider}/${bot.model})`).join(", ");
 	return `${prefix}: ${bots}.`;
+}
+
+function formatPiModel(selection: PiModelSelection): string {
+	const safe = (value: string) => value.replace(/[\u0000-\u001f\u007f]/g, "?").slice(0, 160);
+	return `${safe(selection.provider)}/${safe(selection.model)}:${selection.thinkingLevel}`;
 }
 
 function formatSafeFailure(prefix: string, error: unknown, suffix: string): string {
