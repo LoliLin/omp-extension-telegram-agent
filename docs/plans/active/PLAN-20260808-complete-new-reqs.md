@@ -33,7 +33,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10b** — 增加 cache-write migration/telemetry、跨重启 lifetime 回归与完整 `/tg status`；validates: UI-0009 AC1–AC6；commit: telemetry completeness
 - [x] **T10c** — 调查并正式化用户追加的配置名称强制回复、统一 terminating send、Telegram admin commands 与用户视角 README；validates: 新 notes 可追溯且边界可验收；commit: docs/research only
 - [x] **T10d** — 锁定“我叫小雨”在 p=0/busy/cooldown 下的 name explicit route；validates: ROUTE-0001 AC6；commit: routing regression
-- [ ] **T10e** — 将公开回复用法收口到唯一 send schema，清理 persona/protocol 重复，使用 terminating 最小 ACK 并修正 tools hash/cache epoch；validates: SEND-0001 AC1–AC7；commit: agent send contract
+- [x] **T10e** — 将公开回复用法收口到唯一 send schema，清理 persona/protocol 重复，使用 terminating 最小 ACK 并修正 tools hash/cache epoch；validates: SEND-0001 AC1–AC7；commit: agent send contract
 - [ ] **T10f** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
 - [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification

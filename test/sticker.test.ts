@@ -9,6 +9,7 @@ import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BotRuntime } from "../src/agent/runtime.ts";
+import { SEND_SUCCESS_ACK } from "../src/agent/tools.ts";
 import { ensureStickerCatalog, stickerCatalogBlock, STICKER_CATALOG_MAX } from "../src/media/sticker-catalog.ts";
 import type { AppConfig, BotConfig } from "../src/config.ts";
 import type { MessageRow } from "../src/agent/serialize.ts";
@@ -179,6 +180,46 @@ describe("send from catalog (R3)", () => {
 		const result = await (rt as any).executeSend({ sticker: "s7" });
 		expect(sentSticker as string | null).toBe("fid-c1");
 		expect(result.terminate).toBe(true);
+	});
+
+	test("one send combines message, sticker, and reply with a terminating minimal ACK", async () => {
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-combined', 'sticker', 'cats', '😺', 's8')").run();
+		db.query("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', 'fid-combined', 'uq-combined')").run();
+		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never);
+		const calls: Array<{ kind: string; chatId: number; payload: string; replyTo?: number }> = [];
+		(rt as any).api = {
+			sendMessage: async (chatId: number, text: string, replyTo?: number) => {
+				calls.push({ kind: "message", chatId, payload: text, replyTo });
+				return {
+					chat: { id: CHAT }, message_id: 901, from: { id: 1, is_bot: true, first_name: "小雪" },
+					date: 1754600000, text,
+				};
+			},
+			sendSticker: async (chatId: number, fileId: string, replyTo?: number) => {
+				calls.push({ kind: "sticker", chatId, payload: fileId, replyTo });
+				return {
+					chat: { id: CHAT }, message_id: 902, from: { id: 1, is_bot: true, first_name: "小雪" },
+					date: 1754600001,
+				};
+			},
+		};
+		(rt as any).exposed = new Set([42]);
+
+		const result = await (rt as any).executeSend({ message: "收到", sticker: "s8", reply_to: 42 });
+
+		expect(calls).toEqual([
+			{ kind: "message", chatId: CHAT, payload: "收到", replyTo: 42 },
+			{ kind: "sticker", chatId: CHAT, payload: "fid-combined", replyTo: 42 },
+		]);
+		expect(result).toEqual({
+			content: [{ type: "text", text: SEND_SUCCESS_ACK }],
+			details: { sent: [901, 902] },
+			terminate: true,
+		});
+		expect(db.query("SELECT message_id FROM messages ORDER BY message_id").all()).toEqual([
+			{ message_id: 901 },
+			{ message_id: 902 },
+		]);
 	});
 
 	test("unknown id still errors before any network call", async () => {

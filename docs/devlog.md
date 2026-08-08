@@ -341,3 +341,12 @@
 - 同一 decision 在 busy runtime 映射为 explicit coalesce，在 cooldown runtime 映射为 explicit started；与真实 BotRuntime 的 explicit coalesce/cooldown bypass fake-clock test 组成完整边界证据。
 - routing/flush/config/cache 共 46 tests、2564 assertions 通过；`bun run check` 与 diff check 通过。算法无需修改，新增测试防未来调度重构把 name 错归 probability。
 - Cache impact: **NONE**——只补回归与事实文档，router provider payload、system/tool/message grammar、run 数和每 turn token 均不变。
+
+## 2026-08-08 (36) — 收口唯一 terminating send 工具契约
+
+- `send` 仍是唯一公开 Telegram tool，但 schema 现在自己完整说明 message/sticker/reply_to 的一次组合、可见引用、候选 sticker、显式点名、最终调用与成功终止；根 AGENTS 新增单一权威规则，未来 agent 不得把工具参数/示例复制回 persona/system protocol。
+- 两个 persona 删除重复 send 教程与冲突的“即使点名也沉默”规则，合计缩短 8,859 bytes（小雪 4,472；小雨 4,387）；共享 protocol 只保留显式/概率回应策略。工具描述增加后稳定 prefix 仍净缩短。
+- 成功结果从动态 `ok sent #id...` 改为固定 `ok`，sent ids 只留 details/DB/event；Pi agent-loop harness 证明 `terminate:true` 后 providerCalls=1、turn_end=1，没有 follow-up completion。component test 证明一次调用把文字、sticker、reply 传给两次 Bot API 请求且引用一致。
+- `toolsHash` 与 per-bot filtered hash 现在覆盖 name + description + parameters + order；description-only drift 有回归。`CACHE_SCHEMA_VERSION` 3→4，golden 更新为 system A `6ad7407d617b`、B `4ac8de55e029`、tools `592f789e80f6`、catalog `c7014c404819`。
+- targeted send/sticker/flush/cache 34 tests、262 assertions 与 `bun run check` 通过；真实群文字/纯 sticker/组合 reply smoke 留 T14。
+- Cache impact: **INTENTIONAL**——这是 tool/persona/system 稳定 prefix 的显式修订；daemon 下次受控重启开新 epoch。每次成功 send 的动态结果 token 降为固定一 token，且不增加 provider request。

@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 3; // v3: sticker catalog exposes only entries sendable by the current bot
+export const CACHE_SCHEMA_VERSION = 4; // v4: send usage lives only in its complete tool schema; persona/protocol duplicates removed
 
 // Fixed shared protocol block, appended after the persona. Never reorder.
 const PROTOCOL = `
@@ -22,8 +22,8 @@ const PROTOCOL = `
 
 规则：
 
-- 你可以保持沉默：不调用 send，本轮就不会有任何内容进群。你的普通输出只有本地观察者看得到
-- 想发言就在本轮调用一次 send({message?, reply_to?, sticker?})。reply_to 只能使用上下文中真实出现过的 # 数字 id
+- 未被点名的概率插话可以按人设保持沉默
+- 人类明确 @你、回复你或使用你的配置名称点名时必须回应，不受概率插话的沉默或防刷屏启发式影响
 - 群里还有另一个 AI bot（你的姐妹），她的消息你能看到，但不要替她说话，也不要回复她的消息
 `;
 

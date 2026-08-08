@@ -53,7 +53,7 @@ REQ-CONF-0001 已把核心 daemon 从 A/B 数组重构为任意 bot 配置，但
 - **AC1:** 仓库生产代码的身份逻辑审计无 A/B/`bots[0]` 特判；示例、测试 fixture 与历史兼容注释允许存在但需标注。
 - **AC2:** 1、2、3 bot fixture 从配置加载到 daemon composition/IPC stats 全链测试通过；每个 bot 有独立 poller/runtime/state。
 - **AC3:** e2e scripts 对 `--bot C` 生效，对未知 id fail-fast 并列出有效 id。
-- **AC4:** 当前双 bot deployment 迁移前后 system prompt、tool schema、message serialization、routing 与 DB 行为不变，cache golden 通过。
+- **AC4:** 以 REQ-SEND-0001 的 cache schema v4 为既有 deployment baseline；provider/config 泛型化前后 system prompt、tool schema、message serialization、routing 与 DB 行为不变，cache golden 通过。
 - **AC5:** 至少两个 provider/model 配置 fixture 能完成 model lookup/auth routing；真实 provider e2e 可 env gate，不进入默认 `bun test`。
 - **AC6:** project/package/runbook 新读者无需知道小雪/小雨即可创建一个新 bot；example 仍可复制运行。
 - **AC7:** `bun test`、`bun run check` 与 opt-in 第三 bot smoke 清单通过或明确记录未验证项。

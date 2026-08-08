@@ -1,7 +1,8 @@
 // Cache regression test: golden hashes lock the cache-visible protocol (docs/cache.md).
 // If any of these fail, a change altered the provider-visible prefix:
-// - system prompt (persona + protocol block)  => bump CACHE_SCHEMA_VERSION, new epoch
-// - message serialization grammar             => same
+// - system prompt (persona + protocol block)          => bump CACHE_SCHEMA_VERSION, new epoch
+// - tool name/description/parameter schema + order    => same
+// - message serialization grammar                     => same
 // UI-only changes must NOT affect these hashes.
 
 import { describe, expect, test } from "bun:test";
@@ -18,13 +19,13 @@ import { toolsHash } from "../src/agent/tools.ts";
 import { stickerCatalogBlock } from "../src/media/sticker-catalog.ts";
 
 const GOLDEN = {
-	schemaVersion: 3,
-	systemA: "c2d68946a3a6",
-	systemB: "e2d094446af3",
+	schemaVersion: 4,
+	systemA: "6ad7407d617b",
+	systemB: "4ac8de55e029",
 	serialize: "68a17d6e5c05",
-	tools: "7b1983d95e25",
+	tools: "592f789e80f6",
 	compactionPrompt: "045a5241fdd7",
-	systemAWithCatalog: "c807b394991f",
+	systemAWithCatalog: "c7014c404819",
 };
 
 test("CACHE_SCHEMA_VERSION unchanged", () => {
@@ -52,7 +53,7 @@ test("message serialization grammar stable", () => {
 	expect(sha256Short(out)).toBe(GOLDEN.serialize);
 });
 
-test("tool schema + order stable (REQ-TEST-0001 R2)", () => {
+test("complete provider tool protocol + order stable (REQ-TEST-0001 R2)", () => {
 	expect(toolsHash()).toBe(GOLDEN.tools);
 });
 

@@ -82,7 +82,8 @@ source: `packages/ai/src/api/openai-completions.ts` `convertMessages`（:1046-13
 - `execute()` 返回 `{content, details, terminate: true}` → tool result **仍写入 context 并持久化**，但跳过后续 follow-up LLM 调用，run 直接结束
 - 前提：同批次**每一个** finalized 结果都 `terminate: true`（并行多 tool 时注意）
 - 报错必须 throw；返回任何值都不会标 isError
-- **结论：send tool execute → Telegram API → 存 DB → 返回 `{content: "ok sent #id", terminate: true}`，发送后零额外 provider request**
+- 空 content 经 OpenAI adapter 会变成 `(no tool output)`，反而比固定 `ok` 长；tool result 的 `details` 不进入 provider payload
+- **结论：send tool execute → Telegram API → 存 DB → 返回 `{content: "ok", details:{sent}, terminate:true}`；发送后零额外 provider request，后续 context 不含动态 sent id**
 
 ## 9. Pi compaction 的真实行为
 

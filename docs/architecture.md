@@ -51,7 +51,7 @@
 - 触发/flush 是 BotRuntime 本地持有的串行状态机（REQ-AGENT-0001）：`idle →(trigger) flushing →(drain) idle`；`flushing` 在进入 flush 时同步置位（不等 SDK 事件），在途期间的 trigger 只合并为 `pendingTrigger`，flush 循环结束后统一再跑一轮（burst 合并）；flush 全链路 try/catch，失败只落 agent_events `error`（stage=flush），消息保持未曝光由后续 trigger 重试；消息只在 `sendUserMessage` 成功后 markExposed；daemon shutdown 时 `stop()` 有界（30s）等待在途 flush 再 dispose
 - 唤醒：`session.sendUserMessage(serialized)`，一次 flush 一批（burst 由 pendingTrigger 合并，不走 SDK 队列）
 - 群消息序列化为固定紧凑 grammar（见 docs/cache.md），append-only
-- tools：`send`（terminate:true）、`search`、`run_js`（Phase 6 起）；禁用 coding agent 默认文件工具
+- tools 固定为 `send`、`search`、`run_js`（Phase 6 起），禁用 coding agent 默认文件工具。`src/agent/tools.ts` 是 provider-facing 用法唯一权威；persona/protocol 不复制参数。`send(message?,sticker?,reply_to?)` 是唯一公开通道，成功返回固定最小 ACK + `terminate:true`，sent ids 只留本地 details/event。
 - local assistant text（未调 send）→ agent_events + TUI，不进群
 
 ## run_js sandbox 威胁模型（REQ-SEC-0001）
@@ -109,7 +109,7 @@
 
 ## Provider context flow
 
-- 稳定 prefix：system prompt（persona + 群聊规则 + 消息 grammar 说明 + 格式化规则）+ 固定顺序 tool schema
+- 稳定 prefix：system prompt（persona + 群聊规则 + 消息 grammar 说明 + 格式化规则）+ 固定顺序 tool name/description/parameter schema
 - 动态 suffix：新群消息 / reply 依赖 / vision 结果 / sticker candidates / tool outputs，只追加
 - exposure tracking 保证已出现内容不重复序列化
 - compaction → 新 Context Epoch（明确的 cache boundary）

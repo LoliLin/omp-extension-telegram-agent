@@ -1,6 +1,6 @@
 # REQ-SEND-0001: 统一并内聚 Telegram 公开发送工具
 
-- **Status:** Approved（2026-08-08 已调查，未实现）
+- **Status:** Implemented（2026-08-08；targeted harness/component/cache/check 已验证，真实群 smoke 留总验收）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：回复、文字、sticker 必须合并为一个工具；用法放进工具 schema，不在人设 AGENTS.md 重复；成功后不再调用模型，以 overall cost 为第一目标
 - **依赖:** REQ-AGENT-0001、REQ-STICKER-0001、REQ-ROUTE-0001

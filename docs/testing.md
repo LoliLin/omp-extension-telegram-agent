@@ -43,7 +43,7 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | GPG 签名提交 | ✅ | 2026-08-07 验证 good signature |
 | Bun × Pi SDK 兼容性 smoke | ✅ | 2026-08-07 smoke-pi.ts 真实调用成功 |
 | Telegram ingestion/dedupe/restart | ✅ | 2026-08-07 bun test 12/12 + 真实群 e2e + restart 全通过 |
-| send terminating | ✅ | 2026-08-07 e2e：成功 send 后无额外 provider 请求 |
+| unified terminating send（REQ-SEND-0001） | ✅ unit / ⏳ real smoke | 2026-08-08 `test/send-tool.test.ts` + sticker/flush/cache 34 targeted：唯一 message/sticker/reply_to schema、persona/protocol 去重、description-only hash drift、一次组合网络调用与本地 details、固定 `ok` result；Pi agent-loop harness 证明 providerCalls=1/turn_end=1。cache schema v4 golden/check 通过；真实群三种组合留 T14。 |
 | local assistant 不进群 | ✅ | e2e：assistant_text/thinking 只进 agent_events |
 | Pi 原生 Telegram attach/detach | ✅ | 2026-08-08 项目 Pi 真实 fullscreen TTY：`/tg attach A` 显示 #19061–#19063，`/tg more` prepend 到 #18961，`/tg detach` 断开后内容保留；退出 Pi 不影响 daemon |
 | deterministic routing property tests | ✅ | 2026-08-07 33/33 + 真实群双 bot 实况 |

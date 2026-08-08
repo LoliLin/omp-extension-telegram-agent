@@ -50,7 +50,7 @@
 
 - 小雪（Bot A，token env `teleram_hastuyuki_bot`）：温柔软糯猫娘，暖群夸夸担当，人设全文在 `personas/xiaoxue.md`
 - 小雨（Bot B，token env `telegram_kosamerobot`）：清冷毒舌猫娘，技术担当，人设全文在 `personas/xiaoyu.md`
-- 原始人设文本来自 docs/requirement.md 末尾，抽取后适配本项目 send tool schema
+- 原始人设文本来自 docs/requirement.md 末尾；persona 只保留人格与回应策略，send 的参数/调用/终止语义以 `src/agent/tools.ts` 为唯一权威
 
 ## Scope
 

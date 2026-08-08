@@ -61,6 +61,7 @@
 
 - 满足验收标准的最小改动；复用现有抽象，不过早泛化。
 - **任何功能必须评估 cache hit 率与 token 成本影响**：确定性内容进稳定 prefix 而非动态 suffix；能用确定性代码解决的不花 LLM token；每 turn 新增 token 有界（细则见 `docs/engineering/development-guide.md` 第三节）。
+- Provider-facing 工具的参数、调用方法、错误/终止语义只在 `src/agent/tools.ts` 的 tool description / parameter schema 维护；persona 与共享 system protocol 只描述环境和行为，不复制工具参数表或调用示例。改 tool description 也属于 cache-visible protocol，必须 bump schema 并更新 golden。
 - 行为变化与机械重构尽量分开提交。
 - 行为变化加 / 更新测试；能确定性复现的 bug 必须有回归测试。
 - Agent / LLM 行为测可观察的轨迹与结果，不断言 prompt 字符串。

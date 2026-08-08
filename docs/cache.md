@@ -2,7 +2,7 @@
 
 ## Invariants
 
-1. 稳定 prefix 区域（变化频率极低）：system prompt（persona + 群聊行为规则 + 消息 grammar 说明 + 格式化规则）、tool schema、tool 顺序
+1. 稳定 prefix 区域（变化频率极低）：system prompt（persona + 群聊行为规则 + 消息 grammar 说明 + 格式化规则）、tool name/description/parameter schema 与顺序
 2. 动态内容只以新 suffix 追加，永不改写已存在的 prefix
 3. 历史消息序列化 grammar 固定；已序列化过的消息内容永不变化
 4. compaction 是唯一的 cache boundary（新 Context Epoch）
@@ -10,9 +10,9 @@
 
 ## CACHE_SCHEMA_VERSION
 
-当前：**3**（v3：固定 sticker 目录按当前 bot 的 `media_file_ids` 可发送性过滤，REQ-STICKER-0002）
+当前：**4**（v4：send 用法收口到完整 tool schema，persona/protocol 去重，tools hash 覆盖 description，REQ-SEND-0001）
 
-cache-visible protocol：system prompt shape、persona serialization、tool schema、tool order、消息序列化 grammar、compaction summary grammar、**固定 sticker 目录块**。
+cache-visible protocol：system prompt shape、persona serialization、tool name/description/parameter schema/order、消息序列化 grammar、compaction summary grammar、**固定 sticker 目录块**。
 
 修改任一 → bump version → 新 context epoch（daemon 启动时检测 daemon_state.cache_schema_version 不匹配即全员 epoch+1，一次性的 cache reset，而非每轮莫名 miss）。
 
@@ -27,6 +27,13 @@ tools: [{type:"function", function:{name, description, parameters}}] 固定顺�
 ```
 
 DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`prompt_cache_hit_tokens`）。
+
+## Tool 提示词归属（REQ-SEND-0001）
+
+- `src/agent/tools.ts` 是 provider-facing 工具用法的唯一权威：参数、组合方式、可见 id、错误与终止语义都放 tool/parameter description；persona 与共享 protocol 只保留环境、消息 grammar、人格与何时回应。
+- `send` 是唯一公开 Telegram 通道，`message`/`sticker`/`reply_to` 在一次最终 tool call 内组合。成功 result 是固定 `ok` + `terminate:true`：Pi 仍持久化协议要求的 toolResult，但不再做 follow-up provider request；动态 sent ids 只在 provider 不读取的 details/DB/event。
+- `toolsHash()` 覆盖 provider 实际收到的 name + description + parameters + order；label/execute 是本地字段。per-bot tool filter 使用同一 hash grammar。
+- v4 两个人设文件合计减少 8,859 bytes（小雪 4,472；小雨 4,387），同时删除 shared protocol 的参数示例；tool description 虽增强，稳定 system prefix 仍显著净缩短。每个成功 send 的结果从动态 `ok sent #<id...>` 缩为固定一 token ACK。
 
 ## Sticker 目录分区（REQ-STICKER-0001）
 
@@ -79,5 +86,6 @@ bot、model、provider、timestamp、context epoch、context tokens、cache read
 - 2026-08-07 e2e-compaction：`compaction_threshold=1500` 强制两轮触发，compaction → epoch 2→3→4 持久化、exposure 重置、摘要调用成功；重启后 epoch=4 恢复
 - 2026-08-07 REQ-STICKER-0001：CACHE_SCHEMA_VERSION 1→2，固定 sticker 目录进入 system prompt（systemA/B 无目录 hash 不变、带目录新 golden 锁定）；daemon 启动检测 schema 版本变化全员开新 epoch；sticker 相关 cache 对比方法：llm_runs 里 system_hash 变化即目录变更，`analyze-context-window.ts` 按 epoch 同步模拟
 - 2026-08-08 REQ-STICKER-0002：CACHE_SCHEMA_VERSION 2→3；stable catalog 与 dynamic candidates 都按当前 bot 的 file_id mapping 过滤。合法目录的 hash 不变，已有跨 bot 泄漏行会从 prefix 消失；daemon 下次启动自动为所有 bot 开新 epoch。
-- cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=3、systemA/B hash、serialize hash、**tools hash（含顺序）、compaction summary prompt hash** 与 per-bot catalog filter 全部锁定（REQ-TEST-0001 R2 补全）；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
+- 2026-08-08 REQ-SEND-0001：CACHE_SCHEMA_VERSION 3→4；send 调用知识从 persona/protocol 收口到 tool schema、显式点名不再被 persona silence 覆盖、成功 result 固定最小 ACK、tools hash 补 description。daemon 下次受控重启为所有 bot 开新 epoch。
+- cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=4、systemA/B hash、serialize hash、**tools hash（含 description/schema/order）、compaction summary prompt hash** 与 per-bot catalog filter 全部锁定；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
 - 分析脚本（REQ-TEST-0001 R5）：llm_runs 的 epoch/compaction 列与 >30% context 回落都被视为真实 compaction 并同步模拟 context；60 runs 回放识别 3 次真实 compaction（e2e 遗留 epoch 1→4），幻影触发 0

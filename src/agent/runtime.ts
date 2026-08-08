@@ -25,7 +25,7 @@ import { insertSentMessage } from "../telegram/ingest.ts";
 import { sendTextAndPersist } from "../telegram/send.ts";
 import { serializeMessages, type MessageRow } from "./serialize.ts";
 import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT } from "./prompt.ts";
-import { TOOL_DEFS, toolsHash, type SendParams } from "./tools.ts";
+import { successfulSendResult, TOOL_DEFS, toolProtocolHash, toolsHash, type SendParams } from "./tools.ts";
 import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
 import { ensureVision, fileIdForBot, type VisionUpdateSink } from "../media/vision.ts";
@@ -224,7 +224,7 @@ export class BotRuntime {
 		);
 		if (activeTools.length < tools.length) {
 			// telemetry hash reflects what THIS bot's provider actually sees
-			this.toolsHash = sha256Short(JSON.stringify(activeTools.map((t) => ({ name: t.name, params: t.parameters }))));
+			this.toolsHash = toolProtocolHash(activeTools);
 		}
 
 		const { session } = await createAgentSession({
@@ -426,11 +426,7 @@ export class BotRuntime {
 			this.sentMessageSink?.(m);
 		}
 		this.recordEvent("send", { reply_to: params.reply_to ?? null, sticker: params.sticker ?? null, sent: sentIds });
-		return {
-			content: [{ type: "text" as const, text: `ok sent ${sentIds.map((i) => `#${i}`).join(" ")}` }],
-			details: { sent: sentIds },
-			terminate: true,
-		};
+		return successfulSendResult(sentIds);
 	}
 
 	/** Lifecycle state used only by deterministic probability scheduling. */

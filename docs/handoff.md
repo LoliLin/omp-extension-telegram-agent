@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：ROUTE-0001 精确 name regression 已完成；下一步实现 SEND-0001 的 tool-local/terminating contract，再做 CMD-0001 Telegram control plane。
+2026-08-08：SEND-0001 已实现并完成 cache schema 3→4；下一步实现 CMD-0001 Telegram control plane，再继续平台 provider/config。
 
 ## 已完成
 
@@ -24,7 +24,7 @@
 6. **已实现 `REQ-UI-0008`**：递归 command tree 同时驱动 help/parser/dispatch/completion；A/B/C、config error 与 future third-level targeted tests 通过，真实 Pi 菜单留 T14。
 7. **P1 `REQ-PLAT-0001`**：N-bot daemon 已通用；剩余 DeepSeek provider hardcode、e2e `bots[0]`、双 bot 产品文案与第三 bot 全链验证。
 8. **已实现 `REQ-UI-0009`**：DB lifetime 跨 file reopen/daemon rebuild，cache-write 幂等 migration + additive telemetry 完成；Pi 原生 `W/CH` 与详细 status/零 run 共 70 targeted tests 通过，真实 smoke 留 T14。
-9. **已调查 `REQ-SEND-0001`**：当前已经是单一 send + terminate；剩余是 tool-local authority、persona/protocol 去重、explicit reply 冲突、最小结构 ACK 与 description-aware tools hash。实现会触发 cache schema bump。
+9. **已实现 `REQ-SEND-0001`**：唯一 send schema 拥有全部用法，persona/protocol 共去掉 8,859 bytes 重复；显式点名不再被 silence 覆盖；固定 `ok` + terminate 保证一次 provider call；tools hash 含 description，cache schema 3→4。
 10. **已调查 `REQ-DOC-0001`**：README 需从内部索引改为 prerequisites→配置→启动/Pi→扩 bot→排障的用户旅程；等 provider schema 完成后在 T13 写最终示例。
 11. **已调查 `REQ-CMD-0001`**：Telegram `/tg` 由 deterministic control service 消费；help/bots/status 公开，compact/set/reset deny-by-default。allowlist 支持 id/`@username`，当前 ignored deployment 最终只配 `@aac6fef`。
 
