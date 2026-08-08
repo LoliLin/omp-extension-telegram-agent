@@ -4,9 +4,8 @@
 import { loadConfig } from "../config.ts";
 import { openDb, setBotState, getBotState, getDaemonState, setDaemonState } from "../db/db.ts";
 import { BotApi } from "../telegram/api.ts";
-import { Poller } from "../telegram/poller.ts";
 import { BotRuntime } from "../agent/runtime.ts";
-import { dispatchRoutingDecision, routeMessageDecision, type BotIdentity } from "../agent/router.ts";
+import { dispatchRoutingDecision, routeMessageDecision } from "../agent/router.ts";
 import { IpcServer } from "./ipc-server.ts";
 import { acquirePidLock, releasePidLock } from "./pid.ts";
 import type { MessageRow } from "../agent/serialize.ts";
@@ -19,6 +18,7 @@ import { TelegramControlState } from "../telegram/control-state.ts";
 import { parseTelegramControlCommand, TelegramControlCommandService } from "../telegram/control-command.ts";
 import { publishTelegramControlMenus, TelegramControlCoordinator } from "../telegram/control-integration.ts";
 import { createBotModelRuntime } from "../agent/model-runtime.ts";
+import { composeDeployment, composePollers } from "./composition.ts";
 
 const rootDir = process.cwd();
 const config = loadConfig(rootDir);
@@ -43,22 +43,19 @@ if (!config.routerSecret) {
 
 // resolve bot identities (getMe) so we can recognize own messages and mentions
 console.log(`[daemon] bot list: ${config.bots.map((b) => `${b.id} (${b.name}) persona=${b.personaPath} model=${b.provider}/${b.model}`).join(", ")}`); // no tokens or API keys
-const botApis = new Map(config.bots.map((bot) => [bot.id, new BotApi(bot.token)] as const));
-for (const bot of config.bots) {
-	const me = await botApis.get(bot.id)!.getMe();
-	setBotState(db, bot.id, "bot_user_id", String(me.id));
-	setBotState(db, bot.id, "bot_username", me.username);
-	console.log(`[daemon] bot ${bot.id} (${bot.name}) = @${me.username} (${me.id})`);
-}
-
-// One Pi ModelRuntime + AgentSession per bot keeps provider credentials isolated.
-const runtimes = new Map<string, BotRuntime>();
-for (const bot of config.bots) {
-	const modelRuntime = await createBotModelRuntime(bot);
-	const rt = new BotRuntime(db, bot, config, modelRuntime);
-	await rt.init();
-	runtimes.set(bot.id, rt);
-}
+const composition = await composeDeployment(db, config, {
+	createApi: (bot) => new BotApi(bot.token),
+	createRuntime: async (bot) => {
+		const modelRuntime = await createBotModelRuntime(bot);
+		const runtime = new BotRuntime(db, bot, config, modelRuntime);
+		await runtime.init();
+		return runtime;
+	},
+	onIdentity: (bot, identity) => {
+		console.log(`[daemon] bot ${bot.id} (${bot.name}) = @${identity.username} (${identity.userId})`);
+	},
+});
+const { botApis, runtimes, identities, botNames, botUserIds, replyBotTargets } = composition;
 
 // Cache schema change (e.g. REQ-STICKER-0001 catalog in the prefix): open a new context
 // epoch for every bot so telemetry marks the expected one-time cache reset (docs/cache.md).
@@ -72,12 +69,6 @@ if (storedSchema !== String(CACHE_SCHEMA_VERSION)) {
 	}
 	setDaemonState(db, "cache_schema_version", String(CACHE_SCHEMA_VERSION));
 }
-const identities: BotIdentity[] = config.bots.map((bot) => ({
-	id: bot.id,
-	userId: Number(getBotState(db, bot.id, "bot_user_id") ?? "0"),
-	username: getBotState(db, bot.id, "bot_username") ?? "",
-	name: bot.name,
-}));
 const routeCounters = new Map<string, number>();
 
 function recordRouteMetric(metric: string, botId: string, messageId: number): void {
@@ -87,9 +78,6 @@ function recordRouteMetric(metric: string, botId: string, messageId: number): vo
 }
 
 // IPC server for TUI attach/detach
-const botNames = new Map(config.bots.map((b) => [b.id, b.name] as [string, string]));
-const botUserIds = new Map(identities.map((i) => [i.id, i.userId] as [string, number]));
-const replyBotTargets = new Map(identities.map((identity) => [identity.userId, identity.id] as const));
 let ipc!: IpcServer;
 const manualSend = new ManualSendService(
 	db,
@@ -186,20 +174,22 @@ function route(result: { chatId?: number; messageId?: number }): void {
 	}
 }
 
-const pollers = config.bots.map(
-	(bot) =>
-		new Poller(db, bot.id, bot.token, config.groupPeerId, (result, update, botId) => {
-			console.log(`[msg] bot=${botId} ${result.kind} chat=${result.chatId} msg=${result.messageId}`);
-			const command = parseTelegramControlCommand(update, botId, identities);
-			if (command) runTelegramControl(command);
-			else route(result);
-			if (result.chatId != null && result.messageId != null) {
-				const row = db
-					.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
-					.get(result.chatId, result.messageId) as MessageRow | null;
-				if (row) ipc.broadcast(ipc.msgToItem(row));
-			}
-		}, replyBotTargets),
+const pollers = composePollers(
+	db,
+	config,
+	(result, update, botId) => {
+		console.log(`[msg] bot=${botId} ${result.kind} chat=${result.chatId} msg=${result.messageId}`);
+		const command = parseTelegramControlCommand(update, botId, identities);
+		if (command) runTelegramControl(command);
+		else route(result);
+		if (result.chatId != null && result.messageId != null) {
+			const row = db
+				.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
+				.get(result.chatId, result.messageId) as MessageRow | null;
+			if (row) ipc.broadcast(ipc.msgToItem(row));
+		}
+	},
+	replyBotTargets,
 );
 
 let stopping = false;

@@ -1,32 +1,25 @@
-// Smoke test: Bun runtime × Pi SDK × DeepSeek provider.
+// Smoke test: Bun runtime × Pi SDK × one configured provider/model.
 // Creates a headless AgentSession, sends one prompt, prints reply + usage.
-// Usage: bun run scripts/smoke-pi.ts
+// Usage: bun run scripts/smoke-pi.ts --bot <id>
 import {
 	createAgentSession,
 	DefaultResourceLoader,
-	ModelRuntime,
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { loadConfig } from "../src/config.ts";
+import { createBotModelRuntime } from "../src/agent/model-runtime.ts";
+import { selectConfiguredBot } from "./bot-selection.ts";
 
-function loadEnv(path: string): void {
-	const text = require("node:fs").readFileSync(path, "utf8") as string;
-	for (const line of text.split("\n")) {
-		const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/);
-		if (m) process.env[m[1]] = m[2].trim();
-	}
-}
-
-loadEnv(new URL("../.env", import.meta.url).pathname);
-process.env.DEEPSEEK_API_KEY = process.env.deepseek_api_key;
-
-const modelRuntime = await ModelRuntime.create();
-const model = modelRuntime.getModel("deepseek", process.env.deepseek_model ?? "deepseek-v4-flash");
-if (!model) throw new Error("deepseek model not found in catalog");
+const config = loadConfig(process.cwd());
+const bot = selectConfiguredBot(config.bots, process.argv.slice(2));
+const modelRuntime = await createBotModelRuntime(bot);
+const model = modelRuntime.getModel(bot.provider, bot.model);
+if (!model) throw new Error(`model not found: ${bot.provider}/${bot.model}`);
 
 const loader = new DefaultResourceLoader({
 	cwd: process.cwd(),
-	agentDir: `${process.env.HOME}/.pi/agent`,
+	agentDir: `${config.dataDir}/pi-smoke`,
 	systemPrompt: "You are a concise assistant. Answer in one short sentence.",
 	noExtensions: true,
 	noSkills: true,
@@ -38,7 +31,7 @@ await loader.reload();
 const { session } = await createAgentSession({
 	cwd: process.cwd(),
 	model,
-	thinkingLevel: "medium",
+	thinkingLevel: bot.reasoningEffort as "medium",
 	modelRuntime,
 	sessionManager: SessionManager.inMemory(process.cwd()),
 	settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),

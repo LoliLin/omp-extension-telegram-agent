@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：PLAT-0001 T11 provider/model/auth通用化已完成；继续T12参数化e2e与1/2/3-bot composition/IPC验证。
+2026-08-08：PLAT-0001 T11/T12代码边界已完成；继续ONBOARD-0001 T13a portable Pi launcher/fresh-clone。
 
 ## 已完成
 
@@ -12,7 +12,7 @@
 - `src/plugin/timeline.ts` 只保留 IPC、history cursor、dedupe、stats 与有界媒体读取；旧 `src/tui/engine.ts` 已删除。
 - `/tg attach [bot]`、显式 `/tg compose <bot|off>`、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]` 与 daemon commands 可用。
 - package manifest、项目 Pi launcher、fullscreen settings、native Image 和 Pi `FooterComponent` telemetry 已落地。
-- 全量验证：308 tests pass / 0 fail / 4311 assertions；`bun run check`、cache v5 golden通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Telegram群control及Kitty/Ghostty媒体、Rich/reply/组合发送trace留T14。
+- 全量验证：314 tests pass / 0 fail / 4371 assertions；`bun run check`、cache v5 golden通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Telegram群control及Kitty/Ghostty媒体、Rich/reply/组合发送trace留T14。
 
 ## 当前实施队列
 
@@ -22,7 +22,7 @@
 4. **已实现 `REQ-UI-0006`**：T7/T8 完成 identity update、256-entry/10-minute 乱序缓存、多引用/older page/重复幂等合并，以及 `视觉理解` native card 原位刷新与 sanitize；真实 media smoke 留 T14。
 5. **已实现 `REQ-UI-0003/0007`**：删除 stats widget；`setFooter` 直接返回 Pi `FooterComponent`，IPC stats 只做内存 read view，完整明细保留 `/tg status`。targeted 53 tests/typecheck/cache golden 通过，真实 TTY footer 留 T14。
 6. **已实现 `REQ-UI-0008`**：递归 command tree 同时驱动 help/parser/dispatch/completion；A/B/C、config error 与 future third-level targeted tests 通过，真实 Pi 菜单留 T14。
-7. **P1 `REQ-PLAT-0001`**：deployment/per-bot `provider + model + api_key_env`与每bot隔离Pi runtime已完成；剩余e2e `--bot`、双bot产品文案与1/2/3-bot全链验证。
+7. **P1 `REQ-PLAT-0001`**：provider/auth与N-bot composition已完成；1/2/3 fixture覆盖state/runtime/poller/router/IPC，单bot脚本强制`--bot`。剩余双bot产品文案在T13e收口；真实C token smoke已有opt-in清单但当前未执行。
 8. **已实现 `REQ-UI-0009`**：DB lifetime 跨 file reopen/daemon rebuild，cache-write 幂等 migration + additive telemetry 完成；Pi 原生 `W/CH` 与详细 status/零 run 共 70 targeted tests 通过，真实 smoke 留 T14。
 9. **已实现 `REQ-SEND-0001`**：唯一 send schema 拥有全部用法，persona/protocol 共去掉 8,859 bytes 重复；显式点名不再被 silence 覆盖；固定 `ok` + terminate 保证一次 provider call；tools hash 含 description，cache schema 3→4。
 10. **已调查 `REQ-DOC-0001`**：README 需从内部索引改为 prerequisites→配置→启动/Pi→扩 bot→排障的用户旅程；等 provider schema 完成后在 T13 写最终示例。

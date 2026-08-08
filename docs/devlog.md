@@ -532,3 +532,12 @@
 - daemon不再写全局`DEEPSEEK_API_KEY`或固定`getModel("deepseek", ...)`。每bot创建隔离Pi `ModelRuntime`，以当前Pi公开`setRuntimeApiKey()`只注入内存credential，再按配置provider/model preflight；同provider不同key不会串号。e2e runtime构造也复用同一入口，启动日志只显示provider/model。
 - Context7、当前本地Pi源码与catalog交叉确认API；DeepSeek/Anthropic builtin lookup、双provider fake auth routing、未知model preflight、真实ignored配置与legacy alias均有回归。相关71 tests / 529 assertions、全量308 / 4311、typecheck、cache v5 golden与diff check通过；e2e `--bot`与N-bot composition留T12。
 - Cache impact: **NONE**——provider选择是确定性启动配置；既有system/tool/message/summary grammar、session、DB、routing与context epoch逐字节不变，每turn新增0 token/call。
+
+## 2026-08-08 (60) — 验证通用 N-bot daemon 组合边界
+
+- daemon将getMe identity持久化、API/runtime map与派生botNames/userIds/reply targets收口为`composeDeployment()`，poller构造收口为`composePollers()`；生产继续按配置顺序先解析全部identity、再初始化各BotRuntime，没有A/B或数组位置分支。
+- 1/2/3-bot fixture从真实JSON/.env/persona loader开始，以fake getMe/runtime隔离网络，走到每bot独立state/session key、真实Poller对象、第三bot名字routing/dispatch以及真实IpcServer global/C-filter lifetime stats。每层都消费同一动态id集合。
+- `smoke-pi`与三个e2e脚本共用严格selector并强制`--bot <id>`；C可选，missing/unknown/duplicate/额外参数在DB/网络前失败并列出有效id。脚本所有state、SQL、日志、错误与provider/model均改用所选bot，不再隐式`bots[0]`或A/DeepSeek。
+- runbook明确一份daemon=一个group；同checkout只换config不能并行多群，DB/session/pid/socket必须隔离。另给出真实C的provider、Telegram、Pi filter/stats/reply与回滚清单；当前无第三个真实token，故明确未运行opt-in C smoke。
+- 新增6 tests / 61 assertions；相关config/router/IPC共63 / 2541，全量314 / 4371、typecheck、cache v5 golden与diff check通过。
+- Cache impact: **NONE**——composition与operator script只重用既有确定性配置/边界，不改provider prefix/suffix、DB/IPC协议、context epoch或正常turn token/call。

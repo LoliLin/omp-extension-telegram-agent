@@ -21,7 +21,7 @@
                     └─ Pi native FooterComponent
 ```
 
-- **daemon**：唯一长驻进程。按 `bots.config.json` 为每个 bot 创建 poller 与 AgentSession，并持有 SQLite、router 和 IPC server。
+- **daemon**：唯一长驻进程。`composeDeployment()`按配置为每个 bot 建立identity state与runtime map，`composePollers()`建立同数量poller；router、Telegram control与IPC消费同一组动态id/name/user-id map。daemon同时持有 SQLite 与 IPC server。
 - **Pi 插件**：项目 package 被 Pi 自动发现；通过 IPC 拉历史、订阅实时事件。关闭 Pi 或 `/tg detach` 不影响 daemon。
 
 ## 运行时与依赖
@@ -126,4 +126,5 @@
 - **`.env`**（`key: value` 冒号格式，自解析）+ `.env.example`：只放 secret（bot tokens / provider API keys / tinyfish / router_secret / gpg passphrase）；配置与日志只引用 env key 名，绝不输出值。
 - **启动期校验（REQ-OPS-0001 R2 + REQ-CONF-0001 R6 合并框架）**：JSON schema 校验（id 唯一合法、token_env 在 .env 存在、persona 文件可读、routing_p ∈[0,1] 且 Σ≤1、数值有限>0）+ env 数值检查；peer id 归一化（`-1004402809405` / `-4402809405` / `4402809405` → 裸正数）；校验失败收集**全部**错误一次性抛出（ConfigError 逐条点名），不静默 NaN
 - **进程管理（REQ-OPS-0001/0002）**：daemon 最早时机 `openSync(wx)` 排他pid锁，退出只删除仍属于自己的pid file。CLI controller把start/restart共用同一detached spawn与readiness：先按同仓库cwd/绝对entry验证PID，枚举并优雅停止该deployment的pid owner与孤儿进程，等待所有PID/pid file/socket消失后才spawn；新socket必须真实connect且新PID身份有效才是ready。restart另有可回收control lock，foreign PID与命令文本decoy绝不signal。Pi只异步委托CLI，保留原transcript并以原filter/footer更换IPC client；跨client snapshot按canonical identity去重，compose/pending send按unknown outcome/no-retry关闭。
+- **单群deployment边界（REQ-PLAT-0001）**：一个daemon只读取一个`group_peer_id`，且当前`data/`、DB、session、pid、control lock与socket均由工作目录决定。同一checkout内只换`bots_config`并行多群不安全且不支持；多群必须使用隔离工作目录/data资源，不能共享持久化或进程控制文件。
 - 模型相关数值（contextWindow/价格/threshold/reserve）放 `config/models.json`（Phase 8）

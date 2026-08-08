@@ -4,11 +4,13 @@
 
 - `bots.config.json`（项目根，或设 env `bots_config` 指向其他路径）：bot 清单与参数。复制 `bots.config.example.json` 后编辑。
   - `group_peer_id`：群的裸正数 peer id（`-100...` 形式会被自动归一化）
-  - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1）、可选 `model` / `reasoning_effort` / `compaction_threshold` / `compaction_keep_recent` / `sampling_cooldown_ms` / `tools`（`{send, search, run_js}` 开关）/ `sticker_sets`（Telegram sticker set 名数组）
+  - deployment 默认模型：`provider` + `model` + `api_key_env`；缺省为 `deepseek` + `deepseek-v4-flash` + `deepseek_api_key`。`api_key_env`只是指向`.env`的key名，不放secret值。
+  - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1），可选覆盖 `provider` / `model` / `api_key_env` / `reasoning_effort` / compaction / cooldown / `tools`（`{send, search, run_js}` 开关）/ `sticker_sets`（Telegram sticker set 名数组）。切换provider时必须同时给model和api_key_env；同provider可只换key。
   - `sampling_cooldown_ms` 默认 2000，可全局设置并由单 bot 覆盖；必须有限且 `>=0`，0 关闭概率冷却。它只影响 probability routing，mention/reply/name 不会被静默吞掉。
   - `telegram_admins`：Telegram群内控制白名单，接受正整数user id或规范化`@username`；推荐固定numeric id。缺省/空数组会拒绝所有`compact/set/reset`，但不影响公开`help/bots/status`。
-- `.env`（`key: value` 冒号格式）：只放 secret——bot tokens、`deepseek_api_key`、`tiny_fish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）
+- `.env`（`key: value` 冒号格式）：只放 secret——bot tokens、配置引用的provider API keys、`tiny_fish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）
 - 改配置后重启 daemon 生效（无热重载）
+- 一份配置/daemon只对应一个`group_peer_id`。同一checkout的`data/`、pid、socket与DB是共享deployment资源，不能只换`bots_config`并行跑第二个群；多群当前必须使用彼此隔离的工作目录与data目录，不能共享DB/session/socket/pid。
 
 ## 启动
 
@@ -85,6 +87,19 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 2. `bots.config.json` 的 `bots` 数组加一项（id 唯一、`token_env` 指向新 key、persona 文件存在）
 3. 重启 daemon → 启动日志会列出新 bot；Pi 中 `/tg attach <id>` 可单独观察
 4. 需要固定 sticker 目录就加 `sticker_sets`；不需要就不写（无目录 bot 的 system prompt 与 v1 逐字节一致）
+
+## Opt-in 第三个 bot 真实 smoke
+
+这组操作会调用真实provider与Telegram，可能产生费用/群消息；默认测试不会执行。准备一个只用于验收的bot id（下例为`C`）后逐项记录结果：
+
+1. 在`.env`加入C的Telegram token；在配置追加C、独立persona与`routing_p: 0`。若provider不同，同时显式给`provider`、`model`、`api_key_env`。
+2. `bun run restart`，确认日志出现C的`getMe` identity及`provider/model`，且A/B/C都只有一个poller，没有409。
+3. `bun run scripts/smoke-pi.ts --bot C`，确认当前配置的Pi provider/model完成一次headless调用。
+4. `bun run scripts/e2e-agent.ts --bot C`，确认真实群出现C的run/send结果；需要compaction验收时再运行`bun run scripts/e2e-compaction-manual.ts --bot C`。
+5. 在Pi执行`/tg attach C`、`/tg status C`、`/tg compose C`，确认C过滤、独立lifetime stats与手动发送；再切回全局feed确认A/B/C同时可见。
+6. 在Telegram分别mention与reply C，确认只有C得到explicit response opportunity。验收后删除临时C配置并`bun run restart`；历史DB/session可保留但不会被未配置bot纳入IPC stats。
+
+所有需要单bot身份的smoke/e2e脚本都强制`--bot <id>`；没有默认bot，未知id会在任何网络调用前失败并列出有效id。
 
 ## 故障排查
 
