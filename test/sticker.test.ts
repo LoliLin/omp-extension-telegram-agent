@@ -6,14 +6,22 @@ process.env.TZ = "Asia/Singapore";
 
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BotRuntime } from "../src/agent/runtime.ts";
+import { buildSystemPrompt, sha256Short } from "../src/agent/prompt.ts";
 import { SEND_SUCCESS_ACK } from "../src/agent/tools.ts";
-import { ensureStickerCatalog, stickerCatalogBlock, STICKER_CATALOG_MAX } from "../src/media/sticker-catalog.ts";
+import {
+	ensureStickerCatalog,
+	preRecognizeCatalogVision,
+	stickerCatalogBlock,
+	STICKER_CATALOG_MAX,
+} from "../src/media/sticker-catalog.ts";
 import { TelegramApiError } from "../src/telegram/api.ts";
 import type { AppConfig, BotConfig } from "../src/config.ts";
 import type { MessageRow } from "../src/agent/serialize.ts";
+import type { VisionExecutor } from "../src/media/vision.ts";
 
 const GROUP = 4402809405;
 const CHAT = Number(`-100${GROUP}`);
@@ -122,6 +130,87 @@ describe("ensureStickerCatalog (R1)", () => {
 		const block = stickerCatalogBlock(db, "A", ["cats"]);
 		expect(block).toContain("s1 = 😺 得意的赞同");
 		expect(block).toContain("s2 = 🐱 [未识别]");
+	});
+
+	test("VISION AC4/AC8: background catalog vision is two-wide and cannot mutate the current prompt snapshot", async () => {
+		const cacheDir = mkdtempSync(join(tmpdir(), "catalog-vision-test-"));
+		try {
+			const api = fakeApi({ cats: [sticker("c1", "😺"), sticker("c2", "🐱"), sticker("c3", "😸")] });
+			await ensureStickerCatalog(db, api as never, "A", ["cats"]);
+			const promptSnapshot = buildSystemPrompt("fixture persona", stickerCatalogBlock(db, "A", ["cats"]));
+			const hashSnapshot = sha256Short(promptSnapshot);
+			let active = 0;
+			let peak = 0;
+			const started: number[] = [];
+			const releases = new Map<number, () => void>();
+			const executor: VisionExecutor = {
+				modelRef: "openai-codex/gpt-5.6-luna:low",
+				provider: "openai-codex",
+				model: "gpt-5.6-luna",
+				readinessFailure: null,
+				describe: async (input) => {
+					const id = input.bytes[0]!;
+					started.push(id);
+					active++;
+					peak = Math.max(peak, active);
+					return await new Promise((resolve) => {
+						releases.set(id, () => {
+							active--;
+							resolve({
+								text: `catalog-${id}`,
+								telemetry: {
+									kind: "sticker",
+									sourceBytesBucket: "lt_32_kib",
+									convertedBytesBucket: "unavailable",
+									latencyMs: 1,
+									inputTokens: 1,
+									outputTokens: 1,
+									reasoningTokens: 0,
+									cost: 0,
+									outcome: "ok",
+								},
+							});
+						});
+					});
+				},
+			};
+			const background = preRecognizeCatalogVision(
+				db,
+				{
+					getFile: async (fileId: string) => ({ file_path: `stickers/${fileId}.png` }),
+					downloadFile: async (filePath: string) => new Uint8Array([Number(filePath.match(/c(\d)/)?.[1])]),
+				} as never,
+				"A",
+				["cats"],
+				executor,
+				undefined,
+				undefined,
+				{ cacheDir },
+			);
+			let completed = false;
+			void background.then(() => { completed = true; });
+			for (let attempt = 0; attempt < 100 && started.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(started).toEqual([1, 2]);
+			expect(peak).toBe(2);
+			expect(completed).toBe(false);
+			expect(sha256Short(promptSnapshot)).toBe(hashSnapshot);
+			expect(promptSnapshot).toContain("[未识别]");
+			releases.get(1)!();
+			releases.get(2)!();
+			for (let attempt = 0; attempt < 100 && started.length < 3; attempt++) await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(started).toEqual([1, 2, 3]);
+			expect(completed).toBe(false);
+			releases.get(3)!();
+			await background;
+
+			const nextPrompt = buildSystemPrompt("fixture persona", stickerCatalogBlock(db, "A", ["cats"]));
+			expect(nextPrompt).toContain("catalog-1");
+			expect(sha256Short(nextPrompt)).not.toBe(hashSnapshot);
+			expect(sha256Short(promptSnapshot)).toBe(hashSnapshot);
+		} finally {
+			rmSync(cacheDir, { recursive: true, force: true });
+		}
 	});
 
 	test("R5: catalog is capped at STICKER_CATALOG_MAX with truncation flag", async () => {

@@ -78,7 +78,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13j1** — 取消项目provider key解析/注入，legacy key字段只接受后丢弃；validates: PLAT-0002 R1/R4/AC3；commit: `0859490`
 - [x] **T13j2** — 合并Pi global/project defaults、建立单shared runtime与N-bot脱敏preflight；validates: PLAT-0002 R2/R3/R7/R8/AC1/AC2；commit: `f30e22c`
 - [ ] **T13j3** — 删除向导provider/key输入并收口canonical examples、env与双语运维文档；validates: PLAT-0002 R4/R5/AC4/AC5；commit: keyless Pi onboarding
-- [ ] **T13k1a** — 删除Codex CLI子进程，用shared Pi Luna low执行视觉、转换静态格式并做启动预检；validates: VISION-0001 AC7 + PLAT-0002 R6/AC6；commit: Pi vision executor
+- [x] **T13k1a** — 删除Codex CLI子进程，用shared Pi Luna low执行视觉、转换静态格式并做启动预检；validates: VISION-0001 AC7 + PLAT-0002 R6/AC6；commit: `f4ff63b`
 - [ ] **T13k1b** — 将动态media gate改为两路有界并发并锁定一次序列化、catalog snapshot与脱敏遥测；validates: VISION-0001 AC1–AC8；commit: synchronous vision boundary
 - [ ] **T13k1c** — 增加opt-in匿名photo/static-sticker基准与聚合输出；validates: VISION-0001 AC9；commit: anonymous vision benchmark
 - [ ] **T13j4** — 用真实behavior hashes记录PLAT-0002完成并在REQ-LIST勾选；validates: PLAT-0002 traceability；commit: completion record

@@ -70,6 +70,7 @@ const EPOCH_KEY = "context_epoch";
 const STREAM_TEXT_MAX = 4096;
 const STREAM_TOOL_ARGS_MAX = 2048;
 const STREAM_TOOLS_MAX = 4;
+const VISION_BATCH_CONCURRENCY = 2;
 
 export type RuntimeControlState = "idle" | "busy" | "cooldown" | "stopping" | "compacting";
 
@@ -221,7 +222,7 @@ export class BotRuntime {
 			// fetch + persist + short_ids block startup (seconds); vision pre-recognition runs in
 			// the background so the poller is never held offline for minutes (REQ-STICKER-0001 R1)
 			await ensureStickerCatalog(this.db, this.api, this.bot.id, this.bot.stickerSets);
-			preRecognizeCatalogVision(
+			void preRecognizeCatalogVision(
 				this.db,
 				this.api,
 				this.bot.id,
@@ -229,6 +230,7 @@ export class BotRuntime {
 				this.getVisionExecutor(),
 				(fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
 				(telemetry) => this.recordEvent("vision", telemetry),
+				{ cacheDir: join(this.config.dataDir, "media") },
 			);
 			stickerCatalog = stickerCatalogBlock(this.db, this.bot.id, this.bot.stickerSets);
 		}
@@ -966,22 +968,40 @@ export class BotRuntime {
 
 	/** Lazy vision: resolve media descriptions only now that they enter this bot's context. */
 	private async ensureBatchVision(batch: MessageRow[]): Promise<void> {
+		const pending: string[] = [];
+		const seen = new Set<string>();
 		for (const row of batch) {
 			if (!row.media) continue;
 			const media = JSON.parse(row.media) as { kind: string; file_unique_id?: string };
 			if (!media.file_unique_id || (media.kind !== "photo" && media.kind !== "sticker")) continue;
+			if (seen.has(media.file_unique_id)) continue;
+			seen.add(media.file_unique_id);
 			const existing = this.db.query("SELECT vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as
 				| { vision: string | null }
 				| null;
 			if (existing?.vision) continue; // persistent cache hit, shared by both bots
-			try {
-				await ensureVision(this.db, this.api, this.bot.id, media.file_unique_id, this.getVisionExecutor(), {
-					onPersist: (fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
-					onTelemetry: (telemetry) => this.recordEvent("vision", telemetry),
-				});
-			} catch {
-				this.recordEvent("error", { stage: "vision", category: "request_failed" });
+			pending.push(media.file_unique_id);
+		}
+
+		let next = 0;
+		const workers = Math.min(VISION_BATCH_CONCURRENCY, pending.length);
+		await Promise.all(Array.from({ length: workers }, async () => {
+			while (next < pending.length) {
+				const fileUniqueId = pending[next++]!;
+				await this.ensureOneVision(fileUniqueId);
 			}
+		}));
+	}
+
+	private async ensureOneVision(fileUniqueId: string): Promise<void> {
+		try {
+			await ensureVision(this.db, this.api, this.bot.id, fileUniqueId, this.getVisionExecutor(), {
+				cacheDir: join(this.config.dataDir, "media"),
+				onPersist: (fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
+				onTelemetry: (telemetry) => this.recordEvent("vision", telemetry),
+			});
+		} catch {
+			this.recordEvent("error", { stage: "vision", category: "request_failed" });
 		}
 	}
 

@@ -1,6 +1,6 @@
 # REQ-VISION-0001: cache-visible 视觉结果在 provider 提交前同步确定
 
-- **Status:** Implementing（2026-08-08 shared Pi视觉执行器已实现；两路并发/匿名基准待收口）
+- **Status:** Implementing（2026-08-08 shared Pi视觉执行器与两路provider gate已实现；匿名基准待收口）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「群聊图像与未识别sticker要在bot读上下文前同步；目录sticker保持异步；用Codex 5.6 Luna low并按成本/延迟数据取舍」
 - **依赖:** REQ-AGENT-0001、REQ-STICKER-0001、REQ-UI-0006、REQ-PLAT-0002
@@ -15,6 +15,7 @@ UI会在视觉结果落库后异步刷新，sticker catalog也在daemon启动后
 - Pi `vision_update`只是识别落库后的TUI side channel，不进入Pi session或provider payload，对cache hit没有影响。
 - configured sticker catalog在`init()`中先建立一次system prompt snapshot，后台识别不会原位修改当前AgentSession prefix；可能影响的是未来restart重建出的catalog，而不是当前epoch内的每turn hit。
 - 当前两个configured catalog共220项，pending=0。现有llm_runs聚合cache hit约98.7%；多个historical system hash还包含本轮大量已记录schema/persona变更，不能归因于异步UI。
+- T13k1b实现后按同一只读口径复核：configured catalog仍为220项、pending=0，历史`llm_runs`聚合hit ratio为98.74%；审计只输出聚合数，不输出bot/media/system hash或内容。
 - 把全部catalog vision改为startup阻塞可能让首次ready等待数分钟并破坏polling/onboarding可用性；在没有cache miss证据时不应把side-channel异步一刀切成全局阻塞。
 - 2026-08-08用Pi现有OAuth、`openai-codex/gpt-5.6-luna`、`reasoning=low`做了不输出内容的两次真实基准：50,429-byte photo为3,869ms / 1,027 input / 64 output / 0 reasoning / $0.0002822；24,710-byte WebP sticker经Pi本地转PNG后为2,688ms / 346 input / 46 output / 0 reasoning / $0.0001244。另一个WebM sticker按预期不适合静态vision。样本各1，不能外推百分位，但说明单项是秒级而非零延迟。
 

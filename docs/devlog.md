@@ -644,3 +644,12 @@
 - vision persistence继续按DB+media identity合并in-flight/cache；非空结果才发UI update。新增telemetry只允许kind、bytes bucket、latency、token、cost、outcome，observer错误也不再打印媒体identity。
 - 验证：vision/config/model-runtime/sticker/flush/cache 80 pass / 477 assertions；全量362 / 4756、`bun run check`、cache v5 golden及双mdBook link/build门禁通过；两路动态batch并发和opt-in匿名基准按拆分后的T13k1b/c继续。
 - Cache impact: **NONE**——provider可见的聊天system/tools/message/summary grammar、context epoch与vision调用次数不变；只把既有必要vision从独立CLI认证改到共享Pi runtime，输出上限由执行边界固定。
+
+## 2026-08-08 (74) — 锁定provider前两路视觉gate
+
+- `ensureBatchVision()`先按media identity去重cache miss，再以最多2个worker完成全部vision，最后才做唯一一次序列化/provider提交。1/2/3项deferred fixture分别锁定峰值1/2/2与第三项第二波；release前provider调用恒为0，成功suffix第一次就含描述。
+- provider失败、空结果和TGS/WebM unsupported均持久化terminal outcome并在同一次suffix使用既有fallback；message exposed后重复trigger不会重写。persistent cache跳过Telegram/download/describe，同identity并发继续共享一个in-flight promise。
+- configured catalog后台worker从4收紧为2并返回可测试promise，runtime明确`void`启动；prompt snapshot在completion前后保持原字符串/hash，下一次restart才吸收DB变化。terminal失败不再被误报为pending并在每次启动重复排队。
+- vision event测试锁定9个allowlist字段，production不记录identity/path/prompt/description/upstream body。只读current-deployment复核configured catalog 220/pending 0、历史cache hit 98.74%，不输出身份或hash。
+- 验证：flush/vision/sticker/cache 52 pass / 416 assertions；全量368 / 4815、`bun run check`、cache v5 golden和双mdBook link/build门禁通过。
+- Cache impact: **NONE**——只改变既有必要vision的等待调度；system/tool/message/summary grammar与context epoch不变，调用数不增，两路并发只降低多媒体batch墙钟时间。

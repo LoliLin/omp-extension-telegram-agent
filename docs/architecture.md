@@ -104,7 +104,8 @@
 - photo 与 sticker 用不同 prompt 语义
 - daemon在任何Telegram调用前把视觉选择与所有聊天模型一起交给唯一Pi `ModelRuntime`做catalog/auth预检；视觉默认/示例为`openai-codex/gpt-5.6-luna:low`，历史`gpt-5.6-luna-low`仅在loader边界归一化，不进入runtime。模型缺失、未认证或不支持image input均按固定category终止启动，项目不读取credential。
 - JPEG/PNG原样作为Pi `ImageContent`发送；静态WebP/GIF先走Pi公开`convertToPng()`，TGS/WebM/未知格式确定性fallback且不调用provider。每次`completeSimple()`固定low、256 output tokens、90秒abort、provider retry 0；上游失败/空响应只落固定outcome，不写错误正文。
-- production vision event只含kind、source/converted bytes bucket、latency、input/output/reasoning token、cost与outcome；不含media identity/path/prompt/response。动态media仍在`serializeMessages()`前等待terminal结果；UI update与本地展示是provider外side channel。
+- production vision event只含kind、source/converted bytes bucket、latency、input/output/reasoning token、cost与outcome；不含media identity/path/prompt/response。动态batch先按identity去重，再以最多2个worker等待所有terminal结果，之后才执行唯一一次`serializeMessages()`/provider submit；1/2/3 media分别形成1/1/2个执行波次。失败/unsupported直接进入同一次fallback，exposed后不重写旧entry。
+- configured catalog也只开2个后台worker；runtime先从当时DB构造一次system prompt snapshot且不await后台任务，completion只更新DB/UI，当前session的prompt字符串/hash引用不变。下一次restart才可能吸收新描述。UI update与本地展示始终是provider外side channel。
 - 新的非空描述成功写入 DB 后，`ensureVision` 只发布一次 `(fileUniqueId,text)`；cache hit、unsupported、空结果与失败不发布。background catalog 与 lazy batch 共用同一 in-flight promise，因此 UI transport 不增加 vision provider call。
 - `MsgItem.fileUniqueId` 与 additive `vision_update` 经 daemon IPC 广播给所有 live transcript；旧 client 可忽略新字段/帧。snapshot/history 仍从同一 `media.vision` 读取，provider serialization 不变。
 - timeline 以 256-entry / 10-minute map 有界缓存乱序 update；message/live/history 到达时按 `fileUniqueId` 合并。已显示消息收到新描述时，feed 更新所有匹配 item 并用 Pi component tree 原位 rebuild，不追加 session entry；重复 update 幂等。

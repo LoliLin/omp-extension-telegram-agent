@@ -18,6 +18,12 @@ import type { AppConfig, BotConfig } from "../src/config.ts";
 import type { MessageRow } from "../src/agent/serialize.ts";
 import type { AgentStreamFrame } from "../src/ipc.ts";
 import type { ActivityScheduler } from "../src/telegram/activity.ts";
+import type {
+	VisionExecutor,
+	VisionKind,
+	VisionOutcome,
+	VisionTelemetry,
+} from "../src/media/vision.ts";
 
 const GROUP = 4402809405;
 const CHAT = Number(`-100${GROUP}`);
@@ -34,6 +40,7 @@ function makeRuntime(options: {
 	activityScheduler?: ActivityScheduler;
 	chatActionSender?: () => Promise<unknown>;
 	useBotApiForActivity?: boolean;
+	visionExecutor?: VisionExecutor;
 } = {}): BotRuntime {
 	const config: AppConfig = {
 		dataDir: "/tmp/req-agent-0001-test",
@@ -66,6 +73,7 @@ function makeRuntime(options: {
 		...(options.useBotApiForActivity
 			? {}
 			: { chatActionSender: options.chatActionSender ?? (async () => true) }),
+		visionExecutor: options.visionExecutor,
 	});
 }
 
@@ -150,6 +158,46 @@ function insertMsg(overrides: Partial<MessageRow>): void {
 	).run(m.chat_id, m.message_id, m.date, m.thread_id, m.sender_id, m.display_name, m.username, m.sender_tag, m.sender_chat, m.is_bot, m.text, m.caption, m.entities, m.reply_to_message_id, m.quote, m.forward_origin, m.edit_date, m.media);
 }
 
+function insertVisionMsg(messageId: number, fileUniqueId: string, kind: VisionKind = "photo"): void {
+	db.query("INSERT OR IGNORE INTO media (file_unique_id, kind) VALUES (?, ?)").run(fileUniqueId, kind);
+	db.query("INSERT OR IGNORE INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', ?, ?)").run(
+		`file-${messageId}`,
+		fileUniqueId,
+	);
+	insertMsg({
+		message_id: messageId,
+		date: 1754600000 + messageId,
+		text: null,
+		media: JSON.stringify({
+			kind,
+			file_unique_id: fileUniqueId,
+			...(kind === "sticker" ? { sticker_emoji: "😿", sticker_set: "fixture" } : {}),
+		}),
+	});
+}
+
+function visionTelemetry(kind: VisionKind, outcome: VisionOutcome = "ok"): VisionTelemetry {
+	return {
+		kind,
+		sourceBytesBucket: "lt_32_kib",
+		convertedBytesBucket: "unavailable",
+		latencyMs: 10,
+		inputTokens: 10,
+		outputTokens: 5,
+		reasoningTokens: 0,
+		cost: 0.001,
+		outcome,
+	};
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+	for (let attempt = 0; attempt < 100; attempt++) {
+		if (predicate()) return;
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+	}
+	throw new Error("condition did not settle");
+}
+
 function exposedIds(): number[] {
 	return JSON.parse(getBotState(db, "A", "exposed_ids") ?? "[]") as number[];
 }
@@ -160,6 +208,144 @@ function errorEvents(): { stage: string; error?: string; category?: string; reas
 }
 
 describe("flush state machine (REQ-AGENT-0001)", () => {
+	for (const mediaCount of [1, 2, 3]) {
+		test(`VISION AC1/AC8: ${mediaCount} uncached media settle in two-wide waves before one provider submit`, async () => {
+			let active = 0;
+			let peak = 0;
+			const started: number[] = [];
+			const calls = new Map<number, number>();
+			const releases = new Map<number, () => void>();
+			const executor: VisionExecutor = {
+				modelRef: "openai-codex/gpt-5.6-luna:low",
+				provider: "openai-codex",
+				model: "gpt-5.6-luna",
+				readinessFailure: null,
+				describe: async (input) => {
+					const id = input.bytes[0]!;
+					calls.set(id, (calls.get(id) ?? 0) + 1);
+					started.push(id);
+					active++;
+					peak = Math.max(peak, active);
+					return await new Promise((resolve) => {
+						releases.set(id, () => {
+							active--;
+							resolve({ text: `vision-${id}`, telemetry: visionTelemetry(input.kind) });
+						});
+					});
+				},
+			};
+			const rt = makeRuntime({ visionExecutor: executor });
+			const fake = attachFakeSession(rt);
+			(rt as any).api = {
+				getFile: async (fileId: string) => ({ file_path: `photos/${fileId}.png` }),
+				downloadFile: async (filePath: string) => {
+					const id = Number(filePath.match(/file-(\d+)/)?.[1]);
+					return new Uint8Array([id]);
+				},
+			};
+			for (let id = 1; id <= mediaCount; id++) insertVisionMsg(id, `media-${id}`);
+
+			rt.trigger();
+			const flush = (rt as any).flushPromise as Promise<void>;
+			await waitUntil(() => started.length === Math.min(2, mediaCount));
+			expect(fake.sent).toHaveLength(0);
+			const firstWave = [...started];
+			for (const id of firstWave) releases.get(id)!();
+
+			if (mediaCount === 3) {
+				await waitUntil(() => started.length === 3);
+				expect(fake.sent).toHaveLength(0);
+				releases.get(3)!();
+			}
+			await flush;
+
+			expect(peak).toBe(Math.min(2, mediaCount));
+			expect(started).toEqual(Array.from({ length: mediaCount }, (_, index) => index + 1));
+			expect([...calls.values()]).toEqual(Array.from({ length: mediaCount }, () => 1));
+			expect(fake.sent).toHaveLength(1);
+			for (let id = 1; id <= mediaCount; id++) {
+				expect(fake.sent[0]).toContain(`[图片: vision-${id}]`);
+			}
+			expect(exposedIds()).toEqual(Array.from({ length: mediaCount }, (_, index) => index + 1));
+
+			const payloadRows = db.query("SELECT payload FROM agent_events WHERE bot_id = 'A' AND kind = 'vision' ORDER BY id").all() as { payload: string }[];
+			expect(payloadRows).toHaveLength(mediaCount);
+			const serializedTelemetry = payloadRows.map((row) => JSON.parse(row.payload) as Record<string, unknown>);
+			for (const payload of serializedTelemetry) {
+				expect(Object.keys(payload).sort()).toEqual([
+					"convertedBytesBucket", "cost", "inputTokens", "kind", "latencyMs", "outcome",
+					"outputTokens", "reasoningTokens", "sourceBytesBucket",
+				].sort());
+			}
+			expect(JSON.stringify(serializedTelemetry)).not.toMatch(/media-|file-|photos|vision-\d/);
+		});
+	}
+
+	test("VISION AC2: provider failure and unsupported media submit one fallback and never rewrite it", async () => {
+		let describeCalls = 0;
+		const executor: VisionExecutor = {
+			modelRef: "openai-codex/gpt-5.6-luna:low",
+			provider: "openai-codex",
+			model: "gpt-5.6-luna",
+			readinessFailure: null,
+			describe: async (input) => {
+				describeCalls++;
+				return { text: null, telemetry: visionTelemetry(input.kind, "provider_request_failed") };
+			},
+		};
+		const rt = makeRuntime({ visionExecutor: executor });
+		const fake = attachFakeSession(rt);
+		(rt as any).api = {
+			getFile: async (fileId: string) => ({
+				file_path: fileId === "file-1" ? "photos/failure.png" : "stickers/animated.tgs",
+			}),
+			downloadFile: async () => new Uint8Array([1]),
+		};
+		insertVisionMsg(1, "failed-photo");
+		insertVisionMsg(2, "unsupported-sticker", "sticker");
+
+		rt.trigger();
+		await ((rt as any).flushPromise as Promise<void>);
+		expect(fake.sent).toHaveLength(1);
+		expect(fake.sent[0]).toContain("#1 Alice (@alice): [图片]");
+		expect(fake.sent[0]).toContain("#2 Alice (@alice): [sticker 😿 set:fixture]");
+		expect(describeCalls).toBe(1);
+		expect(exposedIds()).toEqual([1, 2]);
+
+		rt.trigger();
+		await ((rt as any).flushPromise as Promise<void>);
+		expect(fake.sent).toHaveLength(1);
+		expect(describeCalls).toBe(1);
+		expect(db.query("SELECT json_extract(vision, '$.outcome') outcome FROM media WHERE file_unique_id = 'failed-photo'").get()).toEqual({ outcome: "provider_request_failed" });
+		expect(db.query("SELECT json_extract(vision, '$.outcome') outcome FROM media WHERE file_unique_id = 'unsupported-sticker'").get()).toEqual({ outcome: "unsupported_format" });
+	});
+
+	test("VISION AC3: a persistent cache hit reaches provider without download or another description", async () => {
+		const executor: VisionExecutor = {
+			modelRef: "openai-codex/gpt-5.6-luna:low",
+			provider: "openai-codex",
+			model: "gpt-5.6-luna",
+			readinessFailure: null,
+			describe: async () => { throw new Error("cached media must not describe"); },
+		};
+		const rt = makeRuntime({ visionExecutor: executor });
+		const fake = attachFakeSession(rt);
+		(rt as any).api = {
+			getFile: async () => { throw new Error("cached media must not call Telegram"); },
+			downloadFile: async () => { throw new Error("cached media must not download"); },
+		};
+		insertVisionMsg(1, "cached-photo");
+		db.query("UPDATE media SET vision = ? WHERE file_unique_id = 'cached-photo'").run(
+			JSON.stringify({ model: "fixture", kind: "photo", text: "cached-description", outcome: "ok", at: 1 }),
+		);
+
+		rt.trigger();
+		await ((rt as any).flushPromise as Promise<void>);
+		expect(fake.sent).toHaveLength(1);
+		expect(fake.sent[0]).toContain("[图片: cached-description]");
+		expect(db.query("SELECT COUNT(*) n FROM agent_events WHERE kind = 'vision'").get()).toEqual({ n: 0 });
+	});
+
 	test("REQ-UI-0010 streams bounded assistant snapshots without persisting partial rows", async () => {
 		const rt = makeRuntime();
 		const fake = attachFakeSession(rt);

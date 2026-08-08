@@ -42,6 +42,8 @@ DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`
 
 **动态候选（动态 suffix 尾部）**：`Available stickers:` 块保留，只列**上下文出现过、set 外且当前 bot 确有 file_id 映射**的 sticker（set 内 sticker 已在 prefix 里，排除防冗余）；位置约束：必须在全部消息序列之后（R6，测试锁定），不并入 prefix。
 
+**动态媒体 gate**：photo/sticker按identity命中持久cache或以最多2个worker完成一次terminal vision；全部settle后才序列化当前batch。成功描述或确定性fallback都只进入这次新suffix，已exposed entry不重发。`vision_update`、本地文件完成和catalog后台completion不写Pi session；cache v5 golden因此逐字节不变。
+
 **send**：两种来源的 short_id 共用 media 表解析 + 每 bot file_id；无效 id 在发送前结构化报错（REQ-AGENT-0001 R7 协同）。
 
 ## 消息序列化 grammar（v1，Phase 3 实现后以此为准）

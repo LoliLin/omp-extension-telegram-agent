@@ -9,6 +9,7 @@ import type { Database } from "bun:sqlite";
 import type { BotApi } from "../telegram/api.ts";
 import {
 	ensureVision,
+	type EnsureVisionOptions,
 	type VisionExecutor,
 	type VisionTelemetrySink,
 	type VisionUpdateSink,
@@ -126,7 +127,7 @@ export async function ensureStickerCatalog(
 			     SELECT 1 FROM media_file_ids f
 			      WHERE f.bot_id = ? AND f.file_unique_id = media.file_unique_id
 			   )
-			   AND (vision IS NULL OR json_extract(vision, '$.text') IS NULL OR json_extract(vision, '$.unsupported') = 1)`,
+			   AND vision IS NULL`,
 		)
 		.get(JSON.stringify(sets), botId) as { c: number };
 	return { total, sendable, missingMapping, truncated, pendingVision: pendingVision.c };
@@ -134,9 +135,9 @@ export async function ensureStickerCatalog(
 
 /**
  * Background vision pre-recognition (REQ-STICKER-0001 R1). NOT awaited during startup:
- * codex calls are slow (minutes for a full set) and must not hold the poller offline.
- * Unrecognized stickers serialize as [未识别] this run and complete on a later restart
- * (vision results persist). Bounded concurrency; per-sticker errors are logged and skipped.
+ * Pi vision calls are slow (minutes for a full set) and must not hold the poller offline.
+ * Unrecognized stickers serialize as [未识别] in this prompt snapshot; background results
+ * persist for UI and a future restart. Bounded concurrency; errors are safely categorized.
  */
 export function preRecognizeCatalogVision(
 	db: Database,
@@ -146,7 +147,8 @@ export function preRecognizeCatalogVision(
 	executor: VisionExecutor,
 	onVision?: VisionUpdateSink,
 	onTelemetry?: VisionTelemetrySink,
-): void {
+	options: Pick<EnsureVisionOptions, "cacheDir" | "monotonicNow"> = {},
+): Promise<void> {
 	const pending = db
 		.query(
 			`SELECT file_unique_id FROM media
@@ -155,15 +157,15 @@ export function preRecognizeCatalogVision(
 			     SELECT 1 FROM media_file_ids f
 			      WHERE f.bot_id = ? AND f.file_unique_id = media.file_unique_id
 			   )
-			   AND (vision IS NULL OR json_extract(vision, '$.text') IS NULL OR json_extract(vision, '$.unsupported') = 1)`,
+			   AND vision IS NULL`,
 		)
 		.all(JSON.stringify(sets), botId) as { file_unique_id: string }[];
-	if (pending.length === 0) return;
+	if (pending.length === 0) return Promise.resolve();
 	console.log(`[sticker-catalog] ${botId}: pre-recognizing vision for ${pending.length} stickers in background (first start takes minutes)`);
-	const workers = Math.min(4, pending.length);
+	const workers = Math.min(2, pending.length);
 	let next = 0;
 	let doneCount = 0;
-	void (async () => {
+	return (async () => {
 		await Promise.all(
 			Array.from({ length: workers }, async () => {
 				while (next < pending.length) {
@@ -172,6 +174,7 @@ export function preRecognizeCatalogVision(
 						await ensureVision(db, api, botId, fid, executor, {
 							onPersist: onVision,
 							onTelemetry,
+							...options,
 						});
 					} catch {
 						console.error(`[sticker-catalog] ${botId}: vision failed (request_failed)`);
