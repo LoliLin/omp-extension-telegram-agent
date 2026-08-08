@@ -90,9 +90,11 @@
 
 ## 9. 提交与追溯
 
-- 原子化git提交
-- 授权后：原子化签名提交（repo 已配 `scripts/git-gpg.sh` 为 gpg.program），一个内聚任务一个 commit，subject 描述代码改动本身。
-- 基于 REQ / PLAN 的工作在 commit message 末尾加 trailer，规则见 `docs/engineering/traceability.md`。
+- 用户授权提交后，**大任务必须先在 PLAN 中拆成 commit-sized tasks**：一个 task 只产生一个可独立审查、可独立回滚且通过目标验证的行为变化。测试与该行为必需的文档属于同一 commit；机械重构、无关清理、不同需求不得混入。
+- 每个 task 完成后立即提交，不得把多个已完成 task 留到最后压成一个大 commit。提交前只显式暂存本 task 路径/patch（脏工作树禁止 `git add -A`），检查 `git diff --cached` 与 `git status --short`，并先跑该 task 的目标测试；整项任务结束再跑全量验证。
+- 所有授权提交必须签名（repo 已配 `scripts/git-gpg.sh` 为 `gpg.program`）；签名失败时停下诊断，不得改成 unsigned commit。不得用 amend/rebase 把已完成的原子提交重新揉在一起，除非用户明确要求改写历史。
+- Commit subject 采用 `<Imperative verb> <concrete code outcome>`：英文祈使句、首字母大写、无句号、建议不超过 72 字符；描述代码结果，不写空泛的 “update/fix stuff”，不把 REQ/PLAN 标题当 subject。可选 body 解释非显然的 why / invariant / 验证，subject 与 body、body 与 trailer 之间各空一行。
+- 有对应 REQ 的 commit 末尾必须写 `Requirement:`；有 active PLAN task 的必须写 `Task:`；纯机械且无 REQ 的 commit 用 `Work-Type: mechanical`。精确格式、示例与查询命令见 `docs/engineering/traceability.md`。
 
 ## 10. 已知坑
 

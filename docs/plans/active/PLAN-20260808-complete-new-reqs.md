@@ -1,0 +1,75 @@
+# PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
+
+- **Status:** Active
+- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-PLAT-0001
+- **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
+
+## 结果
+
+REQ-LIST 当前新增的 7 项全部实现、验证并以 commit 标注勾选；Telegram plugin 能从 Pi editor 发消息、实时补视觉理解、使用原生 footer stats 与分级命令补全；router 有 busy/cooldown gate；sticker 候选满足 per-bot sendability；平台外围收口为可配置 N-bot/provider。每个 task 是一个独立签名 commit。
+
+## 已确认边界
+
+- 当前 working tree 的 native transcript 重写已通过 149 tests + real Pi smoke，但尚未提交，必须先按独立 task 落库。
+- Pi 官方 extension API：`input` handler 的 `handled` 可阻止进入 agent；`setStatus` 使用默认 footer；`getArgumentCompletions` 原生支持 argument completion。
+- STICKER-0002 会改变稳定 catalog prefix，必须 bump cache schema/new epoch/golden；其余 UI/routing 改动预期 cache NONE。
+- daemon 正在运行；涉及 cache/schema/runtime 的真实 smoke 前按 runbook 做受控重启，不删除 data。
+
+## Commit-sized tasks
+
+- [x] **T0** — 强化 AGENTS/traceability 的原子签名提交与 message 规范，并建立本计划；validates: 用户提交规范要求；commit: docs/policy only
+- [ ] **T1** — 提交已验证的 Pi native transcript 重写（package、timeline、entry、tests、current architecture docs）；validates: REQ-UI-0001/2/3/4；commit: native observer behavior
+- [ ] **T2** — 提交 7 篇新增 REQ、调查记录、REQ-LIST 与 handoff/devlog 基线；validates: requirements traceability；commit: docs only
+- [ ] **T3** — 按 bot file_id 过滤 fixed/dynamic sticker candidates，补真实回归 fixture并 bump cache schema；validates: STICKER-0002 AC1–AC6；commit: sticker invariant
+- [ ] **T4** — 为 probability routing 增加 runtime availability + 2s deadline cooldown（explicit trigger 保留），用 fake clock/burst replay验证；validates: ROUTE-0001 AC1–AC7；commit: routing scheduler
+- [ ] **T5** — 抽取 daemon manual-send service并新增 additive request-id IPC send_message/ack/error；validates: UI-0005 R3–R5；commit: daemon write contract
+- [ ] **T6** — Pi `input` event + explicit compose identity 接入原生 editor，处理附件/失败/unknown outcome/cleanup；validates: UI-0005 AC1–AC6；commit: editor behavior
+- [ ] **T7** — vision 成功持久化后发布 additive media identity/update IPC，保证无新增 vision calls；validates: UI-0006 R1/R2/R4；commit: vision transport
+- [ ] **T8** — timeline/feed 合并 vision update并在 native media card 下实时显示理解；validates: UI-0006 AC1–AC6；commit: vision presentation
+- [ ] **T9** — 删除自定义 stats panel，改用 Pi default footer `setStatus`，保留完整 `/tg status`；validates: UI-0007 AC1–AC6；commit: native footer
+- [ ] **T10** — 建共享 `/tg` command tree + `getArgumentCompletions`，覆盖动态 bot 与多级 prefix；validates: UI-0008 AC1–AC6；commit: command UX
+- [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
+- [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification
+- [ ] **T13** — 将 package/project/runbook/example 文案收口为平台 + example deployment，明确单 deployment 单群边界；validates: PLAT-0001 AC6；commit: docs/metadata only
+- [ ] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
+
+## 每个 commit 的固定流程
+
+1. 只实现当前 task；先跑目标测试与 `bun run check`。
+2. 更新该行为必需的 REQ/architecture/testing/cache docs；devlog 可在 T14 汇总，但行为 contract 必须同 commit。
+3. 用显式路径或 patch 暂存，检查 `git diff --cached --check`、`git diff --cached`、`git status --short`。
+4. `git commit -S`，subject 遵循 AGENTS.md；有 REQ 写 `Requirement:`，所有本计划 task 写 `Task:`；纯机械且无 REQ 时再写 `Work-Type: mechanical`。
+5. 用 `git log -1 --show-signature` 验证 good signature；失败不降级。
+
+## 验证矩阵
+
+| 范围 | 命令 / 观察 | Tasks |
+|---|---|---|
+| Sticker/cache | `bun test test/sticker.test.ts test/cache.test.ts test/flush.test.ts` | T3 |
+| Routing | `bun test test/router.test.ts test/flush.test.ts` | T4 |
+| IPC/editor | `bun test test/ipc.test.ts test/tg-engine.test.ts test/tg-extension.test.ts` | T5–T10 |
+| Config/platform | `bun test test/config.test.ts` + 新 composition tests | T11–T13 |
+| 全量 | `bun test` + `bun run check` + `git diff --check` | T14 |
+| Real Pi | `bun run pi`: attach/compose/send/more/footer/completion/vision | T14 |
+| Real Telegram | 每 bot fixed sticker + manual text + live vision | T3/T6/T8/T14 |
+
+## Cache / token budget
+
+- T3: **INTENTIONAL** prefix correction；bump `CACHE_SCHEMA_VERSION`、new epoch、golden/docs/cache。
+- T4: **NONE** provider grammar；预期减少 run count/miss tokens，用 deterministic counters/tests证明。
+- T5–T10: **NONE**；TUI/IPC/operator I/O 不进入 provider context，vision UI 不新增 inference。
+- T11–T13: 现有 deployment **NONE**；provider choice 是配置边界，现有 golden 必须不变。
+
+## 风险
+
+- manual send ACK 丢失导致双发：request id + no automatic retry + unknown outcome UI。
+- vision update 先于 message：有界 pending map；snapshot仍从 DB取最终值。
+- status/command refactor破坏 extension lifecycle：fake host锁 socket ownership和shutdown cleanup。
+- cache bump误更新非 sticker grammar：逐项 hash diff，只有预期 system hash变化。
+- 多原子 commit 与脏工作树混淆：每次显式 staging并审查 staged paths。
+
+## 完成记录
+
+- 验证证据: 待 T14
+- 需求状态已更新: no
+- commits: 待逐 task 填写

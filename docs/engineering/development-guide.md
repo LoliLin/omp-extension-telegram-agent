@@ -47,11 +47,11 @@
 
 1. **读状态**：`docs/handoff.md` + 相关需求 + 受影响边界的文档章节（只读必要的）。
 2. **摸底**：搜现有模式，确认归属层（根 `AGENTS.md` 第 4 节）。
-3. **计划**：非平凡工作（多文件 / 跨边界 / 改持久格式 / 行为变化）先写 `docs/plans/active/PLAN-*.md`；琐碎改动跳过。
+3. **计划**：非平凡工作（多文件 / 跨边界 / 改持久格式 / 行为变化）先写 `docs/plans/active/PLAN-*.md`；用户授权提交时，task 粒度必须同时是 commit 边界（一个可独立 review/revert 的结果）。琐碎改动跳过。
 4. **实现**：一次做一个内聚 task，按验证漏斗逐层验证（`docs/testing.md`）。
 5. **自审**：diff 对照验收标准逐条过，检查 cache impact（见下）。
 6. **留痕**：`docs/devlog.md` 追加一条；`docs/handoff.md` 更新；接口 / invariant 变化同步 architecture / cache / data-model。
-7. **提交**：用户授权后，一个 task 一个原子签名 commit；基于 REQ/PLAN 的工作加 trailer（见 `traceability.md`）。
+7. **提交**：用户授权后，每个 task 通过目标验证就立即显式暂存、检查 staged diff 并做原子签名 commit；不得积压多个 task 后合并提交。subject 与 trailer 规范见 `traceability.md`。
 8. **报告**：明确说出未验证区域、假设、遗留风险。
 
 ## 三、Cache 与成本（每个任务必做，全局要求）
