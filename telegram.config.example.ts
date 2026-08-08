@@ -51,7 +51,7 @@ export default defineConfig({
 				send: true,
 				// Enable only after adding tiny_fish_api_key to .env.
 				search: false,
-				run_js: false,
+				run_js: true,
 			},
 		},
 	],
