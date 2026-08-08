@@ -5,6 +5,7 @@
 - `../README.md` / `../README.en.md` — 中文 / English 产品入口与三步启动
 - `user-guide/zh/src/README.md` — 中文用户指南
 - `user-guide/en/src/README.md` — English user guide
+- `https://mizorewww.github.io/pi-extension-telegram-agent/` — Pages 双语语言入口（由 Documentation workflow 发布）
 - `maintainers/guide.md` — agent / maintainer 开发、验证、提交与发布入口
 
 ## 规范性文档

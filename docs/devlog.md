@@ -581,3 +581,11 @@
 - package/project/runbook/example不再把固定双bot当产品。`.env.example`、typed/legacy examples统一`tinyfish_api_key`，默认search=false、`telegram_admins: []`，避免最小首配多要credential或复制占位admin产生授权。
 - 77个Markdown本地link target、产品身份审计均通过；config+extension 70 tests / 652 assertions、全量333 / 4579与typecheck通过。mdBook build/generated-link/Pages留T13f。
 - Cache impact: **NONE**——只改public文档、metadata与不进入production deployment的examples；provider/session/IPC/DB bytes、context epoch和每turn调用/token不变。
+
+## 2026-08-08 (66) — 固定双语 mdBook 与最小权限 Pages 发布
+
+- 中文/English分别使用独立`book.toml`和mdBook 0.5.4；统一`docs:build`/`docs:check`先清理受限`build/docs`，构建两个book与无脚本语言入口，再检查README/SUMMARY/source、生成HTML target/fragment和双向语言切换。artifact写入确定性的`verification.json`并由`.nojekyll`保持纯静态。
+- 本机使用官方arm64 macOS archive及发布SHA-256真实构建：21个HTML页面、18个Markdown/92 links、生成站点600 links全部通过。真实build抓到0.5不再接受`multilingual`及404绝对`site-url`两处问题后已加回归。
+- Documentation workflow把checkout、setup-bun、configure/upload/deploy Pages action固定到当前完整release SHA；mdBook x86_64 Linux archive同时固定版本与SHA-256。PR/手工/main共用check并上传单一artifact，仅main push deploy job取得pages/id-token write，无secret；同ref新run取消旧run。
+- 维护指南现在给出真实本地命令、GitHub Actions唯一发布入口和一次性Pages Source设置；不支持手改gh-pages或上传未检查目录。targeted 4 tests / 24 assertions、全量337 / 4603、typecheck与diff check通过；首次GitHub-hosted run需合并后观察。
+- Cache impact: **NONE**——只新增离线文档构建、测试与CI配置；runtime/provider/session/IPC/DB bytes、context epoch、模型调用和每turn token均不变。

@@ -10,6 +10,8 @@
 	},
 	"scripts": {
 		"pi": "bun run scripts/pi-launcher.ts",
+		"docs:build": "bun run scripts/docs-site.ts build",
+		"docs:check": "bun run scripts/docs-site.ts check",
 		"start": "bun run src/main.ts start",
 		"restart": "bun run src/main.ts restart",
 		"status": "bun run src/main.ts status",

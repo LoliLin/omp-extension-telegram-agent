@@ -1,6 +1,6 @@
 # Pi Telegram Agent user guide
 
-[中文指南](../../zh/src/README.md) · [Back to the project README](../../../../README.en.md)
+[中文指南](https://mizorewww.github.io/pi-extension-telegram-agent/zh/) · [Back to the project README](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/README.en.md)
 
 This guide is for operators and users. You can connect 1..N configurable AI companions to one Telegram supergroup and use Pi's native interface without first learning the internal architecture.
 

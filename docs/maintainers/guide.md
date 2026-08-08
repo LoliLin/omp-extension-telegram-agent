@@ -68,15 +68,23 @@ Task: PLAN-...#Tn
 - `docs/user-guide/zh/src/`
 - `docs/user-guide/en/src/`
 
-T13f负责加入固定版本的mdBook、统一build/link-check命令与GitHub Pages workflow。在这些入口落地前，不支持手工Pages发布，也不要声明CI已部署。完成后的发布流程必须满足：
+本地与CI固定使用mdBook 0.5.4。首次本地构建前安装相同版本：
 
-1. 本地与CI调用同一docs check命令；
-2. pull request只build/check，不部署；
-3. 默认分支成功后才上传纯静态artifact并deploy；
-4. workflow只有`contents: read`以及deploy job所需`pages: write`、`id-token: write`；
-5. 不向workflow注入deployment secret；并发更新取消旧Pages run。
+```bash
+cargo install mdbook --version 0.5.4 --locked
+bun run docs:build  # 只构建中文、English与语言入口到build/docs
+bun run docs:check  # 重新构建并检查source、生成HTML、fragment与语言切换
+```
 
-T13f完成时本节必须改为真实命令和workflow链接，并在 [testing](../testing.md) 记录双语build/link结果。
+发布只通过 [Documentation workflow](../../.github/workflows/docs-pages.yml)：
+
+1. pull request、手工运行与`main` push都执行同一个`bun run docs:check`，并上传已检查的单一纯静态artifact；
+2. 只有`main` push进入`github-pages` environment并deploy，PR不获得deploy job；
+3. build权限只有`contents: read`，deploy job才有`pages: write`和`id-token: write`；workflow不读取deployment secret；
+4. 所有actions使用不可变commit SHA，mdBook archive固定版本和SHA-256；同一ref的新run会取消旧run；
+5. 仓库管理员只需在GitHub Settings → Pages把Source设为“GitHub Actions”。workflow不会请求PAT或偷偷自动修改仓库设置。
+
+修改任一用户章节时同步另一语言，先运行`bun run docs:check`，再开PR。合并后的environment URL是发布结果的权威地址；不要手工改`gh-pages`分支或上传未检查目录。构建与断链基线见 [testing](../testing.md)。
 
 ## 完成前检查
 

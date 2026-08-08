@@ -64,7 +64,7 @@ bun run scripts/e2e-agent.ts --bot friend
 bun run scripts/e2e-compaction-manual.ts --bot friend
 ```
 
-These commands may incur cost or post group messages. Read the [daemon runbook](../../../runbooks/daemon.md) first and record the selected bot, expected side effects, and rollback.
+These commands may incur cost or post group messages. Read the [daemon runbook](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/runbooks/daemon.md) first and record the selected bot, expected side effects, and rollback.
 
 ## Multiple groups
 

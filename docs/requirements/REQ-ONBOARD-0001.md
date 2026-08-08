@@ -1,6 +1,6 @@
 # REQ-ONBOARD-0001: clone 到 `/tg config` 的开箱体验与双语用户文档
 
-- **Status:** In Progress（T13a–T13e 已实现；待 T13f mdBook/Pages 与 T14 总验收）
+- **Status:** Implemented（T13a–T13f 已实现；待 T14 真实 smoke 与总验收记录）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：clone 后运行 `bun run pi`、完成 `/tg config` 即可使用；优先写有类型和注释的本机 config.ts 而非 JSON；README / 用户指南 / 机器维护指南分层；提供公开提示词模板但不提交实际部署提示词；中文与 English 文档用 mdBook + GitHub Actions 发布；用户指南增加以成本优势为重点的设计概览
 - **依赖:** REQ-PLAT-0001、REQ-DOC-0001、REQ-OPS-0002
@@ -107,3 +107,9 @@
 
 - Plans: `PLAN-20260808-complete-new-reqs#T10q/T13a-T13f`
 - Commits: 从 `Requirement: REQ-ONBOARD-0001` git trailer 查
+
+## T13f 实施证据（2026-08-08）
+
+- 中文与English各有独立`book.toml`，固定mdBook 0.5.4；`bun run docs:check`使用同一构建产物检查README、SUMMARY、全部source、本地HTML target/fragment与双向语言入口。
+- 真实本地构建生成21个HTML页面；18个Markdown文件的92个链接与生成站点600个链接全部通过，artifact写入无时间戳的`verification.json`。
+- Documentation workflow把checkout/setup/actions固定到不可变SHA，mdBook Linux archive固定SHA-256。PR只build/check/upload；只有`main` push的deploy job拥有`pages: write`与`id-token: write`，无secret输入且同ref并发取消。

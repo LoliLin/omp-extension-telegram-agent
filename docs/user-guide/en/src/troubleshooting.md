@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Choose a safe next action from the observable symptom. Do not delete data, PID files, or sockets just to experiment. The [daemon runbook](../../../runbooks/daemon.md) owns full recovery procedures.
+Choose a safe next action from the observable symptom. Do not delete data, PID files, or sockets just to experiment. The [daemon runbook](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/runbooks/daemon.md) owns full recovery procedures.
 
 ## `bun run pi` does not start
 

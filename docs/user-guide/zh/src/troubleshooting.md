@@ -1,6 +1,6 @@
 # 故障排查
 
-先从症状选择安全的下一步；不要删除data、pid或socket来“试一下”。完整进程恢复规则见[daemon runbook](../../../runbooks/daemon.md)。
+先从症状选择安全的下一步；不要删除data、pid或socket来“试一下”。完整进程恢复规则见[daemon runbook](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/runbooks/daemon.md)。
 
 ## `bun run pi` 无法启动
 

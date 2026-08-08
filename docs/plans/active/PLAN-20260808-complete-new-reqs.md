@@ -69,7 +69,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13c** — 建立可取消、原子写入且不泄露 secret 的 config draft/writer，覆盖 validate/editor/backup-replace；validates: ONBOARD-0001 AC2/AC4；commit: onboarding config core
 - [x] **T13d** — 用 Pi 原生 dialogs 实现 `/tg config`，成功后复用受控 readiness 并建立 live feed；validates: ONBOARD-0001 AC2/AC5；commit: native setup wizard
 - [x] **T13e** — 将双语 README/package/project/runbook/example 重写为用户旅程，加入双语用户指南、成本设计概览与机器维护指南；validates: PLAT-0001 AC6 + DOC-0001 AC1–AC6 + ONBOARD-0001 AC7/AC9/AC11；commit: docs/metadata only
-- [ ] **T13f** — 配置双 mdBook build/link check 与最小权限 GitHub Pages CI/deploy；validates: ONBOARD-0001 AC8/AC10；commit: docs publishing
+- [x] **T13f** — 配置双 mdBook build/link check 与最小权限 GitHub Pages CI/deploy；validates: ONBOARD-0001 AC8/AC10；commit: docs publishing
 - [ ] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
 
 ## 每个 commit 的固定流程
