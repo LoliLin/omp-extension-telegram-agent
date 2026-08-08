@@ -30,7 +30,9 @@ async function waitForCompaction(timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		const row = db
-			.query("SELECT payload FROM agent_events WHERE bot_id = ? AND kind = 'compaction' AND ts > ? ORDER BY id DESC LIMIT 1")
+			.query(
+				"SELECT payload FROM agent_events WHERE bot_id = ? AND kind = 'compaction' AND ts > ? ORDER BY id DESC LIMIT 1",
+			)
 			.get(bot.id, Date.now() - timeoutMs - 60_000) as { payload: string } | null;
 		if (row) return true;
 		await new Promise((r) => setTimeout(r, 500));
@@ -57,7 +59,9 @@ if (epochAfter <= epochBefore) {
 	process.exit(1);
 }
 
-const errors = db.query("SELECT payload FROM agent_events WHERE bot_id = ? AND kind = 'error' AND ts > ?").all(bot.id, Date.now() - 120_000);
+const errors = db
+	.query("SELECT payload FROM agent_events WHERE bot_id = ? AND kind = 'error' AND ts > ?")
+	.all(bot.id, Date.now() - 120_000);
 if (errors.length > 0) {
 	console.error("[e2e] FAIL: unexpected error events:", JSON.stringify(errors));
 	process.exit(1);

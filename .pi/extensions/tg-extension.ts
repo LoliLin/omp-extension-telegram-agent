@@ -14,10 +14,7 @@ import * as Tui from "@earendil-works/pi-tui";
 import { loadConfig, type BotConfig } from "../../src/config.ts";
 import { redactDaemonLog } from "../../src/daemon/control.ts";
 import type { AgentStreamFrame, BotStats, EvtItem, MsgItem, TimelineItem } from "../../src/ipc.ts";
-import {
-	runNativeConfigWizard,
-	type PiModelPreflight,
-} from "../../src/onboarding/config-wizard.ts";
+import { runNativeConfigWizard, type PiModelPreflight } from "../../src/onboarding/config-wizard.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
 	mediaFileRevision,
@@ -56,9 +53,7 @@ export type MediaConverter = (
 ) => Promise<{ data: string; mimeType: string } | null>;
 
 type MediaReadyListener = (filename: string) => void;
-type MediaCacheState =
-	| { kind: "ready"; image: MediaImage; base64Bytes: number }
-	| { kind: "failed"; base64Bytes: 0 };
+type MediaCacheState = { kind: "ready"; image: MediaImage; base64Bytes: number } | { kind: "failed"; base64Bytes: 0 };
 
 interface PendingMediaConversion {
 	listeners: Set<MediaReadyListener>;
@@ -92,9 +87,15 @@ export class NativeMediaCache {
 		};
 	}
 
-	get size(): number { return this.states.size; }
-	get totalBase64Bytes(): number { return this.totalBytesValue; }
-	get pendingCount(): number { return this.pending.size; }
+	get size(): number {
+		return this.states.size;
+	}
+	get totalBase64Bytes(): number {
+		return this.totalBytesValue;
+	}
+	get pendingCount(): number {
+		return this.pending.size;
+	}
 
 	resolve(message: MsgItem, listener?: MediaReadyListener): MediaImage | null {
 		const source = readMediaImage(message);
@@ -166,20 +167,23 @@ export class NativeMediaCache {
 		}
 	}
 
-	private isValidPng(value: { data: string; mimeType: string } | null): value is { data: string; mimeType: "image/png" } {
+	private isValidPng(
+		value: { data: string; mimeType: string } | null,
+	): value is { data: string; mimeType: "image/png" } {
 		if (!value || value.mimeType !== "image/png" || !value.data || value.data.length > this.limits.maxItemBase64Bytes) {
 			return false;
 		}
 		const bytes = Buffer.from(value.data, "base64");
-		const hasSignature = bytes.length >= 8
-			&& bytes[0] === 0x89
-			&& bytes[1] === 0x50
-			&& bytes[2] === 0x4e
-			&& bytes[3] === 0x47
-			&& bytes[4] === 0x0d
-			&& bytes[5] === 0x0a
-			&& bytes[6] === 0x1a
-			&& bytes[7] === 0x0a;
+		const hasSignature =
+			bytes.length >= 8 &&
+			bytes[0] === 0x89 &&
+			bytes[1] === 0x50 &&
+			bytes[2] === 0x4e &&
+			bytes[3] === 0x47 &&
+			bytes[4] === 0x0d &&
+			bytes[5] === 0x0a &&
+			bytes[6] === 0x1a &&
+			bytes[7] === 0x0a;
 		if (!hasSignature) return false;
 		const dimensions = Tui.getPngDimensions(value.data);
 		return dimensions != null && dimensions.widthPx > 0 && dimensions.heightPx > 0;
@@ -267,11 +271,26 @@ function botChildren(dispatch: TgCommandDispatch, optional: boolean, includeOff 
 
 export const TG_COMMAND_TREE: readonly TgCommandNode[] = [
 	{ token: "config", description: "Configure Telegram with Pi dialogs", dispatch: "config" },
-	{ token: "attach", description: "Open all bots or one bot for chat", dispatch: "attach", children: botChildren("attach", true) },
-	{ token: "compose", description: "Use the feed scope, one bot, or Pi", dispatch: "compose", children: botChildren("compose", true, true) },
+	{
+		token: "attach",
+		description: "Open all bots or one bot for chat",
+		dispatch: "attach",
+		children: botChildren("attach", true),
+	},
+	{
+		token: "compose",
+		description: "Use the feed scope, one bot, or Pi",
+		dispatch: "compose",
+		children: botChildren("compose", true, true),
+	},
 	{ token: "more", description: "Load one older history page", dispatch: "more" },
 	{ token: "detach", description: "Disconnect the live feed", dispatch: "detach" },
-	{ token: "panel", description: "Select or restore Telegram footer stats", dispatch: "panel", children: botChildren("panel", true, true) },
+	{
+		token: "panel",
+		description: "Select or restore Telegram footer stats",
+		dispatch: "panel",
+		children: botChildren("panel", true, true),
+	},
 	{ token: "status", description: "Show detailed usage", dispatch: "status", children: botChildren("status", true) },
 	{ token: "start", description: "Start the Telegram daemon", dispatch: "start" },
 	{ token: "restart", description: "Gracefully restart every configured bot", dispatch: "restart" },
@@ -279,18 +298,30 @@ export const TG_COMMAND_TREE: readonly TgCommandNode[] = [
 	{ token: "status-daemon", description: "Show daemon process status", dispatch: "status-daemon" },
 ];
 
-function runChildProcess(command: string, args: readonly string[], options: { cwd: string }): Promise<ProcessRunResult> {
+function runChildProcess(
+	command: string,
+	args: readonly string[],
+	options: { cwd: string },
+): Promise<ProcessRunResult> {
 	return new Promise((resolve) => {
 		const child = spawn(command, [...args], { cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"] });
 		let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
 		let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0);
 		const append = (current: Buffer<ArrayBufferLike>, chunk: Buffer<ArrayBufferLike>): Buffer<ArrayBufferLike> => {
 			const combined = Buffer.concat([current, chunk]);
-			return combined.length <= PROCESS_OUTPUT_MAX_BYTES ? combined : combined.subarray(combined.length - PROCESS_OUTPUT_MAX_BYTES);
+			return combined.length <= PROCESS_OUTPUT_MAX_BYTES
+				? combined
+				: combined.subarray(combined.length - PROCESS_OUTPUT_MAX_BYTES);
 		};
-		child.stdout.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk); });
-		child.stderr.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk); });
-		child.once("error", (error) => resolve({ status: null, stdout: stdout.toString(), stderr: `${stderr.toString()}${error.message}` }));
+		child.stdout.on("data", (chunk: Buffer) => {
+			stdout = append(stdout, chunk);
+		});
+		child.stderr.on("data", (chunk: Buffer) => {
+			stderr = append(stderr, chunk);
+		});
+		child.once("error", (error) =>
+			resolve({ status: null, stdout: stdout.toString(), stderr: `${stderr.toString()}${error.message}` }),
+		);
 		child.once("close", (status) => resolve({ status, stdout: stdout.toString(), stderr: stderr.toString() }));
 	});
 }
@@ -317,7 +348,7 @@ export function completeTgArguments(
 	const tokens = normalizedTokens(argumentPrefix);
 	const startsNextToken = /\s$/.test(argumentPrefix);
 	const path = startsNextToken ? tokens : tokens.slice(0, -1);
-	const partial = startsNextToken ? "" : tokens.at(-1) ?? "";
+	const partial = startsNextToken ? "" : (tokens.at(-1) ?? "");
 	let candidates = tree;
 	const valuePath: string[] = [];
 
@@ -356,7 +387,9 @@ export function parseTgArguments(
 	for (let index = 1; index < tokens.length; index++) {
 		const children: TgCommandChildren | undefined = node.children;
 		if (!children) return { ok: false, reason: "extra" };
-		const child: TgCommandNode | undefined = children.resolve(bots).find((candidate) => candidate.token === tokens[index]);
+		const child: TgCommandNode | undefined = children
+			.resolve(bots)
+			.find((candidate) => candidate.token === tokens[index]);
 		if (child) {
 			node = child;
 			continue;
@@ -417,9 +450,8 @@ function statsText(botId: string, stats: BotStats): string {
 	const denominator = stats.cacheRead + cacheWrite + stats.cacheMiss;
 	const hit = denominator > 0 ? (stats.cacheRead / denominator) * 100 : 0;
 	const since = stats.firstRunTs != null ? `${fmtDay(stats.firstRunTs)} ${fmtClock(stats.firstRunTs)}` : "unknown";
-	const averageLatency = (stats.latencySamples ?? 0) > 0
-		? fmtDuration((stats.totalLatencyMs ?? 0) / (stats.latencySamples ?? 1))
-		: "n/a";
+	const averageLatency =
+		(stats.latencySamples ?? 0) > 0 ? fmtDuration((stats.totalLatencyMs ?? 0) / (stats.latencySamples ?? 1)) : "n/a";
 	const last = stats.last;
 	const lastLine = last
 		? `last · ep${last.epoch} · ctx ${fmtNum(last.contextTokens)} · miss ${fmtNum(last.cacheMiss)} · read ${fmtNum(last.cacheRead)} · write ${fmtNum(last.cacheWrite ?? 0)} · out ${fmtNum(last.outputTokens)} · reasoning ${fmtNum(last.reasoningTokens ?? 0)} · ${last.latencyMs == null ? "latency n/a" : fmtDuration(last.latencyMs)} · $${last.cost.toFixed(last.cost >= 1 ? 2 : 4)}`
@@ -433,26 +465,43 @@ function eventBody(event: EvtItem): string {
 		const payload = JSON.parse(event.payload) as Record<string, unknown>;
 		if (event.evtKind === "thinking") return `thinking · ${sanitize(String(payload.text ?? "")).slice(0, 400)}`;
 		if (event.evtKind === "assistant_text") return sanitize(String(payload.text ?? "")).slice(0, 400);
-		if (event.evtKind === "tool_call") return `${sanitize(String(payload.tool ?? "tool"))} · ${sanitize(JSON.stringify(payload.args ?? {})).slice(0, 180)}`;
-		if (event.evtKind === "tool_result") return `${sanitize(String(payload.tool ?? "tool"))} · ${payload.isError ? "error" : "done"}`;
+		if (event.evtKind === "tool_call")
+			return `${sanitize(String(payload.tool ?? "tool"))} · ${sanitize(JSON.stringify(payload.args ?? {})).slice(0, 180)}`;
+		if (event.evtKind === "tool_result")
+			return `${sanitize(String(payload.tool ?? "tool"))} · ${payload.isError ? "error" : "done"}`;
 		return `${sanitize(event.evtKind)} · ${sanitize(event.payload).slice(0, 240)}`;
 	} catch {
 		return sanitize(event.evtKind);
 	}
 }
 
-function cardHeader(identity: string, metadata: string, theme: Theme, color: Parameters<Theme["fg"]>[0]): Tui.Component {
-	const left = theme.bold(theme.fg(color, sanitize(identity))), right = theme.fg("dim", metadata);
-	return new Tui.HStack([
-		{ component: new Tui.TruncatedText(left), basis: Tui.visibleWidth(left), grow: 1, minSize: 8 },
-		{ component: new Tui.TruncatedText(right), basis: Tui.visibleWidth(right), minSize: 12 },
-	], { gap: 2 });
+function cardHeader(
+	identity: string,
+	metadata: string,
+	theme: Theme,
+	color: Parameters<Theme["fg"]>[0],
+): Tui.Component {
+	const left = theme.bold(theme.fg(color, sanitize(identity))),
+		right = theme.fg("dim", metadata);
+	return new Tui.HStack(
+		[
+			{ component: new Tui.TruncatedText(left), basis: Tui.visibleWidth(left), grow: 1, minSize: 8 },
+			{ component: new Tui.TruncatedText(right), basis: Tui.visibleWidth(right), minSize: 12 },
+		],
+		{ gap: 2 },
+	);
 }
 
 export type MediaImageResolver = (item: MsgItem) => MediaImage | null;
 
-export function itemComponent(item: TimelineItem, theme: Theme, resolveMedia: MediaImageResolver = readMediaImage): Tui.Component {
-	const box = new Tui.Box(1, 0, (text) => theme.bg(item.kind === "msg" && !item.isBot ? "userMessageBg" : "customMessageBg", text));
+export function itemComponent(
+	item: TimelineItem,
+	theme: Theme,
+	resolveMedia: MediaImageResolver = readMediaImage,
+): Tui.Component {
+	const box = new Tui.Box(1, 0, (text) =>
+		theme.bg(item.kind === "msg" && !item.isBot ? "userMessageBg" : "customMessageBg", text),
+	);
 	if (item.kind === "evt") {
 		box.addChild(cardHeader(`${item.botName} · bot ${item.botId}`, `LOCAL · ${fmtClock(item.ts)}`, theme, "warning"));
 		box.addChild(new Tui.Text(theme.fg("customMessageText", eventBody(item)), 0, 0));
@@ -460,27 +509,56 @@ export function itemComponent(item: TimelineItem, theme: Theme, resolveMedia: Me
 	}
 
 	const sender = `${item.senderName}${item.botId ? ` · bot ${item.botId}` : item.username ? ` · @${item.username}` : ""}`;
-	box.addChild(cardHeader(sender, `#${item.messageId} · ${fmtClock(item.ts)}${item.edited ? " · edited" : ""}`, theme, item.isBot ? "accent" : "userMessageText"));
+	box.addChild(
+		cardHeader(
+			sender,
+			`#${item.messageId} · ${fmtClock(item.ts)}${item.edited ? " · edited" : ""}`,
+			theme,
+			item.isBot ? "accent" : "userMessageText",
+		),
+	);
 	if (item.replyTo != null) box.addChild(new Tui.Text(theme.fg("muted", `↪ reply to #${item.replyTo}`), 0, 0));
-	if (item.text) box.addChild(new Tui.Text(theme.fg(item.isBot ? "customMessageText" : "userMessageText", sanitize(item.text)), 0, 0));
+	if (item.text)
+		box.addChild(
+			new Tui.Text(theme.fg(item.isBot ? "customMessageText" : "userMessageText", sanitize(item.text)), 0, 0),
+		);
 	if (item.mediaKind) {
-		box.addChild(new Tui.Text(theme.fg("muted", `[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]`), 0, 0));
+		box.addChild(
+			new Tui.Text(
+				theme.fg("muted", `[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]`),
+				0,
+				0,
+			),
+		);
 		const image = resolveMedia(item);
-		const imageBounds = item.mediaKind === "sticker"
-			? { maxWidthCells: 24, maxHeightCells: 12 }
-			: { maxWidthCells: 56, maxHeightCells: 16 };
-		if (image) box.addChild(new Tui.Image(image.base64, image.mime, { fallbackColor: (text) => theme.fg("muted", text) }, { ...imageBounds, filename: basename(image.filename) }));
-		if (item.mediaDesc?.trim()) box.addChild(new Tui.Text(theme.fg("muted", `视觉理解 · ${sanitize(item.mediaDesc.trim())}`), 0, 0));
+		const imageBounds =
+			item.mediaKind === "sticker"
+				? { maxWidthCells: 24, maxHeightCells: 12 }
+				: { maxWidthCells: 56, maxHeightCells: 16 };
+		if (image)
+			box.addChild(
+				new Tui.Image(
+					image.base64,
+					image.mime,
+					{ fallbackColor: (text) => theme.fg("muted", text) },
+					{ ...imageBounds, filename: basename(image.filename) },
+				),
+			);
+		if (item.mediaDesc?.trim())
+			box.addChild(new Tui.Text(theme.fg("muted", `视觉理解 · ${sanitize(item.mediaDesc.trim())}`), 0, 0));
 	}
 	return box;
 }
 
 export function streamComponent(stream: Extract<AgentStreamFrame, { phase: "update" }>, theme: Theme): Tui.Component {
 	const box = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
-	box.addChild(cardHeader(`${stream.botName} · bot ${stream.botId}`, `STREAMING · ${fmtClock(stream.ts)}`, theme, "warning"));
+	box.addChild(
+		cardHeader(`${stream.botName} · bot ${stream.botId}`, `STREAMING · ${fmtClock(stream.ts)}`, theme, "warning"),
+	);
 	if (stream.thinking) box.addChild(new Tui.Text(theme.fg("muted", `thinking · ${sanitize(stream.thinking)}`), 0, 0));
 	if (stream.text) box.addChild(new Tui.Text(theme.fg("customMessageText", sanitize(stream.text)), 0, 0));
-	for (const tool of stream.toolCalls) box.addChild(new Tui.Text(theme.fg("accent", `${sanitize(tool.name)} · ${sanitize(tool.arguments)}`), 0, 0));
+	for (const tool of stream.toolCalls)
+		box.addChild(new Tui.Text(theme.fg("accent", `${sanitize(tool.name)} · ${sanitize(tool.arguments)}`), 0, 0));
 	return box;
 }
 
@@ -528,7 +606,14 @@ export class TelegramFooterTelemetry {
 	private scope(): {
 		bot: FooterBot | undefined;
 		latest: NonNullable<BotStats["last"]> | null;
-		totals: { runs: number; cacheMiss: number; cacheRead: number; cacheWrite: number; outputTokens: number; cost: number };
+		totals: {
+			runs: number;
+			cacheMiss: number;
+			cacheRead: number;
+			cacheWrite: number;
+			outputTokens: number;
+			cost: number;
+		};
 	} {
 		const selectedBots = this.filter ? this.bots.filter((bot) => bot.id === this.filter) : this.bots;
 		let latest: NonNullable<BotStats["last"]> | null = null;
@@ -542,11 +627,15 @@ export class TelegramFooterTelemetry {
 			totals.cacheWrite += stats.cacheWrite ?? 0;
 			totals.outputTokens += stats.outputTokens;
 			totals.cost += stats.cost;
-			if (stats.last && (!latest || stats.last.ts > latest.ts || (stats.last.ts === latest.ts && stats.last.id > latest.id))) latest = stats.last;
+			if (
+				stats.last &&
+				(!latest || stats.last.ts > latest.ts || (stats.last.ts === latest.ts && stats.last.id > latest.id))
+			)
+				latest = stats.last;
 		}
 		const bot = this.filter
 			? selectedBots[0]
-			: this.bots.find((candidate) => candidate.id === latest?.botId) ?? selectedBots[0];
+			: (this.bots.find((candidate) => candidate.id === latest?.botId) ?? selectedBots[0]);
 		return { bot, latest, totals };
 	}
 
@@ -570,29 +659,31 @@ export class TelegramFooterTelemetry {
 		if (totals.runs === 0) return [];
 		const model = this.modelFor(bot);
 		const totalTokens = totals.cacheMiss + totals.cacheRead + totals.cacheWrite + totals.outputTokens;
-		return [{
-			type: "message",
-			id: "telegram-telemetry",
-			parentId: null,
-			timestamp: new Date(0).toISOString(),
-			message: {
-				role: "assistant",
-				content: [],
-				api: model?.api ?? "openai-completions",
-				provider: model?.provider ?? "telegram",
-				model: model?.id ?? bot?.model ?? "telegram",
-				usage: {
-					input: totals.cacheMiss,
-					output: totals.outputTokens,
-					cacheRead: totals.cacheRead,
-					cacheWrite: totals.cacheWrite,
-					totalTokens,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: totals.cost },
+		return [
+			{
+				type: "message",
+				id: "telegram-telemetry",
+				parentId: null,
+				timestamp: new Date(0).toISOString(),
+				message: {
+					role: "assistant",
+					content: [],
+					api: model?.api ?? "openai-completions",
+					provider: model?.provider ?? "telegram",
+					model: model?.id ?? bot?.model ?? "telegram",
+					usage: {
+						input: totals.cacheMiss,
+						output: totals.outputTokens,
+						cacheRead: totals.cacheRead,
+						cacheWrite: totals.cacheWrite,
+						totalTokens,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: totals.cost },
+					},
+					stopReason: "stop",
+					timestamp: 0,
 				},
-				stopReason: "stop",
-				timestamp: 0,
 			},
-		}];
+		];
 	}
 
 	private contextUsage(): { tokens: number; contextWindow: number; percent: number } {
@@ -631,8 +722,16 @@ export class TelegramFeed extends Tui.Container {
 		this.mediaListener = this.createMediaListener();
 		this.mediaResolver = (item) => this.mediaCache.resolve(item, this.mediaListener);
 		const header = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
-		header.addChild(new Tui.Text(theme.bold(theme.fg("accent", filter ? `Telegram · bot ${filter}` : "Telegram · all bots")), 0, 0));
-		header.addChild(new Tui.Text(theme.fg("dim", "Pi transcript owns scrolling, resize, selection and images · /tg more · /tg detach"), 0, 0));
+		header.addChild(
+			new Tui.Text(theme.bold(theme.fg("accent", filter ? `Telegram · bot ${filter}` : "Telegram · all bots")), 0, 0),
+		);
+		header.addChild(
+			new Tui.Text(
+				theme.fg("dim", "Pi transcript owns scrolling, resize, selection and images · /tg more · /tg detach"),
+				0,
+				0,
+			),
+		);
 		this.addChild(header);
 		this.addChild(new Tui.Spacer(1));
 		this.addChild(this.content);
@@ -640,11 +739,21 @@ export class TelegramFeed extends Tui.Container {
 		this.clientValue = factory(filter, { onEvent: (event) => this.onEvent(event) });
 	}
 
-	get client(): TimelinePort { return this.clientValue; }
-	get stats(): Record<string, BotStats> { return this.statsValue; }
-	get status(): string { return this.statusValue; }
-	start(): void { void this.clientValue.connect(); }
-	more(): boolean { return this.clientValue.requestOlder(); }
+	get client(): TimelinePort {
+		return this.clientValue;
+	}
+	get stats(): Record<string, BotStats> {
+		return this.statsValue;
+	}
+	get status(): string {
+		return this.statusValue;
+	}
+	start(): void {
+		void this.clientValue.connect();
+	}
+	more(): boolean {
+		return this.clientValue.requestOlder();
+	}
 
 	suspendForRestart(): void {
 		this.clientValue.dispose();
@@ -672,7 +781,9 @@ export class TelegramFeed extends Tui.Container {
 		this.setStatus(reason);
 	}
 
-	dispose(): void { this.detach(); }
+	dispose(): void {
+		this.detach();
+	}
 
 	private onEvent(event: TimelineEvent): void {
 		if (event.type === "append") {
@@ -717,10 +828,12 @@ export class TelegramFeed extends Tui.Container {
 	}
 
 	private appendItems(items: TimelineItem[]): void {
-		let previousDay = this.items.length > items.length ? fmtDay(this.items[this.items.length - items.length - 1]!.ts) : "";
+		let previousDay =
+			this.items.length > items.length ? fmtDay(this.items[this.items.length - items.length - 1]!.ts) : "";
 		for (const item of items) {
 			const day = fmtDay(item.ts);
-			if (day !== previousDay) this.content.addChild(new Tui.Text(this.theme.fg("dim", `──────── ${day} ────────`), 1, 0));
+			if (day !== previousDay)
+				this.content.addChild(new Tui.Text(this.theme.fg("dim", `──────── ${day} ────────`), 1, 0));
 			const slot = new Tui.Container();
 			slot.addChild(itemComponent(item, this.theme, this.mediaResolver));
 			this.cardSlots.set(this.itemKey(item), slot);
@@ -738,9 +851,7 @@ export class TelegramFeed extends Tui.Container {
 
 	private itemKey(item: TimelineItem): string {
 		if (item.kind === "msg") return `m:${item.chatId}:${item.messageId}`;
-		return item.evtId != null
-			? `e:${item.evtId}`
-			: `e?:${item.botId}:${item.ts}:${item.evtKind}:${item.payload}`;
+		return item.evtId != null ? `e:${item.evtId}` : `e?:${item.botId}:${item.ts}:${item.evtKind}:${item.payload}`;
 	}
 
 	private refreshMedia(filename: string): void {
@@ -786,7 +897,10 @@ export class TelegramFeed extends Tui.Container {
 			if (oldest) this.streams.delete(oldest);
 		}
 		this.streams.delete(key);
-		this.streams.set(key, stream.phase === "start" ? { ...stream, phase: "update", thinking: "", text: "", toolCalls: [] } : stream);
+		this.streams.set(
+			key,
+			stream.phase === "start" ? { ...stream, phase: "update", thinking: "", text: "", toolCalls: [] } : stream,
+		);
 		this.rebuildStreams();
 	}
 
@@ -837,7 +951,16 @@ function detachedEntry(data: FeedEntry, theme: Theme, supported: boolean): Tui.C
 	const box = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
 	const scope = data.filter ? `bot ${data.filter}` : "all bots";
 	box.addChild(new Tui.Text(theme.bold(theme.fg("accent", `Telegram · ${scope}`)), 0, 0));
-	box.addChild(new Tui.Text(theme.fg("dim", supported ? "detached · run /tg attach to reconnect" : `requires Pi >= ${MIN_PI_VERSION} · run bun run pi`), 0, 0));
+	box.addChild(
+		new Tui.Text(
+			theme.fg(
+				"dim",
+				supported ? "detached · run /tg attach to reconnect" : `requires Pi >= ${MIN_PI_VERSION} · run bun run pi`,
+			),
+			0,
+			0,
+		),
+	);
 	return box;
 }
 
@@ -845,7 +968,9 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	const rootDir = options.rootDir ?? process.cwd();
 	const hostVersion = options.hostVersion ?? VERSION;
 	const supported = supportsPiVersion(hostVersion);
-	const factory = options.timelineFactory ?? ((filter, hooks) => new TimelineClient(join(rootDir, "data", "daemon.sock"), filter, hooks));
+	const factory =
+		options.timelineFactory ??
+		((filter, hooks) => new TimelineClient(join(rootDir, "data", "daemon.sock"), filter, hooks));
 	const mediaCache = options.mediaCache ?? new NativeMediaCache();
 	const runProcess = options.processRunner ?? runChildProcess;
 	const makeId = options.idFactory ?? randomUUID;
@@ -872,7 +997,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		}
 	};
 
-	const composeLabel = (bot: ComposeIdentity) => bot.name === bot.id ? bot.id : `${bot.id} (${bot.name})`;
+	const composeLabel = (bot: ComposeIdentity) => (bot.name === bot.id ? bot.id : `${bot.id} (${bot.name})`);
 	const scopeIdentities = (): ComposeIdentity[] => {
 		const identities = getCompletionBots();
 		return active?.filter ? identities.filter((identity) => identity.id === active?.filter) : identities;
@@ -962,7 +1087,10 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			const bots = loadConfig(rootDir).bots;
 			const bot = bots.find((candidate) => candidate.id === arg);
 			if (bot) return bot;
-			ui.notify(`unknown bot id "${arg}"; configured bots: ${bots.map((candidate) => candidate.id).join(", ") || "(none)"}`, "error");
+			ui.notify(
+				`unknown bot id "${arg}"; configured bots: ${bots.map((candidate) => candidate.id).join(", ") || "(none)"}`,
+				"error",
+			);
 		} catch (error) {
 			ui.notify(`config error: ${(error as Error).message}`, "error");
 		}
@@ -1002,7 +1130,9 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		const existing = feeds.get(data.instanceId);
 		if (existing) return existing;
 		if (!supported || pending?.data.instanceId !== data.instanceId) return detachedEntry(data, theme, supported);
-		const feed = new TelegramFeed(data.filter, theme, factory, pending.changed, mediaCache, () => requestHostRender?.());
+		const feed = new TelegramFeed(data.filter, theme, factory, pending.changed, mediaCache, () =>
+			requestHostRender?.(),
+		);
 		pending = null;
 		feeds.set(data.instanceId, feed);
 		active = feed;
@@ -1103,11 +1233,15 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			} else {
 				ctx.ui.setEditorText(original);
 				if (result.code === "unknown_outcome") {
-					ctx.ui.notify("Telegram send result is unknown. Check the group before retrying to avoid a duplicate.", "warning");
+					ctx.ui.notify(
+						"Telegram send result is unknown. Check the group before retrying to avoid a duplicate.",
+						"warning",
+					);
 					if (composeGeneration === generation && compose === mode) closeCompose(ctx.ui);
 				} else {
 					ctx.ui.notify(`Telegram send failed (${result.code}): ${result.error}`, "error");
-					if (result.code === "service_unavailable" && composeGeneration === generation && compose === mode) closeCompose(ctx.ui);
+					if (result.code === "service_unavailable" && composeGeneration === generation && compose === mode)
+						closeCompose(ctx.ui);
 				}
 			}
 		} catch (error) {
@@ -1135,7 +1269,10 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			const botArg = parsed.arguments[0];
 			const daemonSub = sub === "start" || sub === "restart" || sub === "stop" || sub === "status-daemon";
 			if (!supported && !daemonSub) {
-				ctx.ui.notify(`Telegram native UI requires Pi >= ${MIN_PI_VERSION}; host is ${hostVersion}. Run: bun run pi`, "error");
+				ctx.ui.notify(
+					`Telegram native UI requires Pi >= ${MIN_PI_VERSION}; host is ${hostVersion}. Run: bun run pi`,
+					"error",
+				);
 				return;
 			}
 			if (ctx.mode !== "tui" && !daemonSub) {
@@ -1160,7 +1297,9 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 							} catch {
 								return { ready: false, diagnostic: "failed to run the controlled daemon restart" };
 							}
-							const diagnostic = redactDaemonLog([processResult.stdout, processResult.stderr].filter(Boolean).join("\n"));
+							const diagnostic = redactDaemonLog(
+								[processResult.stdout, processResult.stderr].filter(Boolean).join("\n"),
+							);
 							const ready = processResult.status === 0 && /(^|\n)daemon ready(?:\s|$)/.test(diagnostic);
 							return { ready, ...(ready || !diagnostic ? {} : { diagnostic }) };
 						},
@@ -1203,17 +1342,27 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				}
 				if (!botArg) {
 					openScopeCompose(ctx.ui);
-					ctx.ui.notify("Telegram compose follows the active feed scope. Run /tg compose off to return to Pi.", "warning");
+					ctx.ui.notify(
+						"Telegram compose follows the active feed scope. Run /tg compose off to return to Pi.",
+						"warning",
+					);
 					return;
 				}
 				const bot = resolveBot(botArg, ctx.ui);
 				if (!bot) return;
 				const identity = { id: bot.id, name: bot.name };
 				openBotCompose(ctx.ui, identity);
-				ctx.ui.notify(`Telegram compose enabled: editor sends as ${composeLabel(identity)}. Run /tg compose off to return to Pi.`, "warning");
+				ctx.ui.notify(
+					`Telegram compose enabled: editor sends as ${composeLabel(identity)}. Run /tg compose off to return to Pi.`,
+					"warning",
+				);
 			} else if (sub === "more") {
 				if (!active) ctx.ui.notify("no live Telegram feed; run /tg attach first", "warning");
-				else if (!active.more()) ctx.ui.notify(active.client.hasMore ? "Telegram history request already in progress" : "oldest Telegram record reached", "info");
+				else if (!active.more())
+					ctx.ui.notify(
+						active.client.hasMore ? "Telegram history request already in progress" : "oldest Telegram record reached",
+						"info",
+					);
 			} else if (sub === "detach") {
 				if (!active) ctx.ui.notify("no live Telegram feed", "warning");
 				else {
@@ -1240,7 +1389,12 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				const filter = resolveFilter(botArg);
 				if (filter === undefined) return;
 				if (active && active.filter === filter && Object.keys(active.stats).length > 0) {
-					ctx.ui.notify(Object.entries(active.stats).map(([id, stats]) => statsText(id, stats)).join("\n\n"), "info");
+					ctx.ui.notify(
+						Object.entries(active.stats)
+							.map(([id, stats]) => statsText(id, stats))
+							.join("\n\n"),
+						"info",
+					);
 					return;
 				}
 				await new Promise<void>((resolve) => {
@@ -1258,7 +1412,9 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 					client = factory(filter, {
 						onEvent: (event) => {
 							if (event.type === "stats") {
-								const text = Object.entries(event.stats).map(([id, stats]) => statsText(id, stats)).join("\n\n");
+								const text = Object.entries(event.stats)
+									.map(([id, stats]) => statsText(id, stats))
+									.join("\n\n");
 								finish(text || "no telemetry yet", "info");
 							} else if (event.type === "disconnected") finish(event.reason, "error");
 						},
@@ -1268,9 +1424,10 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			} else if (daemonSub) {
 				const command = sub === "status-daemon" ? "status" : sub;
 				const restartFeed = sub === "restart" && ctx.mode === "tui" ? active : null;
-				const restoreFooter = sub === "restart" && ctx.mode === "tui" && footerOwner && footerTelemetry
-					? { owner: footerOwner, filter: footerTelemetry.filter }
-					: null;
+				const restoreFooter =
+					sub === "restart" && ctx.mode === "tui" && footerOwner && footerTelemetry
+						? { owner: footerOwner, filter: footerTelemetry.filter }
+						: null;
 				if (sub === "restart" && ctx.mode === "tui") {
 					closeCompose(ctx.ui);
 					restartFeed?.suspendForRestart();

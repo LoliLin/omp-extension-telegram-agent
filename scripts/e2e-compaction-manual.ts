@@ -31,7 +31,9 @@ if (epochAfter <= epochBefore) {
 	console.error(`FAIL: epoch did not advance (${epochBefore} -> ${epochAfter})`);
 	process.exit(1);
 }
-const errs = db.query("SELECT payload FROM agent_events WHERE bot_id = ? AND kind = 'error' AND ts > ?").all(bot.id, Date.now() - 120_000) as { payload: string }[];
+const errs = db
+	.query("SELECT payload FROM agent_events WHERE bot_id = ? AND kind = 'error' AND ts > ?")
+	.all(bot.id, Date.now() - 120_000) as { payload: string }[];
 if (errs.length > 0) {
 	console.error("FAIL: unexpected error events:", JSON.stringify(errs));
 	process.exit(1);

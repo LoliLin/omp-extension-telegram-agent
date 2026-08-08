@@ -81,12 +81,7 @@ export function listRecentMessageEvents(
 }
 
 /** Obligations remain addressable even after the ordinary cursor advanced past their event. */
-export function listReplyObligationEvents(
-	db: Database,
-	botId: string,
-	chatId: number,
-	limit = 64,
-): MessageEvent[] {
+export function listReplyObligationEvents(db: Database, botId: string, chatId: number, limit = 64): MessageEvent[] {
 	const rows = db
 		.query(`${EVENT_SELECT}
 			JOIN reply_obligations o
@@ -103,9 +98,9 @@ export function getConsumedSeq(db: Database, botId: string, chatId: number): num
 		.query("SELECT consumed_seq AS consumedSeq FROM bot_cursors WHERE bot_id = ? AND chat_id = ?")
 		.get(botId, chatId) as { consumedSeq: number } | null;
 	if (row) return row.consumedSeq;
-	const baseline = db
-		.query("SELECT value FROM daemon_state WHERE key = 'message_events_backfill_max_seq'")
-		.get() as { value: string } | null;
+	const baseline = db.query("SELECT value FROM daemon_state WHERE key = 'message_events_backfill_max_seq'").get() as {
+		value: string;
+	} | null;
 	return Number(baseline?.value ?? "0");
 }
 
@@ -122,14 +117,16 @@ export function setConsumedSeq(db: Database, botId: string, chatId: number, cons
 }
 
 export function listVisibleMessageIds(db: Database, botId: string, chatId: number, epoch: number): number[] {
-	return (db
-		.query(`
+	return (
+		db
+			.query(`
 			SELECT message_id AS messageId
 			  FROM bot_visible_messages
 			 WHERE bot_id = ? AND chat_id = ? AND context_epoch = ?
 			 ORDER BY message_id
 		`)
-		.all(botId, chatId, epoch) as { messageId: number }[]).map((row) => row.messageId);
+			.all(botId, chatId, epoch) as { messageId: number }[]
+	).map((row) => row.messageId);
 }
 
 export function replaceVisibleMessageIds(
@@ -249,7 +246,8 @@ export interface SessionManifest {
 }
 
 export function getSessionManifest(db: Database, botId: string): SessionManifest | null {
-	return db.query(`
+	return db
+		.query(`
 		SELECT bot_id AS botId,
 		       session_id AS sessionId,
 		       session_file AS sessionFile,
@@ -257,7 +255,8 @@ export function getSessionManifest(db: Database, botId: string): SessionManifest
 		       created_at AS createdAt
 		  FROM bot_session_manifest
 		 WHERE bot_id = ?
-	`).get(botId) as SessionManifest | null;
+	`)
+		.get(botId) as SessionManifest | null;
 }
 
 export function setSessionManifest(db: Database, manifest: SessionManifest): void {
@@ -270,11 +269,5 @@ export function setSessionManifest(db: Database, manifest: SessionManifest): voi
 			session_file = excluded.session_file,
 			context_fingerprint = excluded.context_fingerprint,
 			created_at = excluded.created_at
-	`).run(
-		manifest.botId,
-		manifest.sessionId,
-		manifest.sessionFile,
-		manifest.contextFingerprint,
-		manifest.createdAt,
-	);
+	`).run(manifest.botId, manifest.sessionId, manifest.sessionFile, manifest.contextFingerprint, manifest.createdAt);
 }

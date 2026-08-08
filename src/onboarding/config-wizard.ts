@@ -7,11 +7,7 @@ import {
 	PiModelConfigurationError,
 	type PiModelConfigurationCategory,
 } from "../agent/model-runtime.ts";
-import {
-	loadPiModelDefaults,
-	PiSettingsConfigurationError,
-	type PiModelDefaults,
-} from "../agent/model-settings.ts";
+import { loadPiModelDefaults, PiSettingsConfigurationError, type PiModelDefaults } from "../agent/model-settings.ts";
 import { redactDaemonLog } from "../daemon/control.ts";
 import {
 	OnboardingValidationError,
@@ -61,10 +57,7 @@ export interface PiModelSelection {
 
 export type PiModelPreflight = (rootDir: string) => Promise<PiModelSelection>;
 
-export type PiOnboardingPreflightCategory =
-	| "invalid_settings"
-	| "missing_default"
-	| PiModelConfigurationCategory;
+export type PiOnboardingPreflightCategory = "invalid_settings" | "missing_default" | PiModelConfigurationCategory;
 
 export class PiOnboardingPreflightError extends Error {
 	constructor(readonly category: PiOnboardingPreflightCategory) {
@@ -133,7 +126,10 @@ export async function runNativeConfigWizard(
 				ui.notify(`Configuration source verified; backup kept at ${result.backupPath}.`, "info");
 				return await finishReadiness(ui, dependencies, result.summary);
 			} catch (error) {
-				ui.notify(formatSafeFailure("Edited configuration is invalid", error, "The original file was preserved."), "error");
+				ui.notify(
+					formatSafeFailure("Edited configuration is invalid", error, "The original file was preserved."),
+					"error",
+				);
 				return { outcome: "failed" };
 			}
 		}
@@ -144,7 +140,10 @@ export async function runNativeConfigWizard(
 		if (!confirmed) return cancelled(ui);
 		mode = "backup-replace";
 	} else if (existsSync(typedPath) || existsSync(envPath)) {
-		const action = await ui.select("Partial or ambiguous Telegram configuration found", [WIZARD_ACTION_REPLACE, WIZARD_ACTION_CANCEL]);
+		const action = await ui.select("Partial or ambiguous Telegram configuration found", [
+			WIZARD_ACTION_REPLACE,
+			WIZARD_ACTION_CANCEL,
+		]);
 		if (!action || action === WIZARD_ACTION_CANCEL) return cancelled(ui);
 		const confirmed = await ui.confirm(
 			"Back up and replace local configuration?",
@@ -171,7 +170,14 @@ export async function runNativeConfigWizard(
 	try {
 		collected = await collectFirstRunDraft(ui, rootDir);
 	} catch (error) {
-		ui.notify(formatSafeFailure("Configuration could not start", error, "No files were changed; restore the public persona templates and retry."), "error");
+		ui.notify(
+			formatSafeFailure(
+				"Configuration could not start",
+				error,
+				"No files were changed; restore the public persona templates and retry.",
+			),
+			"error",
+		);
 		return { outcome: "failed" };
 	}
 	if (!collected) return cancelled(ui);
@@ -181,7 +187,9 @@ export async function runNativeConfigWizard(
 			`Bot: ${collected.bot.id} (${collected.bot.name})`,
 			`Pi model: ${formatPiModel(piModel)}`,
 			"Files: .env, telegram.config.ts, private persona",
-			mode === "backup-replace" ? "Existing local files will be backed up first." : "No existing local files will be overwritten.",
+			mode === "backup-replace"
+				? "Existing local files will be backed up first."
+				: "No existing local files will be overwritten.",
 		].join("\n"),
 	);
 	if (!approved) return cancelled(ui);
@@ -198,7 +206,14 @@ export async function runNativeConfigWizard(
 		}
 		return await finishReadiness(ui, dependencies, result.summary);
 	} catch (error) {
-		ui.notify(formatSafeFailure("Configuration was not written", error, "Existing files were preserved; run /tg config to retry."), "error");
+		ui.notify(
+			formatSafeFailure(
+				"Configuration was not written",
+				error,
+				"Existing files were preserved; run /tg config to retry.",
+			),
+			"error",
+		);
 		return { outcome: "failed" };
 	}
 }
@@ -221,12 +236,17 @@ async function collectFirstRunDraft(ui: ConfigWizardUI, rootDir: string): Promis
 	if (botName == null) return null;
 	const tokenEnv = await input(ui, "Name for the Telegram token in .env", "telegram_bot_token", "telegram_bot_token");
 	if (tokenEnv == null) return null;
-	const token = await input(ui, "Telegram bot token (Pi native input is visible)", "paste the BotFather token; it is written only to ignored .env");
+	const token = await input(
+		ui,
+		"Telegram bot token (Pi native input is visible)",
+		"paste the BotFather token; it is written only to ignored .env",
+	);
 	if (token == null) return null;
 
-	personaText = templateChoice === WIZARD_TEMPLATE_ZH
-		? personaText.replace("- 名字：请填写公开显示名。", `- 名字：${botName}`)
-		: personaText.replace("- Name: choose the public display name.", `- Name: ${botName}`);
+	personaText =
+		templateChoice === WIZARD_TEMPLATE_ZH
+			? personaText.replace("- 名字：请填写公开显示名。", `- 名字：${botName}`)
+			: personaText.replace("- Name: choose the public display name.", `- Name: ${botName}`);
 	return {
 		groupPeerId,
 		bot: { id: botId, name: botName, tokenEnv, token, personaText },
@@ -237,7 +257,9 @@ async function collectFirstRunDraft(ui: ConfigWizardUI, rootDir: string): Promis
 export async function preflightPiDefaultModel(
 	rootDir: string,
 	readDefaults: (root: string) => PiModelDefaults = loadPiModelDefaults,
-	preflightModels: (bots: readonly { provider: string; model: string }[]) => Promise<unknown> = createSharedModelRuntime,
+	preflightModels: (
+		bots: readonly { provider: string; model: string }[],
+	) => Promise<unknown> = createSharedModelRuntime,
 ): Promise<PiModelSelection> {
 	let defaults: PiModelDefaults;
 	try {

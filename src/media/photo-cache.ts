@@ -66,22 +66,38 @@ export class PhotoCacheQueue {
 		private readonly apis: ReadonlyMap<string, MediaDownloadApi>,
 		private readonly options: PhotoCacheOptions = {},
 	) {
-		this.concurrency = Math.min(PHOTO_CACHE_CONCURRENCY, Math.max(1, Math.floor(options.concurrency ?? PHOTO_CACHE_CONCURRENCY)));
-		this.maxPending = Math.min(PHOTO_CACHE_MAX_PENDING, Math.max(1, Math.floor(options.maxPending ?? PHOTO_CACHE_MAX_PENDING)));
-		this.backfillLimit = Math.min(PHOTO_CACHE_BACKFILL_LIMIT, Math.max(1, Math.floor(options.backfillLimit ?? PHOTO_CACHE_BACKFILL_LIMIT)));
+		this.concurrency = Math.min(
+			PHOTO_CACHE_CONCURRENCY,
+			Math.max(1, Math.floor(options.concurrency ?? PHOTO_CACHE_CONCURRENCY)),
+		);
+		this.maxPending = Math.min(
+			PHOTO_CACHE_MAX_PENDING,
+			Math.max(1, Math.floor(options.maxPending ?? PHOTO_CACHE_MAX_PENDING)),
+		);
+		this.backfillLimit = Math.min(
+			PHOTO_CACHE_BACKFILL_LIMIT,
+			Math.max(1, Math.floor(options.backfillLimit ?? PHOTO_CACHE_BACKFILL_LIMIT)),
+		);
 		this.stopTimeoutMs = Math.max(0, Math.floor(options.stopTimeoutMs ?? 5_000));
 	}
 
-	get pendingCount(): number { return this.queue.length; }
-	get activeCount(): number { return this.active; }
-	get peakActiveCount(): number { return this.peak; }
+	get pendingCount(): number {
+		return this.queue.length;
+	}
+	get activeCount(): number {
+		return this.active;
+	}
+	get peakActiveCount(): number {
+		return this.peak;
+	}
 
 	/** Queue one canonical photo identity. Returns immediately and never blocks polling. */
 	schedule(botId: string, fileUniqueId: string): boolean {
 		if (this.stopped || !fileUniqueId || !this.apis.has(botId) || this.scheduled.has(fileUniqueId)) return false;
-		const row = this.db.query("SELECT kind, local_path FROM media WHERE file_unique_id = ?").get(fileUniqueId) as
-			| { kind: string; local_path: string | null }
-			| null;
+		const row = this.db.query("SELECT kind, local_path FROM media WHERE file_unique_id = ?").get(fileUniqueId) as {
+			kind: string;
+			local_path: string | null;
+		} | null;
 		if (!row || row.kind !== "photo") return false;
 		if (isDisplayReadyPath(row.local_path, this.options.fileOps)) return false;
 		if (this.queue.length >= this.maxPending) {
@@ -175,7 +191,9 @@ export class PhotoCacheQueue {
 		if (this.stopped || this.controller.signal.aborted) return;
 		if (!result.ok) {
 			this.emit(
-				result.outcome === "unsupported_format" || result.outcome === "download_oversize" ? "media_cache_skip" : "media_cache_error",
+				result.outcome === "unsupported_format" || result.outcome === "download_oversize"
+					? "media_cache_skip"
+					: "media_cache_error",
 				result.outcome,
 				"unavailable",
 			);
@@ -183,7 +201,11 @@ export class PhotoCacheQueue {
 		}
 		const bucket = bytesBucket(Math.min(result.bytes.byteLength, MEDIA_CACHE_MAX_BYTES));
 		if (!result.mediaPath) {
-			this.emit(result.cacheOutcome === "install_failed" ? "media_cache_error" : "media_cache_skip", result.cacheOutcome, bucket);
+			this.emit(
+				result.cacheOutcome === "install_failed" ? "media_cache_error" : "media_cache_skip",
+				result.cacheOutcome,
+				bucket,
+			);
 			return;
 		}
 		try {

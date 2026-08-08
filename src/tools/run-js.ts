@@ -115,7 +115,8 @@ export interface RunJsResult {
 }
 
 export async function runJs(code: string, execPath: string = process.execPath): Promise<RunJsResult> {
-	if (code.length > MAX_CODE) return { ok: false, output: `code too large (${code.length} > ${MAX_CODE})`, durationMs: 0 };
+	if (code.length > MAX_CODE)
+		return { ok: false, output: `code too large (${code.length} > ${MAX_CODE})`, durationMs: 0 };
 	const started = Date.now();
 	const dir = mkdtempSync(join(tmpdir(), "runjs-"));
 	try {
@@ -130,16 +131,28 @@ export async function runJs(code: string, execPath: string = process.execPath): 
 			let out = "";
 			let err = "";
 			const cap = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}\n...(truncated)` : s);
-			child.stdout.on("data", (d: Buffer) => { out = cap(out + d.toString(), MAX_RAW); });
-			child.stderr.on("data", (d: Buffer) => { err = cap(err + d.toString(), MAX_OUTPUT); });
+			child.stdout.on("data", (d: Buffer) => {
+				out = cap(out + d.toString(), MAX_RAW);
+			});
+			child.stderr.on("data", (d: Buffer) => {
+				err = cap(err + d.toString(), MAX_OUTPUT);
+			});
 			const killer = setTimeout(() => {
 				child.kill("SIGKILL");
-				resolve({ ok: false, output: cap(out + `\n(timeout after ${TIMEOUT_MS}ms)`, MAX_OUTPUT), durationMs: Date.now() - started });
+				resolve({
+					ok: false,
+					output: cap(out + `\n(timeout after ${TIMEOUT_MS}ms)`, MAX_OUTPUT),
+					durationMs: Date.now() - started,
+				});
 			}, TIMEOUT_MS);
 			child.on("error", (spawnErr) => {
 				// e.g. ENOENT: interpreter missing — structured error, never uncaught
 				clearTimeout(killer);
-				resolve({ ok: false, output: `failed to spawn sandbox interpreter: ${spawnErr.message}`, durationMs: Date.now() - started });
+				resolve({
+					ok: false,
+					output: `failed to spawn sandbox interpreter: ${spawnErr.message}`,
+					durationMs: Date.now() - started,
+				});
 			});
 			child.on("close", (codeNum) => {
 				clearTimeout(killer);
@@ -156,7 +169,11 @@ export async function runJs(code: string, execPath: string = process.execPath): 
 					if (codeNum === 0) {
 						resolve({ ok: true, output: cap(out, MAX_OUTPUT), durationMs });
 					} else {
-						resolve({ ok: false, output: cap(out + (err ? `\n${err}` : "") || "sandbox failed", MAX_OUTPUT), durationMs });
+						resolve({
+							ok: false,
+							output: cap(out + (err ? `\n${err}` : "") || "sandbox failed", MAX_OUTPUT),
+							durationMs,
+						});
 					}
 				}
 			});

@@ -38,13 +38,13 @@ export type LocalMediaCacheOutcome = "cached" | "ready" | "oversize" | "install_
 
 export type LocalMediaResult =
 	| {
-		ok: true;
-		kind: "photo" | "sticker";
-		bytes: Uint8Array;
-		mimeType: StaticMediaMime;
-		mediaPath: string | null;
-		cacheOutcome: LocalMediaCacheOutcome;
-	}
+			ok: true;
+			kind: "photo" | "sticker";
+			bytes: Uint8Array;
+			mimeType: StaticMediaMime;
+			mediaPath: string | null;
+			cacheOutcome: LocalMediaCacheOutcome;
+	  }
 	| { ok: false; outcome: LocalMediaFailure };
 
 export interface MediaCacheFileOps {
@@ -114,14 +114,18 @@ export function isDisplayReadyPath(path: string | null, fileOps: MediaCacheFileO
 	}
 }
 
-function readExisting(path: string, fileOps: MediaCacheFileOps): { bytes: Uint8Array; mimeType: StaticMediaMime } | null {
+function readExisting(
+	path: string,
+	fileOps: MediaCacheFileOps,
+): { bytes: Uint8Array; mimeType: StaticMediaMime } | null {
 	const mimeType = staticMediaMimeForPath(path);
 	if (!mimeType) return null;
 	try {
 		const stat = fileOps.stat(path);
 		if (!stat.isFile() || stat.size <= 0 || stat.size > MEDIA_DOWNLOAD_MAX_BYTES) return null;
 		const bytes = fileOps.read(path);
-		if (bytes.byteLength !== stat.size || bytes.byteLength === 0 || bytes.byteLength > MEDIA_DOWNLOAD_MAX_BYTES) return null;
+		if (bytes.byteLength !== stat.size || bytes.byteLength === 0 || bytes.byteLength > MEDIA_DOWNLOAD_MAX_BYTES)
+			return null;
 		return { bytes, mimeType };
 	} catch {
 		return null;
@@ -192,9 +196,10 @@ async function ensureLocalMediaInner(
 	const fileOps = options.fileOps ?? defaultFileOps;
 	const signal = options.signal;
 	if (signal?.aborted) return { ok: false, outcome: "aborted" };
-	const media = db.query("SELECT kind, local_path FROM media WHERE file_unique_id = ?").get(fileUniqueId) as
-		| { kind: string; local_path: string | null }
-		| null;
+	const media = db.query("SELECT kind, local_path FROM media WHERE file_unique_id = ?").get(fileUniqueId) as {
+		kind: string;
+		local_path: string | null;
+	} | null;
 	if (!media || (media.kind !== "photo" && media.kind !== "sticker")) {
 		return { ok: false, outcome: "media_unavailable" };
 	}

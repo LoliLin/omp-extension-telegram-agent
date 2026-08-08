@@ -16,7 +16,13 @@ export interface DebugReportInput {
 }
 
 export interface DebugFinding {
-	code: "cursor_backlog" | "pending_reply_obligation" | "route_without_run" | "model_silence" | "tool_preflight_failed" | "send_degraded";
+	code:
+		| "cursor_backlog"
+		| "pending_reply_obligation"
+		| "route_without_run"
+		| "model_silence"
+		| "tool_preflight_failed"
+		| "send_degraded";
 	bot_id: string;
 	message_id?: number;
 	count?: number;
@@ -40,24 +46,30 @@ interface SafeEvent {
 }
 
 function safeInt(value: unknown): number | undefined {
-	return Number.isSafeInteger(value) ? value as number : undefined;
+	return Number.isSafeInteger(value) ? (value as number) : undefined;
 }
 
 function safeEvent(row: { id: number; ts: number; kind: string; payload: string }): SafeEvent {
 	const event: SafeEvent = { id: row.id, ts: row.ts, kind: row.kind };
 	let payload: Record<string, unknown> = {};
-	try { payload = JSON.parse(row.payload) as Record<string, unknown>; } catch { /* malformed historical payload */ }
+	try {
+		payload = JSON.parse(row.payload) as Record<string, unknown>;
+	} catch {
+		/* malformed historical payload */
+	}
 	if (typeof payload.stage === "string") event.stage = payload.stage.slice(0, 64);
 	if (typeof payload.category === "string") event.category = payload.category.slice(0, 64);
 	if (typeof payload.code === "string" && event.category == null) event.category = payload.code.slice(0, 64);
 	if (typeof payload.tool === "string") event.tool = payload.tool.slice(0, 32);
 	if (typeof payload.isError === "boolean") event.is_error = payload.isError;
 	if (typeof payload.outcome === "string") event.outcome = payload.outcome.slice(0, 32);
-	const firstFailure = Array.isArray(payload.failures) && payload.failures[0] && typeof payload.failures[0] === "object"
-		? payload.failures[0] as Record<string, unknown>
-		: null;
+	const firstFailure =
+		Array.isArray(payload.failures) && payload.failures[0] && typeof payload.failures[0] === "object"
+			? (payload.failures[0] as Record<string, unknown>)
+			: null;
 	if (event.stage == null && typeof firstFailure?.stage === "string") event.stage = firstFailure.stage.slice(0, 64);
-	if (event.category == null && typeof firstFailure?.category === "string") event.category = firstFailure.category.slice(0, 64);
+	if (event.category == null && typeof firstFailure?.category === "string")
+		event.category = firstFailure.category.slice(0, 64);
 	const messageId = safeInt(payload.message_id);
 	if (messageId != null) event.message_id = messageId;
 	const sent = Array.isArray(payload.sent) ? payload.sent.filter((id) => Number.isSafeInteger(id)) : [];
@@ -76,36 +88,66 @@ function logMatchesBot(record: LogRecord, botId: string): boolean {
 export function buildDebugReport(db: Database, input: DebugReportInput) {
 	const now = input.now ?? Date.now();
 	const since = now - input.sinceMs;
-	const highWater = (db.query("SELECT COALESCE(MAX(ingest_seq), 0) value FROM message_events WHERE chat_id = ?").get(input.chatId) as { value: number }).value;
+	const highWater = (
+		db.query("SELECT COALESCE(MAX(ingest_seq), 0) value FROM message_events WHERE chat_id = ?").get(input.chatId) as {
+			value: number;
+		}
+	).value;
 	const bots = input.botIds.map((botId) => {
-		const cursor = (db.query("SELECT consumed_seq value FROM bot_cursors WHERE bot_id = ? AND chat_id = ?").get(botId, input.chatId) as { value: number } | null)?.value ?? 0;
-		const obligationCount = (db.query("SELECT COUNT(*) value FROM reply_obligations WHERE bot_id = ? AND chat_id = ?").get(botId, input.chatId) as { value: number }).value;
-		const claims = db.query(`
+		const cursor =
+			(
+				db
+					.query("SELECT consumed_seq value FROM bot_cursors WHERE bot_id = ? AND chat_id = ?")
+					.get(botId, input.chatId) as { value: number } | null
+			)?.value ?? 0;
+		const obligationCount = (
+			db
+				.query("SELECT COUNT(*) value FROM reply_obligations WHERE bot_id = ? AND chat_id = ?")
+				.get(botId, input.chatId) as { value: number }
+		).value;
+		const claims = db
+			.query(`
 			SELECT message_id, route_version, reason, status, created_at, updated_at
 			  FROM routing_claims
 			 WHERE bot_id = ? AND chat_id = ? AND updated_at >= ?
 			 ORDER BY updated_at DESC, message_id DESC LIMIT ?
-		`).all(botId, input.chatId, since, MAX_CLAIMS) as Array<Record<string, string | number>>;
-		const runs = db.query(`
+		`)
+			.all(botId, input.chatId, since, MAX_CLAIMS) as Array<Record<string, string | number>>;
+		const runs = db
+			.query(`
 			SELECT id, ts, epoch, trigger_message_id, public_send_count, tool_followup_rounds,
 			       input_events, input_tokens_estimated, rows_scanned, latency_ms,
 			       context_tokens, cache_read, cache_write, cache_miss, output_tokens,
 			       reasoning_tokens, vision_calls
 			  FROM llm_runs WHERE bot_id = ? AND ts >= ?
 			 ORDER BY id DESC LIMIT ?
-		`).all(botId, since, MAX_RUNS) as Array<Record<string, number | null>>;
-		const rawEvents = db.query(`
+		`)
+			.all(botId, since, MAX_RUNS) as Array<Record<string, number | null>>;
+		const rawEvents = db
+			.query(`
 			SELECT id, ts, kind, payload FROM agent_events
 			 WHERE bot_id = ? AND ts >= ? ORDER BY id DESC LIMIT ?
-		`).all(botId, since, MAX_EVENTS) as Array<{ id: number; ts: number; kind: string; payload: string }>;
+		`)
+			.all(botId, since, MAX_EVENTS) as Array<{ id: number; ts: number; kind: string; payload: string }>;
 		const events = rawEvents.map(safeEvent);
 		const logs = (input.logs ?? [])
 			.filter((record) => Date.parse(record.ts) >= since && logMatchesBot(record, botId))
 			.slice(-MAX_LOGS)
-			.map((record) => ({ ts: record.ts, level: record.level, component: record.component, event: record.event, fields: record.fields }));
+			.map((record) => ({
+				ts: record.ts,
+				level: record.level,
+				component: record.component,
+				event: record.event,
+				fields: record.fields,
+			}));
 		return {
 			bot_id: botId,
-			context: { consumed_seq: cursor, high_water: highWater, backlog: Math.max(0, highWater - cursor), pending_reply_obligations: obligationCount },
+			context: {
+				consumed_seq: cursor,
+				high_water: highWater,
+				backlog: Math.max(0, highWater - cursor),
+				pending_reply_obligations: obligationCount,
+			},
 			claims,
 			runs,
 			events,
@@ -115,8 +157,14 @@ export function buildDebugReport(db: Database, input: DebugReportInput) {
 
 	const findings: DebugFinding[] = [];
 	for (const bot of bots) {
-		if (bot.context.backlog > 0) findings.push({ code: "cursor_backlog", bot_id: bot.bot_id, count: bot.context.backlog });
-		if (bot.context.pending_reply_obligations > 0) findings.push({ code: "pending_reply_obligation", bot_id: bot.bot_id, count: bot.context.pending_reply_obligations });
+		if (bot.context.backlog > 0)
+			findings.push({ code: "cursor_backlog", bot_id: bot.bot_id, count: bot.context.backlog });
+		if (bot.context.pending_reply_obligations > 0)
+			findings.push({
+				code: "pending_reply_obligation",
+				bot_id: bot.bot_id,
+				count: bot.context.pending_reply_obligations,
+			});
 		for (const claim of bot.claims) {
 			if (claim.status !== "started" || Number(claim.updated_at) > now - 120_000) continue;
 			if (!bot.runs.some((run) => run.trigger_message_id === claim.message_id)) {
@@ -125,20 +173,31 @@ export function buildDebugReport(db: Database, input: DebugReportInput) {
 		}
 		for (const run of bot.runs) {
 			if (run.public_send_count !== 0) continue;
-			const silent = bot.events.some((event) => event.kind === "assistant_text" && Math.abs(event.ts - Number(run.ts)) <= 120_000);
-			if (silent) findings.push({ code: "model_silence", bot_id: bot.bot_id, ...(safeInt(run.trigger_message_id) == null ? {} : { message_id: run.trigger_message_id as number }) });
+			const silent = bot.events.some(
+				(event) => event.kind === "assistant_text" && Math.abs(event.ts - Number(run.ts)) <= 120_000,
+			);
+			if (silent)
+				findings.push({
+					code: "model_silence",
+					bot_id: bot.bot_id,
+					...(safeInt(run.trigger_message_id) == null ? {} : { message_id: run.trigger_message_id as number }),
+				});
 		}
 		for (const record of bot.logs) {
 			if (record.component === "agent_send" && record.event === "preflight_failed") {
 				findings.push({
-					code: "tool_preflight_failed", bot_id: bot.bot_id,
-					...(safeInt(record.fields?.trigger_message_id) == null ? {} : { message_id: record.fields!.trigger_message_id as number }),
+					code: "tool_preflight_failed",
+					bot_id: bot.bot_id,
+					...(safeInt(record.fields?.trigger_message_id) == null
+						? {}
+						: { message_id: record.fields!.trigger_message_id as number }),
 					category: typeof record.fields?.category === "string" ? record.fields.category : "unknown",
 				});
 			}
 		}
 		for (const event of bot.events) {
-			if (event.kind === "send_degraded") findings.push({ code: "send_degraded", bot_id: bot.bot_id, category: event.category, outcome: event.outcome });
+			if (event.kind === "send_degraded")
+				findings.push({ code: "send_degraded", bot_id: bot.bot_id, category: event.category, outcome: event.outcome });
 		}
 	}
 

@@ -31,12 +31,14 @@ export interface MessageRow {
 
 /** Stable short alias (u<N>) for users without username. */
 export function getOrCreateAlias(db: Database, chatId: number, userId: number): string {
-	const existing = db.query("SELECT alias FROM aliases WHERE chat_id = ? AND user_id = ?").get(chatId, userId) as
-		| { alias: string }
-		| null;
+	const existing = db.query("SELECT alias FROM aliases WHERE chat_id = ? AND user_id = ?").get(chatId, userId) as {
+		alias: string;
+	} | null;
 	if (existing) return existing.alias;
 	// alias from rowid: stable, unique, race-free (same pattern as sticker short_id).
-	const { lastInsertRowid } = db.query("INSERT INTO aliases (chat_id, user_id, alias) VALUES (?, ?, '')").run(chatId, userId);
+	const { lastInsertRowid } = db
+		.query("INSERT INTO aliases (chat_id, user_id, alias) VALUES (?, ?, '')")
+		.run(chatId, userId);
 	const alias = `u${lastInsertRowid}`;
 	db.query("UPDATE aliases SET alias = ? WHERE rowid = ?").run(alias, lastInsertRowid);
 	return alias;
@@ -53,12 +55,17 @@ function senderLabel(db: Database, m: MessageRow): string {
 }
 
 function mediaPlaceholder(db: Database, mediaJson: string, resolveVision = true): string {
-	const media = JSON.parse(mediaJson) as { kind: string; sticker_emoji?: string; sticker_set?: string; file_unique_id?: string };
+	const media = JSON.parse(mediaJson) as {
+		kind: string;
+		sticker_emoji?: string;
+		sticker_set?: string;
+		file_unique_id?: string;
+	};
 	let vision: string | null = null;
 	if (resolveVision && media.file_unique_id) {
-		const row = db.query("SELECT vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as
-			| { vision: string | null }
-			| null;
+		const row = db.query("SELECT vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as {
+			vision: string | null;
+		} | null;
 		if (row?.vision) vision = (JSON.parse(row.vision) as { text: string }).text;
 	}
 	if (media.kind === "sticker") {
@@ -139,7 +146,8 @@ export function serializeMessages(db: Database, rows: MessageRow[], opts: Serial
 
 function serializeMediaUpdate(event: MessageEvent): string {
 	const payload = event.payload as MediaUpdatePayload;
-	const label = payload.media_kind === "photo" ? "图片" : payload.media_kind === "sticker" ? "sticker" : payload.media_kind;
+	const label =
+		payload.media_kind === "photo" ? "图片" : payload.media_kind === "sticker" ? "sticker" : payload.media_kind;
 	return `[media_update #${event.messageId}] [${label}: ${payload.text}]`;
 }
 

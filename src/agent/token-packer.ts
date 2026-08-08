@@ -28,12 +28,13 @@ export interface SuffixBudgetInput {
 
 export function availableSuffixBudget(input: SuffixBudgetInput): number {
 	const occupied = input.currentContextTokens > 0 ? input.currentContextTokens : input.staticPrefixTokens;
-	const available = input.contextWindow
-		- occupied
-		- (input.outputReserve ?? DEFAULT_OUTPUT_RESERVE)
-		- (input.reasoningReserve ?? 0)
-		- (input.toolFollowupReserve ?? 0)
-		- (input.safetyMargin ?? DEFAULT_SAFETY_MARGIN);
+	const available =
+		input.contextWindow -
+		occupied -
+		(input.outputReserve ?? DEFAULT_OUTPUT_RESERVE) -
+		(input.reasoningReserve ?? 0) -
+		(input.toolFollowupReserve ?? 0) -
+		(input.safetyMargin ?? DEFAULT_SAFETY_MARGIN);
 	return Math.max(512, Math.min(input.maxSuffixTokens ?? DEFAULT_SUFFIX_TOKEN_BUDGET, available));
 }
 

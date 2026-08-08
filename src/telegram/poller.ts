@@ -73,7 +73,11 @@ export class Poller {
 					await sleep(30_000);
 					continue;
 				}
-				log.error("telegram_poller", "poll_failed", { bot_id: this.botId, category: errorCategory(err), retry_ms: backoffMs });
+				log.error("telegram_poller", "poll_failed", {
+					bot_id: this.botId,
+					category: errorCategory(err),
+					retry_ms: backoffMs,
+				});
 				await sleep(backoffMs);
 				backoffMs = Math.min(backoffMs * 2, 60_000);
 				continue;
@@ -96,14 +100,27 @@ export class Poller {
 						} catch {
 							// The update and offset are already durable. A side-channel handler failure
 							// must not replay or halt polling.
-							log.error("telegram_poller", "message_handler_failed", { bot_id: this.botId, update_id: updateId, category: "local_failure" });
+							log.error("telegram_poller", "message_handler_failed", {
+								bot_id: this.botId,
+								update_id: updateId,
+								category: "local_failure",
+							});
 						}
 					}
 				} catch (err) {
 					ingestFailures++;
-					log.error("telegram_poller", "ingest_failed", { bot_id: this.botId, update_id: updateId, consecutive: ingestFailures, category: errorCategory(err) });
+					log.error("telegram_poller", "ingest_failed", {
+						bot_id: this.botId,
+						update_id: updateId,
+						consecutive: ingestFailures,
+						category: errorCategory(err),
+					});
 					if (ingestFailures >= INGEST_FAILURE_WARN_THRESHOLD) {
-						log.warn("telegram_poller", "ingest_replay_pending", { bot_id: this.botId, consecutive: ingestFailures, offset: this.offset() });
+						log.warn("telegram_poller", "ingest_replay_pending", {
+							bot_id: this.botId,
+							consecutive: ingestFailures,
+							offset: this.offset(),
+						});
 					}
 					// do not advance the offset past a failed update; stop this batch so later
 					// updates don't skip over it. The whole remainder replays on the next poll.

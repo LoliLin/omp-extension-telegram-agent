@@ -4,9 +4,13 @@
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Configurable Telegram group companions with a Pi-native chat interface",
-	"keywords": ["pi-package"],
+	"keywords": [
+		"pi-package"
+	],
 	"pi": {
-		"extensions": ["./.pi/extensions/tg-extension.ts"]
+		"extensions": [
+			"./.pi/extensions/tg-extension.ts"
+		]
 	},
 	"scripts": {
 		"pi": "bun run scripts/pi-launcher.ts",

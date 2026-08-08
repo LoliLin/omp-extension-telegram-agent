@@ -29,7 +29,10 @@ export function main(args = process.argv.slice(2), rootDir = process.cwd()): num
 		}
 		if (arg === "--since" && args[index + 1]) {
 			const parsed = parseDebugDuration(args[++index]!);
-			if (parsed == null) { process.stderr.write(usage()); return 2; }
+			if (parsed == null) {
+				process.stderr.write(usage());
+				return 2;
+			}
 			sinceMs = parsed;
 			continue;
 		}
@@ -45,7 +48,9 @@ export function main(args = process.argv.slice(2), rootDir = process.cwd()): num
 	try {
 		const config = loadDebugDeploymentIdentity(rootDir);
 		if (showProviderContent && botId == null) {
-			process.stderr.write("--show-provider-content requires --bot <id> to prevent an accidental multi-bot content dump.\n");
+			process.stderr.write(
+				"--show-provider-content requires --bot <id> to prevent an accidental multi-bot content dump.\n",
+			);
 			return 2;
 		}
 		const botIds = botId == null ? config.botIds : [botId];
@@ -62,10 +67,15 @@ export function main(args = process.argv.slice(2), rootDir = process.cwd()): num
 			logs: readStructuredLogTail(join(config.dataDir, "daemon.log")),
 			daemon: { pid, alive: pid != null && pidAlive(pid), socket: existsSync(join(config.dataDir, "daemon.sock")) },
 		});
-		const providerContexts = Object.fromEntries(botIds.map((id) => {
-			try { return [id, inspectProviderContext(db!, config, id, showProviderContent)]; }
-			catch { return [id, { unavailable: true }]; }
-		}));
+		const providerContexts = Object.fromEntries(
+			botIds.map((id) => {
+				try {
+					return [id, inspectProviderContext(db!, config, id, showProviderContent)];
+				} catch {
+					return [id, { unavailable: true }];
+				}
+			}),
+		);
 		process.stdout.write(`${JSON.stringify({ ...report, provider_contexts: providerContexts }, null, 2)}\n`);
 		return 0;
 	} catch {

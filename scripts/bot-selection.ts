@@ -5,10 +5,7 @@ function validIds(bots: readonly Pick<BotConfig, "id">[]): string {
 }
 
 /** Parse the shared, required bot selector used by scripts that act as one configured bot. */
-export function selectConfiguredBot<T extends Pick<BotConfig, "id">>(
-	bots: readonly T[],
-	args: readonly string[],
-): T {
+export function selectConfiguredBot<T extends Pick<BotConfig, "id">>(bots: readonly T[], args: readonly string[]): T {
 	let selected: string | null = null;
 	for (let index = 0; index < args.length; index++) {
 		const arg = args[index]!;

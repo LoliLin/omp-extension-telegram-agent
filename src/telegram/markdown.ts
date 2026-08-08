@@ -96,10 +96,7 @@ function withStyle(fragment: Fragment, type: "bold" | "italic" | "strikethrough"
 	return { text: fragment.text, entities: [...fragment.entities, ...additions] };
 }
 
-function withNonStyle(
-	fragment: Fragment,
-	entity: TelegramNonStyleEntity,
-): Fragment {
+function withNonStyle(fragment: Fragment, entity: TelegramNonStyleEntity): Fragment {
 	if (!fragment.text || fragment.entities.some((existing) => !STYLE_TYPES.has(existing.type))) return fragment;
 	return {
 		text: fragment.text,
@@ -292,17 +289,17 @@ function normalizedEntities(text: string, entities: readonly TelegramMessageEnti
 	for (const entity of entities) {
 		const end = entity.offset + entity.length;
 		if (
-			!Number.isSafeInteger(entity.offset)
-			|| !Number.isSafeInteger(entity.length)
-			|| entity.offset < 0
-			|| entity.length <= 0
-			|| end > text.length
-			|| !isSurrogateBoundary(text, entity.offset)
-			|| !isSurrogateBoundary(text, end)
+			!Number.isSafeInteger(entity.offset) ||
+			!Number.isSafeInteger(entity.length) ||
+			entity.offset < 0 ||
+			entity.length <= 0 ||
+			end > text.length ||
+			!isSurrogateBoundary(text, entity.offset) ||
+			!isSurrogateBoundary(text, end)
 		) {
 			throw new TelegramMarkdownError("invalid");
 		}
-		const extra = entity.type === "text_link" ? entity.url : entity.type === "pre" ? entity.language ?? "" : "";
+		const extra = entity.type === "text_link" ? entity.url : entity.type === "pre" ? (entity.language ?? "") : "";
 		unique.set(`${entity.type}:${entity.offset}:${entity.length}:${extra}`, entity);
 	}
 	const sorted = [...unique.values()].sort(
@@ -317,7 +314,11 @@ function normalizedEntities(text: string, entities: readonly TelegramMessageEnti
 			if (right.offset >= leftEnd) break;
 			const rightEnd = right.offset + right.length;
 			if (rightEnd > leftEnd) throw new TelegramMarkdownError("invalid");
-			if ((CODE_TYPES.has(left.type) || CODE_TYPES.has(right.type)) && left.offset < rightEnd && right.offset < leftEnd) {
+			if (
+				(CODE_TYPES.has(left.type) || CODE_TYPES.has(right.type)) &&
+				left.offset < rightEnd &&
+				right.offset < leftEnd
+			) {
 				throw new TelegramMarkdownError("invalid");
 			}
 		}

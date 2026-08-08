@@ -4,10 +4,7 @@
 
 import type { Database } from "bun:sqlite";
 import { log } from "../observability/log.ts";
-import {
-	convertToPng,
-	type ModelRuntime,
-} from "@earendil-works/pi-coding-agent";
+import { convertToPng, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
 import type { BotApi } from "../telegram/api.ts";
 import { parsePiModelReference } from "../agent/model-ref.ts";
@@ -16,11 +13,7 @@ import {
 	PiModelConfigurationError,
 	type PiProviderFailureCategory,
 } from "../agent/model-runtime.ts";
-import {
-	ensureLocalMedia,
-	staticMediaMimeForPath,
-	type LocalMediaFailure,
-} from "./local-cache.ts";
+import { ensureLocalMedia, staticMediaMimeForPath, type LocalMediaFailure } from "./local-cache.ts";
 import { appendMediaUpdateEvents } from "../db/message-events.ts";
 import { VisionBudgetExceededError, type VisionScheduler } from "./vision-scheduler.ts";
 
@@ -163,11 +156,7 @@ export function createPiVisionExecutor(
 		throw new Error("invalid auxiliary_visual_model; expected provider/model:effort");
 	}
 	const model = runtime.getModel(selection.provider, selection.model);
-	const readinessFailure = !model
-		? "unknown_model"
-		: !model.input.includes("image")
-			? "image_input_unsupported"
-			: null;
+	const readinessFailure = !model ? "unknown_model" : !model.input.includes("image") ? "image_input_unsupported" : null;
 	const convert = options.convert ?? convertToPng;
 	const monotonicNow = options.monotonicNow ?? (() => performance.now());
 
@@ -211,14 +200,16 @@ export function createPiVisionExecutor(
 			}
 
 			const context: Context = {
-				messages: [{
-					role: "user",
-					content: [
-						{ type: "text", text: input.kind === "sticker" ? STICKER_PROMPT : PHOTO_PROMPT },
-						{ type: "image", data: image.data, mimeType: image.mimeType },
-					],
-					timestamp: Date.now(),
-				}],
+				messages: [
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: input.kind === "sticker" ? STICKER_PROMPT : PHOTO_PROMPT },
+							{ type: "image", data: image.data, mimeType: image.mimeType },
+						],
+						timestamp: Date.now(),
+					},
+				],
 			};
 			let message: AssistantMessage;
 			try {
@@ -247,19 +238,35 @@ export function createPiVisionExecutor(
 				const category = classifyPiProviderFailure(new Error(message.errorMessage ?? message.stopReason));
 				return {
 					text: null,
-					telemetry: usageTelemetry(input.kind, sourceBytes, convertedBytes, monotonicNow() - startedAt, category, message),
+					telemetry: usageTelemetry(
+						input.kind,
+						sourceBytes,
+						convertedBytes,
+						monotonicNow() - startedAt,
+						category,
+						message,
+					),
 				};
 			}
 
 			const text = message.content
-				.filter((content): content is Extract<(typeof message.content)[number], { type: "text" }> => content.type === "text")
+				.filter(
+					(content): content is Extract<(typeof message.content)[number], { type: "text" }> => content.type === "text",
+				)
 				.map((content) => content.text)
 				.join("\n")
 				.trim();
 			const outcome: VisionOutcome = text ? "ok" : "empty_response";
 			return {
 				text: text || null,
-				telemetry: usageTelemetry(input.kind, sourceBytes, convertedBytes, monotonicNow() - startedAt, outcome, message),
+				telemetry: usageTelemetry(
+					input.kind,
+					sourceBytes,
+					convertedBytes,
+					monotonicNow() - startedAt,
+					outcome,
+					message,
+				),
 			};
 		},
 	};
@@ -324,9 +331,10 @@ async function ensureVisionInner(
 ): Promise<string | null> {
 	const monotonicNow = options.monotonicNow ?? (() => performance.now());
 	const startedAt = monotonicNow();
-	const media = db.query("SELECT kind, vision FROM media WHERE file_unique_id = ?").get(fileUniqueId) as
-		| { kind: string; vision: string | null }
-		| null;
+	const media = db.query("SELECT kind, vision FROM media WHERE file_unique_id = ?").get(fileUniqueId) as {
+		kind: string;
+		vision: string | null;
+	} | null;
 	if (!media || (media.kind !== "photo" && media.kind !== "sticker")) return null;
 	const kind = media.kind as VisionKind;
 	if (media.vision) {

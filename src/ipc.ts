@@ -123,11 +123,12 @@ interface AgentStreamBase {
 }
 
 /** Ephemeral assistant display state. It is never persisted or replayed in snapshots. */
-export type AgentStreamFrame = AgentStreamBase & (
-	| { phase: "start" }
-	| { phase: "update"; thinking: string; text: string; toolCalls: AgentStreamToolCall[] }
-	| { phase: "end" }
-);
+export type AgentStreamFrame = AgentStreamBase &
+	(
+		| { phase: "start" }
+		| { phase: "update"; thinking: string; text: string; toolCalls: AgentStreamToolCall[] }
+		| { phase: "end" }
+	);
 
 export type SendMessageErrorCode =
 	| "invalid_request"

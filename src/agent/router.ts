@@ -90,7 +90,12 @@ export interface RoutingConfig {
 }
 
 /** Full routing decision with an explicit reason for scheduler policy. */
-export function routeMessageDecision(db: Database, row: MessageRow, bots: BotIdentity[], config: RoutingConfig): RoutingDecision {
+export function routeMessageDecision(
+	db: Database,
+	row: MessageRow,
+	bots: BotIdentity[],
+	config: RoutingConfig,
+): RoutingDecision {
 	const makeDecision = (target: TriggerTarget, reason: RoutingReason): RoutingDecision => ({
 		target,
 		reason,

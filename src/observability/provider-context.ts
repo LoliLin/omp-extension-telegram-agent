@@ -17,21 +17,25 @@ function hash(value: string): string {
 function contentText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return JSON.stringify(content ?? null);
-	return content.map((part) => {
-		if (!part || typeof part !== "object") return String(part);
-		const item = part as Record<string, unknown>;
-		if (item.type === "text") return String(item.text ?? "");
-		if (item.type === "thinking") return String(item.thinking ?? "");
-		if (item.type === "toolCall") return JSON.stringify({ name: item.name, arguments: item.arguments });
-		return JSON.stringify(item);
-	}).join("\n");
+	return content
+		.map((part) => {
+			if (!part || typeof part !== "object") return String(part);
+			const item = part as Record<string, unknown>;
+			if (item.type === "text") return String(item.text ?? "");
+			if (item.type === "thinking") return String(item.thinking ?? "");
+			if (item.type === "toolCall") return JSON.stringify({ name: item.name, arguments: item.arguments });
+			return JSON.stringify(item);
+		})
+		.join("\n");
 }
 
 function messageMetadata(message: AgentMessage, index: number) {
 	const record = message as AgentMessage & Record<string, unknown>;
 	const text = contentText(record.content);
 	const contentTypes = Array.isArray(record.content)
-		? record.content.map((part) => part && typeof part === "object" ? String((part as { type?: unknown }).type ?? "object") : typeof part)
+		? record.content.map((part) =>
+				part && typeof part === "object" ? String((part as { type?: unknown }).type ?? "object") : typeof part,
+			)
 		: [typeof record.content];
 	return {
 		index,
@@ -61,13 +65,24 @@ export function inspectProviderContext(
 	if (!bot) throw new Error(`unknown bot: ${botId}`);
 	const manifest = getSessionManifest(db, botId);
 	if (!manifest) throw new Error(`session manifest unavailable: ${botId}`);
-	const manager = SessionManager.open(manifest.sessionFile, `${deployment.dataDir}/sessions/${botId}`, deployment.dataDir);
+	const manager = SessionManager.open(
+		manifest.sessionFile,
+		`${deployment.dataDir}/sessions/${botId}`,
+		deployment.dataDir,
+	);
 	const context = buildSessionContext(manager.getBranch(), manager.getLeafId());
 	const messages = projectTelegramContext(context.messages);
-	const lastRun = db.query(`
+	const lastRun = db
+		.query(`
 		SELECT provider, api, model, tools_hash AS toolsHash
 		  FROM llm_runs WHERE bot_id = ? ORDER BY id DESC LIMIT 1
-	`).get(botId) as { provider: string | null; api: string | null; model: string | null; toolsHash: string | null } | null;
+	`)
+		.get(botId) as {
+		provider: string | null;
+		api: string | null;
+		model: string | null;
+		toolsHash: string | null;
+	} | null;
 	const system = buildSystemPrompt(
 		readFileSync(bot.personaPath, "utf8"),
 		bot.stickerSets.length > 0 ? stickerCatalogPromptBlock(db, bot.id, bot.stickerSets) : "",
@@ -78,7 +93,11 @@ export function inspectProviderContext(
 	return {
 		source: "current_session_pre_adapter_projection",
 		exact_last_request: false,
-		session: { id_hash: hash(manifest.sessionId), file_hash: hash(manifest.sessionFile), context_fingerprint: manifest.contextFingerprint },
+		session: {
+			id_hash: hash(manifest.sessionId),
+			file_hash: hash(manifest.sessionFile),
+			context_fingerprint: manifest.contextFingerprint,
+		},
 		request_metadata: {
 			provider: bot.provider ?? lastRun?.provider ?? context.model?.provider ?? null,
 			api: lastRun?.api ?? null,

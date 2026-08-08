@@ -32,7 +32,13 @@ import {
 	type SentMessageTransport,
 } from "../telegram/send.ts";
 import { type MessageRow, TELEGRAM_SERIALIZER_VERSION } from "./serialize.ts";
-import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT, SHARED_PROTOCOL } from "./prompt.ts";
+import {
+	buildSystemPrompt,
+	sha256Short,
+	CACHE_SCHEMA_VERSION,
+	COMPACTION_SUMMARY_PROMPT,
+	SHARED_PROTOCOL,
+} from "./prompt.ts";
 import {
 	degradedSendResult,
 	successfulSendResult,
@@ -81,11 +87,7 @@ import {
 	setSessionManifest,
 	type MessageEvent,
 } from "../db/message-events.ts";
-import {
-	availableSuffixBudget,
-	estimateProviderTokensUpperBound,
-	packMessageEvents,
-} from "./token-packer.ts";
+import { availableSuffixBudget, estimateProviderTokensUpperBound, packMessageEvents } from "./token-packer.ts";
 import {
 	makeAssistantPersistencePolicyExtension,
 	makeCachePayloadObserverExtension,
@@ -192,21 +194,23 @@ export class BotRuntime {
 	/** Optional sink for messages this bot sent (poller echo dedupes them, so TUI needs this path). */
 	sentMessageSink: ((rawMsg: unknown) => void) | null = null;
 	/** Optional sink for llm_run telemetry (REQ-UI-0003: live usage push). */
-	usageSink: ((run: {
-		id: number;
-		botId: string;
-		ts: number;
-		model: string;
-		epoch: number;
-		contextTokens: number;
-		cacheRead: number;
-		cacheWrite: number;
-		cacheMiss: number;
-		outputTokens: number;
-		reasoningTokens: number;
-		latencyMs: number | null;
-		cost: number;
-	}) => void) | null = null;
+	usageSink:
+		| ((run: {
+				id: number;
+				botId: string;
+				ts: number;
+				model: string;
+				epoch: number;
+				contextTokens: number;
+				cacheRead: number;
+				cacheWrite: number;
+				cacheMiss: number;
+				outputTokens: number;
+				reasoningTokens: number;
+				latencyMs: number | null;
+				cost: number;
+		  }) => void)
+		| null = null;
 	/** Optional sink for newly persisted media descriptions (REQ-UI-0006). */
 	visionSink: VisionUpdateSink | null = null;
 	/** Ephemeral Pi-feed assistant snapshots; never persisted (REQ-UI-0010). */
@@ -237,20 +241,18 @@ export class BotRuntime {
 		this.monotonicNow = options.monotonicNow ?? (() => performance.now());
 		this.api = new BotApi(bot.token);
 		const chatId = Number(`-100${config.groupPeerId}`);
-		this.typingLease = new TelegramTypingLease(
-			options.chatActionSender ?? (() => this.api.sendChatAction(chatId)),
-			{
-				scheduler: options.activityScheduler,
-				onFailure: (error) => {
-					const category = error instanceof TelegramApiError
+		this.typingLease = new TelegramTypingLease(options.chatActionSender ?? (() => this.api.sendChatAction(chatId)), {
+			scheduler: options.activityScheduler,
+			onFailure: (error) => {
+				const category =
+					error instanceof TelegramApiError
 						? `telegram_${error.code}`
 						: typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "TimeoutError"
 							? "timeout"
 							: "request_failed";
-					log.warn("telegram_activity", "typing_failed", { bot_id: this.bot.id, category, retry: true });
-				},
+				log.warn("telegram_activity", "typing_failed", { bot_id: this.bot.id, category, retry: true });
 			},
-		);
+		});
 		this.epoch = Number(getBotState(db, bot.id, EPOCH_KEY) ?? "1");
 		this.visibleMessageIds = new Set(listVisibleMessageIds(db, bot.id, chatId, this.epoch));
 	}
@@ -270,9 +272,8 @@ export class BotRuntime {
 		if (this.bot.stickerSets.length > 0) {
 			await ensureStickerCatalog(this.db, this.api, this.bot.id, this.bot.stickerSets);
 		}
-		const stickerCatalog = this.bot.stickerSets.length > 0
-			? stickerCatalogPromptBlock(this.db, this.bot.id, this.bot.stickerSets)
-			: "";
+		const stickerCatalog =
+			this.bot.stickerSets.length > 0 ? stickerCatalogPromptBlock(this.db, this.bot.id, this.bot.stickerSets) : "";
 		const systemPrompt = buildSystemPrompt(persona, stickerCatalog);
 		this.systemHash = sha256Short(systemPrompt);
 
@@ -316,9 +317,7 @@ export class BotRuntime {
 		const model = this.modelRuntime.getModel(this.bot.provider, this.bot.model);
 		if (!model) throw new Error(`model not found: ${this.bot.provider}/${this.bot.model}`);
 		this.model = model;
-		const compactionSelection = parsePiModelReference(
-			this.bot.compactionModel ?? this.config.auxiliaryVisualModel,
-		);
+		const compactionSelection = parsePiModelReference(this.bot.compactionModel ?? this.config.auxiliaryVisualModel);
 		if (!compactionSelection) throw new Error("invalid compaction_model; expected provider/model:effort");
 		const compactionModel = this.modelRuntime.getModel(compactionSelection.provider, compactionSelection.model);
 		if (!compactionModel) {
@@ -354,11 +353,7 @@ export class BotRuntime {
 			serializerVersion: TELEGRAM_SERIALIZER_VERSION,
 			compactionPromptSha256: sha256(COMPACTION_SUMMARY_PROMPT),
 			compactionModel: compactionSelection.canonical,
-			stickerCatalogSnapshotSha256: stickerCatalogSnapshotHash(
-				this.db,
-				this.bot.id,
-				this.bot.stickerSets,
-			),
+			stickerCatalogSnapshotSha256: stickerCatalogSnapshotHash(this.db, this.bot.id, this.bot.stickerSets),
 			extensionOrder: TELEGRAM_EXTENSION_ORDER,
 			tools: activeTools.map((tool) => ({
 				name: tool.name,
@@ -397,10 +392,13 @@ export class BotRuntime {
 				this.pendingPayloadObservations.push(observation);
 				if (this.pendingPayloadObservations.length > 8) this.pendingPayloadObservations.shift();
 			}),
-		makeAssistantPersistencePolicyExtension((text) => {
-			this.recordEvent("assistant_text", { text });
-			log.info("agent_runtime", "model_silence", { bot_id: this.bot.id, trigger_message_id: this.currentTriggerMessageId });
-		}),
+			makeAssistantPersistencePolicyExtension((text) => {
+				this.recordEvent("assistant_text", { text });
+				log.info("agent_runtime", "model_silence", {
+					bot_id: this.bot.id,
+					trigger_message_id: this.currentTriggerMessageId,
+				});
+			}),
 		];
 		const loader = new DefaultResourceLoader({
 			cwd: this.config.dataDir,
@@ -420,18 +418,17 @@ export class BotRuntime {
 			thinkingLevel: this.bot.reasoningEffort,
 			modelRuntime: this.modelRuntime,
 			sessionManager,
-			settingsManager: SettingsManager.inMemory({ compaction: { enabled: true, reserveTokens, keepRecentTokens: this.bot.compactionKeepRecent } }),
+			settingsManager: SettingsManager.inMemory({
+				compaction: { enabled: true, reserveTokens, keepRecentTokens: this.bot.compactionKeepRecent },
+			}),
 			resourceLoader: loader,
 			noTools: "builtin",
 			customTools: activeTools,
 		});
 		this.session = session;
 		const streamFunction = session.agent.streamFunction;
-		session.agent.streamFunction = (requestModel, context, options) => streamFunction(
-			requestModel,
-			context,
-			{ ...options, cacheRetention: this.bot.cacheRetention ?? "short" },
-		);
+		session.agent.streamFunction = (requestModel, context, options) =>
+			streamFunction(requestModel, context, { ...options, cacheRetention: this.bot.cacheRetention ?? "short" });
 		const sessionFile = session.sessionFile;
 		if (!sessionFile) throw new Error(`persistent session file unavailable for bot ${this.bot.id}`);
 		setSessionManifest(this.db, {
@@ -444,9 +441,14 @@ export class BotRuntime {
 		this.reconcileContextStateFromSession();
 		this.subscribeEvents();
 		log.info("agent_runtime", "session_ready", {
-			bot_id: this.bot.id, state: canResume ? "resumed" : "new", epoch: this.epoch,
-			fingerprint: this.contextFingerprint.slice(0, 12), system_hash: this.systemHash,
-			tools_hash: this.toolsHash, tools: activeTools.map((tool) => tool.name).join(","), cache_schema: CACHE_SCHEMA_VERSION,
+			bot_id: this.bot.id,
+			state: canResume ? "resumed" : "new",
+			epoch: this.epoch,
+			fingerprint: this.contextFingerprint.slice(0, 12),
+			system_hash: this.systemHash,
+			tools_hash: this.toolsHash,
+			tools: activeTools.map((tool) => tool.name).join(","),
+			cache_schema: CACHE_SCHEMA_VERSION,
 		});
 	}
 
@@ -486,11 +488,14 @@ export class BotRuntime {
 				// Compaction is a replacement boundary. Entries summarized away may remain in the
 				// session tree, but their message ids are no longer provider-visible.
 				visible.clear();
-				const details = entry.details as {
-					consumedSeq?: unknown;
-					visibleMessageIds?: unknown;
-				} | undefined;
-				if (Number.isSafeInteger(details?.consumedSeq)) consumedSeq = Math.max(consumedSeq, details!.consumedSeq as number);
+				const details = entry.details as
+					| {
+							consumedSeq?: unknown;
+							visibleMessageIds?: unknown;
+					  }
+					| undefined;
+				if (Number.isSafeInteger(details?.consumedSeq))
+					consumedSeq = Math.max(consumedSeq, details!.consumedSeq as number);
 				if (Array.isArray(details?.visibleMessageIds)) {
 					for (const messageId of details.visibleMessageIds) {
 						if (Number.isSafeInteger(messageId) && (messageId as number) > 0) visible.add(messageId as number);
@@ -527,7 +532,7 @@ export class BotRuntime {
 		if (!this.session) return;
 		this.session.subscribe((event) => {
 			const now = Date.now();
-				switch (event.type) {
+			switch (event.type) {
 				case "agent_start":
 					this.running = true;
 					this.runStartTs = now;
@@ -562,19 +567,32 @@ export class BotRuntime {
 					break;
 				case "tool_execution_start":
 					this.recordEvent("tool_call", { tool: event.toolName, args: event.args });
-					log.info("agent_tool", "execution_started", { bot_id: this.bot.id, tool: event.toolName, trigger_message_id: this.currentTriggerMessageId });
+					log.info("agent_tool", "execution_started", {
+						bot_id: this.bot.id,
+						tool: event.toolName,
+						trigger_message_id: this.currentTriggerMessageId,
+					});
 					break;
 				case "tool_execution_end":
 					if (event.toolName === "send") {
 						try {
 							this.recordEvent("tool_result", { tool: event.toolName, isError: event.isError });
 						} catch {
-							log.warn("agent_tool", "result_persist_failed", { bot_id: this.bot.id, tool: "send", category: "local_failure" });
+							log.warn("agent_tool", "result_persist_failed", {
+								bot_id: this.bot.id,
+								tool: "send",
+								category: "local_failure",
+							});
 						}
 					} else {
 						this.recordEvent("tool_result", { tool: event.toolName, isError: event.isError });
 					}
-					log.info("agent_tool", "execution_finished", { bot_id: this.bot.id, tool: event.toolName, is_error: event.isError, trigger_message_id: this.currentTriggerMessageId });
+					log.info("agent_tool", "execution_finished", {
+						bot_id: this.bot.id,
+						tool: event.toolName,
+						is_error: event.isError,
+						trigger_message_id: this.currentTriggerMessageId,
+					});
 					break;
 				case "agent_settled":
 					this.running = false;
@@ -661,14 +679,21 @@ export class BotRuntime {
 		if (event.aborted || !event.result) {
 			const category = classifyPiProviderFailure(event.errorMessage ?? "compaction failed");
 			this.recordEvent("error", { stage: "compaction", reason: event.reason, aborted: event.aborted, category });
-			log.error("agent_runtime", "compaction_failed", { bot_id: this.bot.id, reason: event.reason, aborted: event.aborted, category });
+			log.error("agent_runtime", "compaction_failed", {
+				bot_id: this.bot.id,
+				reason: event.reason,
+				aborted: event.aborted,
+				category,
+			});
 			return;
 		}
 		this.epoch += 1;
 		setBotState(this.db, this.bot.id, EPOCH_KEY, String(this.epoch));
 		const details = event.result.details as { visibleMessageIds?: unknown } | undefined;
 		const kept = Array.isArray(details?.visibleMessageIds)
-			? details.visibleMessageIds.filter((messageId): messageId is number => Number.isSafeInteger(messageId) && (messageId as number) > 0)
+			? details.visibleMessageIds.filter(
+					(messageId): messageId is number => Number.isSafeInteger(messageId) && (messageId as number) > 0,
+				)
 			: [];
 		this.visibleMessageIds = new Set(kept);
 		const chatId = Number(`-100${this.config.groupPeerId}`);
@@ -678,7 +703,9 @@ export class BotRuntime {
 	}
 
 	/** session_before_compact handler: empty summary is refused via cancel, never persisted. */
-	private async handleBeforeCompact(event: SessionBeforeCompactEvent): Promise<{ cancel: true } | { compaction: CompactionResult }> {
+	private async handleBeforeCompact(
+		event: SessionBeforeCompactEvent,
+	): Promise<{ cancel: true } | { compaction: CompactionResult }> {
 		const prep = event.preparation;
 		const gen = await this.generateCompactionSummary(prep);
 		if (!gen) {
@@ -692,8 +719,9 @@ export class BotRuntime {
 		const keptEntries = keptIndex >= 0 ? branchEntries.slice(keptIndex) : [];
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		const state = this.contextStateFromEntries(keptEntries, getConsumedSeq(this.db, this.bot.id, chatId));
-		const unresolvedReplyMessageIds = listReplyObligations(this.db, this.bot.id, chatId, MAX_OBLIGATION_SCAN)
-			.map((obligation) => obligation.messageId);
+		const unresolvedReplyMessageIds = listReplyObligations(this.db, this.bot.id, chatId, MAX_OBLIGATION_SCAN).map(
+			(obligation) => obligation.messageId,
+		);
 		return {
 			compaction: {
 				summary: gen.summary,
@@ -739,32 +767,47 @@ export class BotRuntime {
 
 	private async executeSend(params: SendParams) {
 		if (!params.message && !params.sticker) {
-			log.warn("agent_send", "preflight_failed", { bot_id: this.bot.id, category: "empty_payload", trigger_message_id: this.currentTriggerMessageId });
+			log.warn("agent_send", "preflight_failed", {
+				bot_id: this.bot.id,
+				category: "empty_payload",
+				trigger_message_id: this.currentTriggerMessageId,
+			});
 			throw new Error("send requires at least one of message or sticker");
 		}
 		if (params.reply_to != null && !this.visibleMessageIds.has(params.reply_to)) {
 			log.warn("agent_send", "preflight_failed", {
-				bot_id: this.bot.id, category: "reply_not_visible", reply_to: params.reply_to,
-				visible_count: this.visibleMessageIds.size, trigger_message_id: this.currentTriggerMessageId,
+				bot_id: this.bot.id,
+				category: "reply_not_visible",
+				reply_to: params.reply_to,
+				visible_count: this.visibleMessageIds.size,
+				trigger_message_id: this.currentTriggerMessageId,
 			});
 			throw new Error("messaging.reply_not_visible");
 		}
 		log.info("agent_send", "started", {
-			bot_id: this.bot.id, has_message: Boolean(params.message), has_sticker: Boolean(params.sticker),
-			has_reply: params.reply_to != null, trigger_message_id: this.currentTriggerMessageId,
+			bot_id: this.bot.id,
+			has_message: Boolean(params.message),
+			has_sticker: Boolean(params.sticker),
+			has_reply: params.reply_to != null,
+			trigger_message_id: this.currentTriggerMessageId,
 		});
 		// Validate everything (incl. sticker resolution) before any network send (R7):
 		// a late sticker failure would make the model retry and double-send the text.
 		let stickerFileId: string | null = null;
 		if (params.sticker) {
-			const row = this.db.query("SELECT file_unique_id FROM media WHERE short_id = ?").get(params.sticker) as
-				| { file_unique_id: string }
-				| null;
-			if (!row) throw new Error(`unknown sticker id: ${params.sticker} (use a short_id from the Sticker 目录 in the system prompt)`);
+			const row = this.db.query("SELECT file_unique_id FROM media WHERE short_id = ?").get(params.sticker) as {
+				file_unique_id: string;
+			} | null;
+			if (!row)
+				throw new Error(
+					`unknown sticker id: ${params.sticker} (use a short_id from the Sticker 目录 in the system prompt)`,
+				);
 			stickerFileId = fileIdForBot(this.db, this.bot.id, row.file_unique_id);
 			if (!stickerFileId) {
 				this.recordEvent("error", { stage: "send", code: "candidate_invariant", sticker: params.sticker });
-				throw new Error(`candidate invariant violated: sticker ${params.sticker} is not sendable by this bot (no file_id)`);
+				throw new Error(
+					`candidate invariant violated: sticker ${params.sticker} is not sendable by this bot (no file_id)`,
+				);
 			}
 		}
 		const chatId = Number(`-100${this.config.groupPeerId}`);
@@ -814,7 +857,8 @@ export class BotRuntime {
 				await runLocalEffect(
 					component,
 					"event_failed",
-					() => this.recordEvent(transport === "formatted" ? "markdown_sent" : "plain_fallback", { message_id: messageId }),
+					() =>
+						this.recordEvent(transport === "formatted" ? "markdown_sent" : "plain_fallback", { message_id: messageId }),
 					true,
 				);
 			}
@@ -826,7 +870,12 @@ export class BotRuntime {
 				await runLocalEffect(
 					component,
 					"event_failed",
-					() => this.recordEvent("send", { reply_to: params.reply_to ?? null, sticker: params.sticker ?? null, sent: sentIds }),
+					() =>
+						this.recordEvent("send", {
+							reply_to: params.reply_to ?? null,
+							sticker: params.sticker ?? null,
+							sent: sentIds,
+						}),
 					true,
 				);
 			}
@@ -834,13 +883,14 @@ export class BotRuntime {
 				typingStopAttempted = true;
 				await runLocalEffect(component, "typing_stop_failed", () => this.typingLease.stop(), false);
 			}
-			const primary = (outcome === "partial" ? failures.find((failure) => failure.stage === "telegram_create") : null)
-				?? failures[0]
-				?? {
-				failed_component: component,
-				failed_outcome: "unknown" as const,
-				stage: "local_effect" as const,
-				category: "local_failure",
+			const primary = (outcome === "partial"
+				? failures.find((failure) => failure.stage === "telegram_create")
+				: null) ??
+				failures[0] ?? {
+					failed_component: component,
+					failed_outcome: "unknown" as const,
+					stage: "local_effect" as const,
+					category: "local_failure",
 				};
 			const diagnostic = {
 				outcome,
@@ -853,8 +903,13 @@ export class BotRuntime {
 				// The bounded, redacted process log remains available when SQLite/event sinks are unavailable.
 			}
 			log.warn("agent_send", "degraded", {
-				bot_id: this.bot.id, outcome, component: primary.failed_component, stage: primary.stage,
-				category: primary.category, sent_count: sentIds.length, trigger_message_id: this.currentTriggerMessageId,
+				bot_id: this.bot.id,
+				outcome,
+				component: primary.failed_component,
+				stage: primary.stage,
+				category: primary.category,
+				sent_count: sentIds.length,
+				trigger_message_id: this.currentTriggerMessageId,
 			});
 			return degradedSendResult({ sent: [...sentIds], outcome, ...primary });
 		};
@@ -928,7 +983,8 @@ export class BotRuntime {
 		await runLocalEffect(
 			params.sticker && !params.message ? "sticker" : "message",
 			"event_failed",
-			() => this.recordEvent("send", { reply_to: params.reply_to ?? null, sticker: params.sticker ?? null, sent: sentIds }),
+			() =>
+				this.recordEvent("send", { reply_to: params.reply_to ?? null, sticker: params.sticker ?? null, sent: sentIds }),
 			true,
 		);
 		await runLocalEffect(
@@ -938,7 +994,11 @@ export class BotRuntime {
 			false,
 		);
 		if (failures.length > 0) return await finishDegraded("committed");
-		log.info("agent_send", "committed", { bot_id: this.bot.id, sent_count: sentIds.length, trigger_message_id: this.currentTriggerMessageId });
+		log.info("agent_send", "committed", {
+			bot_id: this.bot.id,
+			sent_count: sentIds.length,
+			trigger_message_id: this.currentTriggerMessageId,
+		});
 		return successfulSendResult(sentIds);
 	}
 
@@ -961,12 +1021,7 @@ export class BotRuntime {
 		let directReplyMessageId: number | null = null;
 		if (routingTrigger) this.currentTriggerMessageId = routingTrigger.messageId;
 		if (isDirectReply && !this.visibleMessageIds.has(routingTrigger.messageId)) {
-			const created = createReplyObligation(
-				this.db,
-				this.bot.id,
-				routingTrigger.chatId,
-				routingTrigger.messageId,
-			);
+			const created = createReplyObligation(this.db, this.bot.id, routingTrigger.chatId, routingTrigger.messageId);
 			directReplyPending = true;
 			directReplyMessageId = routingTrigger.messageId;
 			const alreadyRecorded = this.db
@@ -999,7 +1054,10 @@ export class BotRuntime {
 		if (source === "probability") this.cooldownAfterFlush = true;
 		this.flushing = true; // set synchronously, before any await — never gated on SDK events
 		log.info("agent_runtime", "flush_started", {
-			bot_id: this.bot.id, source, trigger_message_id: this.currentTriggerMessageId, direct_reply: isDirectReply,
+			bot_id: this.bot.id,
+			source,
+			trigger_message_id: this.currentTriggerMessageId,
+			direct_reply: isDirectReply,
 		});
 		this.typingLease.start();
 		this.flushPromise = this.flushLoop()
@@ -1012,7 +1070,11 @@ export class BotRuntime {
 				} catch {
 					// shutdown may have closed the db under a wedged flush; nothing more to do
 				}
-				log.error("agent_runtime", "flush_failed", { bot_id: this.bot.id, category, trigger_message_id: this.currentTriggerMessageId });
+				log.error("agent_runtime", "flush_failed", {
+					bot_id: this.bot.id,
+					category,
+					trigger_message_id: this.currentTriggerMessageId,
+				});
 			})
 			.finally(() => {
 				this.flushing = false;
@@ -1047,24 +1109,21 @@ export class BotRuntime {
 		const consumedSeq = getConsumedSeq(this.db, this.bot.id, chatId);
 		let highWater = messageEventHighWater(this.db, chatId);
 		let recent = listRecentMessageEvents(this.db, chatId, consumedSeq, highWater, MAX_EVENT_SCAN);
-		let obligationEvents = listReplyObligationEvents(
-			this.db,
-			this.bot.id,
-			chatId,
-			MAX_OBLIGATION_SCAN,
-		);
+		let obligationEvents = listReplyObligationEvents(this.db, this.bot.id, chatId, MAX_OBLIGATION_SCAN);
 		let rowsScanned = recent.length + obligationEvents.length;
 		const consumedControl = consumedControlMessageIds(this.db, chatId);
 		const obligationIds = new Set(obligations.map((obligation) => obligation.messageId));
-		const ordinaryEvents = (): MessageEvent[] => recent.filter((event) =>
-			!consumedControl.has(event.messageId)
-			&& !obligationIds.has(event.messageId)
-			&& !(event.kind === "message" && this.visibleMessageIds.has(event.messageId))
-		);
-		const requiredEvents = (): MessageEvent[] => [
-			...obligationEvents,
-			...recent.filter((event) => obligationIds.has(event.messageId)),
-		].filter((event) => !consumedControl.has(event.messageId));
+		const ordinaryEvents = (): MessageEvent[] =>
+			recent.filter(
+				(event) =>
+					!consumedControl.has(event.messageId) &&
+					!obligationIds.has(event.messageId) &&
+					!(event.kind === "message" && this.visibleMessageIds.has(event.messageId)),
+			);
+		const requiredEvents = (): MessageEvent[] =>
+			[...obligationEvents, ...recent.filter((event) => obligationIds.has(event.messageId))].filter(
+				(event) => !consumedControl.has(event.messageId),
+			);
 		let mandatory = requiredEvents();
 		let normal = ordinaryEvents();
 
@@ -1074,12 +1133,7 @@ export class BotRuntime {
 		if (postVisionHighWater > highWater) {
 			highWater = postVisionHighWater;
 			recent = listRecentMessageEvents(this.db, chatId, consumedSeq, highWater, MAX_EVENT_SCAN);
-			obligationEvents = listReplyObligationEvents(
-				this.db,
-				this.bot.id,
-				chatId,
-				MAX_OBLIGATION_SCAN,
-			);
+			obligationEvents = listReplyObligationEvents(this.db, this.bot.id, chatId, MAX_OBLIGATION_SCAN);
 			rowsScanned += recent.length + obligationEvents.length;
 			mandatory = requiredEvents();
 			normal = ordinaryEvents();
@@ -1103,10 +1157,16 @@ export class BotRuntime {
 			this.bot.maxMessageTokens,
 		);
 		log.info("agent_runtime", "context_packed", {
-			bot_id: this.bot.id, trigger_message_id: this.currentTriggerMessageId, consumed_seq: consumedSeq,
-			high_water: highWater, rows_scanned: rowsScanned, input_events: packed.events.length,
-			visible_count: packed.visibleMessageIds.length, obligation_count: obligations.length,
-			estimated_tokens: packed.estimatedTokens, suffix_budget: suffixBudget,
+			bot_id: this.bot.id,
+			trigger_message_id: this.currentTriggerMessageId,
+			consumed_seq: consumedSeq,
+			high_water: highWater,
+			rows_scanned: rowsScanned,
+			input_events: packed.events.length,
+			visible_count: packed.visibleMessageIds.length,
+			obligation_count: obligations.length,
+			estimated_tokens: packed.estimatedTokens,
+			suffix_budget: suffixBudget,
 		});
 		if (!packed.text.trim()) {
 			if (highWater > consumedSeq) setConsumedSeq(this.db, this.bot.id, chatId, highWater);
@@ -1149,8 +1209,10 @@ export class BotRuntime {
 			throw error;
 		}
 		log.info("agent_runtime", "provider_turn_settled", {
-			bot_id: this.bot.id, trigger_message_id: this.currentTriggerMessageId,
-			input_events: packed.events.length, provider_calls: this.providerCallsInRun,
+			bot_id: this.bot.id,
+			trigger_message_id: this.currentTriggerMessageId,
+			input_events: packed.events.length,
+			provider_calls: this.providerCallsInRun,
 		});
 		const deliveredObligationIds = delivered.map((obligation) => obligation.messageId);
 		if (deliveredObligationIds.length > 0) {
@@ -1216,7 +1278,10 @@ export class BotRuntime {
 		} catch (error) {
 			this.lastControlCompact = { at: Date.now(), outcome: "failed" };
 			const message = error instanceof Error ? error.message : String(error);
-			return { ok: false, code: /Nothing to compact|Already compacted/.test(message) ? "nothing_to_compact" : "failed" };
+			return {
+				ok: false,
+				code: /Nothing to compact|Already compacted/.test(message) ? "nothing_to_compact" : "failed",
+			};
 		} finally {
 			this.controlCompacting = false;
 			if (this.pendingTrigger && !this.stopping) {
@@ -1231,9 +1296,10 @@ export class BotRuntime {
 		if (!this.visionEnabled || (this.config.vision?.foregroundMediaLimit ?? 2) <= 0) return;
 		const pending: string[] = [];
 		const seen = new Set<string>();
-		const prioritized = [...batch].sort((left, right) =>
-			Number(obligationIds.has(right.messageId)) - Number(obligationIds.has(left.messageId))
-			|| right.ingestSeq - left.ingestSeq
+		const prioritized = [...batch].sort(
+			(left, right) =>
+				Number(obligationIds.has(right.messageId)) - Number(obligationIds.has(left.messageId)) ||
+				right.ingestSeq - left.ingestSeq,
 		);
 		for (const event of prioritized) {
 			if (event.kind === "media_update") continue;
@@ -1243,9 +1309,9 @@ export class BotRuntime {
 			if (!media.file_unique_id || (media.kind !== "photo" && media.kind !== "sticker")) continue;
 			if (seen.has(media.file_unique_id)) continue;
 			seen.add(media.file_unique_id);
-			const existing = this.db.query("SELECT vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as
-				| { vision: string | null }
-				| null;
+			const existing = this.db.query("SELECT vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as {
+				vision: string | null;
+			} | null;
 			if (existing?.vision) continue; // persistent cache hit, shared by both bots
 			pending.push(media.file_unique_id);
 			if (pending.length >= (this.config.vision?.foregroundMediaLimit ?? 2)) break;
@@ -1253,12 +1319,14 @@ export class BotRuntime {
 
 		let next = 0;
 		const workers = Math.min(VISION_BATCH_CONCURRENCY, pending.length);
-		await Promise.all(Array.from({ length: workers }, async () => {
-			while (next < pending.length) {
-				const fileUniqueId = pending[next++]!;
-				await this.ensureOneVision(fileUniqueId);
-			}
-		}));
+		await Promise.all(
+			Array.from({ length: workers }, async () => {
+				while (next < pending.length) {
+					const fileUniqueId = pending[next++]!;
+					await this.ensureOneVision(fileUniqueId);
+				}
+			}),
+		);
 	}
 
 	private async ensureOneVision(fileUniqueId: string): Promise<void> {
@@ -1308,7 +1376,14 @@ export class BotRuntime {
 	}
 
 	private recordUsage(
-		usage: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning?: number; cost: { total: number } },
+		usage: {
+			input: number;
+			output: number;
+			cacheRead: number;
+			cacheWrite: number;
+			reasoning?: number;
+			cost: { total: number };
+		},
 		now: number,
 	): void {
 		this.providerCallsInRun++;
@@ -1317,9 +1392,7 @@ export class BotRuntime {
 		const latencyMs = this.runStartTs ? now - this.runStartTs : null;
 		const observation = this.pendingPayloadObservations.shift();
 		const metrics = this.pendingInputMetrics;
-		const sessionIdHash = this.session
-			? sha256(`${this.telemetryHmacKey}:${this.session.sessionId}`)
-			: null;
+		const sessionIdHash = this.session ? sha256(`${this.telemetryHmacKey}:${this.session.sessionId}`) : null;
 		const res = this.db
 			.query(
 				`INSERT INTO llm_runs (
@@ -1383,33 +1456,42 @@ export class BotRuntime {
 	}
 
 	private recordCompactionUsage(
-		usage: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning?: number; cost: { total: number } },
+		usage: {
+			input: number;
+			output: number;
+			cacheRead: number;
+			cacheWrite: number;
+			reasoning?: number;
+			cost: { total: number };
+		},
 		now: number,
 	): void {
 		if (!this.compactionModel) return;
-		this.db.query(`
+		this.db
+			.query(`
 			INSERT INTO llm_runs (
 				bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
 				output_tokens, reasoning_tokens, latency_ms, cost, compaction,
 				system_hash, tools_hash, provider, api, cache_retention
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, ?, 'none')
-		`).run(
-			this.bot.id,
-			now,
-			this.compactionModel.id,
-			this.epoch,
-			usage.input + usage.cacheRead + usage.cacheWrite,
-			usage.cacheRead,
-			usage.cacheWrite,
-			usage.input,
-			usage.output,
-			usage.reasoning ?? 0,
-			usage.cost.total,
-			sha256Short(COMPACTION_SUMMARY_PROMPT),
-			sha256Short("[]"),
-			this.compactionModel.provider,
-			this.compactionModel.api,
-		);
+		`)
+			.run(
+				this.bot.id,
+				now,
+				this.compactionModel.id,
+				this.epoch,
+				usage.input + usage.cacheRead + usage.cacheWrite,
+				usage.cacheRead,
+				usage.cacheWrite,
+				usage.input,
+				usage.output,
+				usage.reasoning ?? 0,
+				usage.cost.total,
+				sha256Short(COMPACTION_SUMMARY_PROMPT),
+				sha256Short("[]"),
+				this.compactionModel.provider,
+				this.compactionModel.api,
+			);
 	}
 
 	async stop(): Promise<void> {

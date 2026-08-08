@@ -89,10 +89,20 @@ function recordMedia(db: Database, botId: string, m: CanonicalMessage): void {
 		`INSERT INTO media (file_unique_id, kind, mime, width, height, sticker_set, sticker_emoji)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(file_unique_id) DO NOTHING`,
-	).run(media.file_unique_id, media.kind, media.mime ?? null, media.width ?? null, media.height ?? null, media.sticker_set ?? null, media.sticker_emoji ?? null);
-	db.query(
-		"INSERT OR IGNORE INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES (?, ?, ?)",
-	).run(botId, media.file_id, media.file_unique_id);
+	).run(
+		media.file_unique_id,
+		media.kind,
+		media.mime ?? null,
+		media.width ?? null,
+		media.height ?? null,
+		media.sticker_set ?? null,
+		media.sticker_emoji ?? null,
+	);
+	db.query("INSERT OR IGNORE INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES (?, ?, ?)").run(
+		botId,
+		media.file_id,
+		media.file_unique_id,
+	);
 }
 
 function insertMessage(db: Database, botId: string, m: CanonicalMessage): IngestResult {
@@ -136,7 +146,8 @@ function insertMessage(db: Database, botId: string, m: CanonicalMessage): Ingest
 					"UPDATE messages SET reply_to_sender_id = ? WHERE chat_id = ? AND message_id = ? AND reply_to_sender_id IS NULL",
 				)
 				.run(m.reply_to_sender_id, m.chat_id, m.message_id);
-			if (enriched.changes > 0) return { kind: "enriched", chatId: m.chat_id, messageId: m.message_id, routeVersion: 2 };
+			if (enriched.changes > 0)
+				return { kind: "enriched", chatId: m.chat_id, messageId: m.message_id, routeVersion: 2 };
 		}
 		return { kind: "duplicate", chatId: m.chat_id, messageId: m.message_id };
 	}
@@ -151,15 +162,17 @@ function insertMessage(db: Database, botId: string, m: CanonicalMessage): Ingest
 
 function editMessage(db: Database, m: CanonicalMessage): IngestResult {
 	const existing = db
-		.query("SELECT text, caption, entities, rich_message, date, edit_date FROM messages WHERE chat_id = ? AND message_id = ?")
+		.query(
+			"SELECT text, caption, entities, rich_message, date, edit_date FROM messages WHERE chat_id = ? AND message_id = ?",
+		)
 		.get(m.chat_id, m.message_id) as {
-			text: string | null;
-			caption: string | null;
-			entities: string | null;
-			rich_message: string | null;
-			date: number;
-			edit_date: number | null;
-		} | null;
+		text: string | null;
+		caption: string | null;
+		entities: string | null;
+		rich_message: string | null;
+		date: number;
+		edit_date: number | null;
+	} | null;
 	if (!existing) {
 		// edit arrived for a message we never saw (started mid-history): store as new
 		return insertMessage(db, EDIT_UNKNOWN_BOT_ID, m);
@@ -181,7 +194,9 @@ function editMessage(db: Database, m: CanonicalMessage): IngestResult {
 		existing.entities,
 		existing.rich_message,
 	);
-	db.query("UPDATE messages SET text = ?, caption = ?, entities = ?, rich_message = ?, reply_to_sender_id = COALESCE(?, reply_to_sender_id), edit_date = ? WHERE chat_id = ? AND message_id = ?").run(
+	db.query(
+		"UPDATE messages SET text = ?, caption = ?, entities = ?, rich_message = ?, reply_to_sender_id = COALESCE(?, reply_to_sender_id), edit_date = ? WHERE chat_id = ? AND message_id = ?",
+	).run(
 		m.text,
 		m.caption,
 		m.entities ? JSON.stringify(m.entities) : null,

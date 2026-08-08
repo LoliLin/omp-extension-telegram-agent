@@ -50,28 +50,50 @@ describe("Pi context protocol", () => {
 
 	test("tool and extension order participate in the context fingerprint", () => {
 		const input = fingerprintInput();
-		expect(buildContextFingerprint({ ...input, tools: [...input.tools].reverse() }))
-			.not.toBe(buildContextFingerprint(input));
-		expect(buildContextFingerprint({ ...input, extensionOrder: [...input.extensionOrder].reverse() }))
-			.not.toBe(buildContextFingerprint(input));
+		expect(buildContextFingerprint({ ...input, tools: [...input.tools].reverse() })).not.toBe(
+			buildContextFingerprint(input),
+		);
+		expect(buildContextFingerprint({ ...input, extensionOrder: [...input.extensionOrder].reverse() })).not.toBe(
+			buildContextFingerprint(input),
+		);
 	});
 
 	test("provider payload observations are deterministic and redact content", () => {
-		const first = observeProviderPayload({
-			model: "m",
-			tools: [{ name: "send", parameters: { b: 2, a: 1 } }],
-			messages: [{ role: "system", content: "protocol" }, { role: "user", content: "hello" }],
-		}, "local-hmac-key");
-		const reordered = observeProviderPayload({
-			messages: [{ content: "protocol", role: "system" }, { content: "hello", role: "user" }],
-			tools: [{ parameters: { a: 1, b: 2 }, name: "send" }],
-			model: "m",
-		}, "local-hmac-key", first);
-		const changed = observeProviderPayload({
-			model: "m",
-			tools: [{ name: "send", parameters: { a: 1, b: 2 } }],
-			messages: [{ role: "system", content: "protocol" }, { role: "user", content: "changed" }],
-		}, "local-hmac-key", reordered);
+		const first = observeProviderPayload(
+			{
+				model: "m",
+				tools: [{ name: "send", parameters: { b: 2, a: 1 } }],
+				messages: [
+					{ role: "system", content: "protocol" },
+					{ role: "user", content: "hello" },
+				],
+			},
+			"local-hmac-key",
+		);
+		const reordered = observeProviderPayload(
+			{
+				messages: [
+					{ content: "protocol", role: "system" },
+					{ content: "hello", role: "user" },
+				],
+				tools: [{ parameters: { a: 1, b: 2 }, name: "send" }],
+				model: "m",
+			},
+			"local-hmac-key",
+			first,
+		);
+		const changed = observeProviderPayload(
+			{
+				model: "m",
+				tools: [{ name: "send", parameters: { a: 1, b: 2 } }],
+				messages: [
+					{ role: "system", content: "protocol" },
+					{ role: "user", content: "changed" },
+				],
+			},
+			"local-hmac-key",
+			reordered,
+		);
 
 		expect(reordered.fullPayloadHash).toBe(first.fullPayloadHash);
 		expect(reordered.firstDivergentSegment).toBeNull();
@@ -114,10 +136,15 @@ describe("Pi context protocol", () => {
 
 	test("unpublished assistant prose is absent from the next context", () => {
 		let unpublished = "";
-		const result = applyAssistantPersistencePolicy({
-			role: "assistant",
-			content: [{ type: "text", text: "private draft that was never sent" }],
-		} as never, (text) => { unpublished = text; });
+		const result = applyAssistantPersistencePolicy(
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "private draft that was never sent" }],
+			} as never,
+			(text) => {
+				unpublished = text;
+			},
+		);
 
 		expect(unpublished).toBe("private draft that was never sent");
 		expect((result as { content: unknown }).content).toEqual([{ type: "text", text: NO_SEND_MARKER }]);

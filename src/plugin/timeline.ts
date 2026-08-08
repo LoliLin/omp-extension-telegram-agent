@@ -143,9 +143,15 @@ export class TimelineClient implements TimelinePort {
 		private readonly sendAckTimeoutMs = SEND_ACK_TIMEOUT_MS,
 	) {}
 
-	get isConnected(): boolean { return this.connected; }
-	get hasMore(): boolean { return this.more; }
-	get isLoadingOlder(): boolean { return this.loadingOlder; }
+	get isConnected(): boolean {
+		return this.connected;
+	}
+	get hasMore(): boolean {
+		return this.more;
+	}
+	get isLoadingOlder(): boolean {
+		return this.loadingOlder;
+	}
 
 	async connect(): Promise<boolean> {
 		if (this.disposed) return false;
@@ -212,7 +218,9 @@ export class TimelineClient implements TimelinePort {
 
 	sendText(botId: string, text: string, requestId: string): Promise<SendMessageResult> {
 		if (this.disposed || !this.connected || !this.socket) {
-			return Promise.resolve(this.sendFailure(requestId, botId, "service_unavailable", "Telegram daemon is not connected"));
+			return Promise.resolve(
+				this.sendFailure(requestId, botId, "service_unavailable", "Telegram daemon is not connected"),
+			);
 		}
 		if (this.pendingSends.has(requestId)) {
 			return Promise.resolve(this.sendFailure(requestId, botId, "request_conflict", "request id is already pending"));
@@ -226,23 +234,28 @@ export class TimelineClient implements TimelinePort {
 				const pending = this.pendingSends.get(requestId);
 				if (!pending) return;
 				this.pendingSends.delete(requestId);
-				pending.resolve(this.sendFailure(
-					requestId,
-					botId,
-					"unknown_outcome",
-					"Telegram send acknowledgement timed out; check the group before retrying",
-				));
+				pending.resolve(
+					this.sendFailure(
+						requestId,
+						botId,
+						"unknown_outcome",
+						"Telegram send acknowledgement timed out; check the group before retrying",
+					),
+				);
 			}, this.sendAckTimeoutMs);
 			this.pendingSends.set(requestId, { botId, resolve, timer });
 			try {
 				this.socket!.write(encodeFrame({ type: "send_message", requestId, botId, text }));
 			} catch (error) {
-				this.finishPendingSend(requestId, this.sendFailure(
+				this.finishPendingSend(
 					requestId,
-					botId,
-					"unknown_outcome",
-					`Telegram send write failed with an unknown outcome: ${String(error)}`,
-				));
+					this.sendFailure(
+						requestId,
+						botId,
+						"unknown_outcome",
+						`Telegram send write failed with an unknown outcome: ${String(error)}`,
+					),
+				);
 			}
 		});
 	}
@@ -344,12 +357,10 @@ export class TimelineClient implements TimelinePort {
 
 	private failPendingSends(reason: string): void {
 		for (const [requestId, pending] of this.pendingSends) {
-			this.finishPendingSend(requestId, this.sendFailure(
+			this.finishPendingSend(
 				requestId,
-				pending.botId,
-				"unknown_outcome",
-				`${reason}; check the group before retrying`,
-			));
+				this.sendFailure(requestId, pending.botId, "unknown_outcome", `${reason}; check the group before retrying`),
+			);
 		}
 	}
 
@@ -365,24 +376,26 @@ export class TimelineClient implements TimelinePort {
 	private emitFresh(type: "append" | "prepend", items: TimelineItem[]): void {
 		this.pruneVisionUpdates();
 		this.pruneMediaReadyUpdates();
-		const fresh = items.filter((item) => {
-			const key = itemKey(item);
-			if (this.seen.has(key)) return false;
-			this.seen.add(key);
-			const cursor = cursorOf(item);
-			if (cursor && (!this.oldestCursor || compareCursor(cursor, this.oldestCursor) < 0)) {
-				this.oldestTs = item.ts;
-				this.oldestCursor = cursor;
-			}
-			return true;
-		}).map((item) => {
-			if (item.kind !== "msg" || !item.fileUniqueId) return item;
-			const vision = this.visionUpdates.get(item.fileUniqueId);
-			const media = this.mediaReadyUpdates.get(item.fileUniqueId);
-			return vision || media
-				? { ...item, ...(vision ? { mediaDesc: vision.text } : {}), ...(media ? { mediaPath: media.mediaPath } : {}) }
-				: item;
-		});
+		const fresh = items
+			.filter((item) => {
+				const key = itemKey(item);
+				if (this.seen.has(key)) return false;
+				this.seen.add(key);
+				const cursor = cursorOf(item);
+				if (cursor && (!this.oldestCursor || compareCursor(cursor, this.oldestCursor) < 0)) {
+					this.oldestTs = item.ts;
+					this.oldestCursor = cursor;
+				}
+				return true;
+			})
+			.map((item) => {
+				if (item.kind !== "msg" || !item.fileUniqueId) return item;
+				const vision = this.visionUpdates.get(item.fileUniqueId);
+				const media = this.mediaReadyUpdates.get(item.fileUniqueId);
+				return vision || media
+					? { ...item, ...(vision ? { mediaDesc: vision.text } : {}), ...(media ? { mediaPath: media.mediaPath } : {}) }
+					: item;
+			});
 		if (fresh.length > 0) this.hooks.onEvent({ type, items: fresh });
 	}
 

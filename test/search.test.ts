@@ -67,9 +67,9 @@ describe("tinyFishSearch", () => {
 			fetch: () => new Response("x".repeat(300 * 1024), { headers: { "content-type": "application/json" } }),
 		});
 		try {
-			await expect(
-				tinyFishSearch("key", "q", { endpoint: `http://127.0.0.1:${server.port}` }),
-			).rejects.toEqual(new TinyFishClientError("search_response_too_large"));
+			await expect(tinyFishSearch("key", "q", { endpoint: `http://127.0.0.1:${server.port}` })).rejects.toEqual(
+				new TinyFishClientError("search_response_too_large"),
+			);
 		} finally {
 			server.stop(true);
 		}
@@ -124,7 +124,12 @@ describe("tinyFishFetch", () => {
 				links: false,
 				image_links: false,
 			});
-			expect(page).toMatchObject({ hostname: "example.com", title: "Example Page", characters: 8_000, truncated: true });
+			expect(page).toMatchObject({
+				hostname: "example.com",
+				title: "Example Page",
+				characters: 8_000,
+				truncated: true,
+			});
 			expect(Array.from(page.content)).toHaveLength(8_000);
 			const formatted = formatFetchedPage(page);
 			expect(formatted).toStartWith("[UNTRUSTED WEB CONTENT");

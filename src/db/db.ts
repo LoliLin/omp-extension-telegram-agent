@@ -25,7 +25,9 @@ function migrate(db: Database): void {
 	if (!messageCols.includes("reply_to_sender_id")) {
 		db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender_id INTEGER");
 	}
-	const revisionCols = (db.query("PRAGMA table_info(message_revisions)").all() as { name: string }[]).map((c) => c.name);
+	const revisionCols = (db.query("PRAGMA table_info(message_revisions)").all() as { name: string }[]).map(
+		(c) => c.name,
+	);
 	if (!revisionCols.includes("rich_message")) {
 		db.exec("ALTER TABLE message_revisions ADD COLUMN rich_message TEXT");
 	}
@@ -90,9 +92,9 @@ function messagePayloadSql(prefix: "NEW" | "m"): string {
 
 /** One-time immutable baseline for databases created before message_events existed. */
 function backfillMessageEvents(db: Database): void {
-	const marker = db.query("SELECT value FROM daemon_state WHERE key = ?").get(MESSAGE_EVENT_BACKFILL_KEY) as
-		| { value: string }
-		| null;
+	const marker = db.query("SELECT value FROM daemon_state WHERE key = ?").get(MESSAGE_EVENT_BACKFILL_KEY) as {
+		value: string;
+	} | null;
 	if (marker) return;
 	const migrateBaseline = db.transaction(() => {
 		db.exec(`
@@ -104,12 +106,14 @@ function backfillMessageEvents(db: Database): void {
 			 ORDER BY m.date, m.message_id
 		`);
 		const row = db.query("SELECT COALESCE(MAX(ingest_seq), 0) AS seq FROM message_events").get() as { seq: number };
-		const botIds = db.query(`
+		const botIds = db
+			.query(`
 			SELECT bot_id FROM bot_state
 			UNION SELECT bot_id FROM raw_updates
 			UNION SELECT bot_id FROM agent_events
 			UNION SELECT bot_id FROM llm_runs
-		`).all() as { bot_id: string }[];
+		`)
+			.all() as { bot_id: string }[];
 		const insertCursor = db.query(
 			"INSERT OR IGNORE INTO bot_cursors (bot_id, chat_id, consumed_seq, updated_at) VALUES (?, ?, ?, ?)",
 		);
@@ -123,23 +127,20 @@ function backfillMessageEvents(db: Database): void {
 }
 
 export function getDaemonState(db: Database, key: string): string | null {
-	const row = db.query("SELECT value FROM daemon_state WHERE key = ?").get(key) as
-		| { value: string }
-		| null;
+	const row = db.query("SELECT value FROM daemon_state WHERE key = ?").get(key) as { value: string } | null;
 	return row?.value ?? null;
 }
 
 export function setDaemonState(db: Database, key: string, value: string): void {
-	db.query("INSERT INTO daemon_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(
-		key,
-		value,
-	);
+	db.query(
+		"INSERT INTO daemon_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+	).run(key, value);
 }
 
 export function getBotState(db: Database, botId: string, key: string): string | null {
-	const row = db.query("SELECT value FROM bot_state WHERE bot_id = ? AND key = ?").get(botId, key) as
-		| { value: string }
-		| null;
+	const row = db.query("SELECT value FROM bot_state WHERE bot_id = ? AND key = ?").get(botId, key) as {
+		value: string;
+	} | null;
 	return row?.value ?? null;
 }
 

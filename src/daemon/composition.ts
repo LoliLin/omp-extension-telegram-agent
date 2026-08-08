@@ -60,7 +60,5 @@ export function composePollers(
 	onMessage: MessageHandler,
 	replyBotTargets: ReadonlyMap<number, string>,
 ): Poller[] {
-	return config.bots.map(
-		(bot) => new Poller(db, bot.id, bot.token, config.groupPeerId, onMessage, replyBotTargets),
-	);
+	return config.bots.map((bot) => new Poller(db, bot.id, bot.token, config.groupPeerId, onMessage, replyBotTargets));
 }

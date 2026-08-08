@@ -96,7 +96,11 @@ interface TinyFishToolDependencies {
 
 function safeInlineText(value: unknown, maxChars: number): string {
 	if (typeof value !== "string") return "";
-	return value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, maxChars);
+	return value
+		.replace(/[\u0000-\u001f\u007f]+/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+		.slice(0, maxChars);
 }
 
 function estimatedTokens(value: string): number {
@@ -286,7 +290,8 @@ export function formatFetchedPage(page: FetchedPage): string {
 }
 
 function toolFailure(error: unknown, stage: "tool_search" | "tool_fetch", hostname?: string): TinyFishToolExecution {
-	const category = error instanceof TinyFishClientError ? error.category : stage === "tool_fetch" ? "fetch_failed" : "search_network";
+	const category =
+		error instanceof TinyFishClientError ? error.category : stage === "tool_fetch" ? "fetch_failed" : "search_network";
 	return {
 		content: `search failed: ${category}`,
 		details: { mode: stage === "tool_fetch" ? "url" : "query", category },

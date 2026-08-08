@@ -135,7 +135,10 @@ function renderCaption(value: unknown, depth: number, state: ProjectionState): s
 }
 
 function prefixLines(value: string, prefix: string): string {
-	return value.split("\n").map((line) => `${prefix}${line}`).join("\n");
+	return value
+		.split("\n")
+		.map((line) => `${prefix}${line}`)
+		.join("\n");
 }
 
 function renderBlocks(value: unknown, depth: number, state: ProjectionState): string {
@@ -162,7 +165,9 @@ function* renderTableCells(values: readonly unknown[], depth: number, state: Pro
 	for (const value of values) {
 		if (state.truncated) return;
 		if (!objectValue(value) || !enter(value, depth, state)) continue;
-		yield renderInline(value.text, depth + 1, state).replace(/\n+/g, " ").trim();
+		yield renderInline(value.text, depth + 1, state)
+			.replace(/\n+/g, " ")
+			.trim();
 	}
 }
 
@@ -226,9 +231,7 @@ function renderBlock(value: unknown, depth: number, state: ProjectionState): str
 		case "anchor":
 			return "";
 		case "list":
-			return Array.isArray(value.items)
-				? joinLimited(renderListItems(value.items, depth + 1, state), "\n", state)
-				: "";
+			return Array.isArray(value.items) ? joinLimited(renderListItems(value.items, depth + 1, state), "\n", state) : "";
 		case "blockquote": {
 			const quote = renderBlocks(value.blocks, depth + 1, state);
 			const credit = renderInline(value.credit, depth + 1, state);

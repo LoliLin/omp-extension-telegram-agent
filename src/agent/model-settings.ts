@@ -1,18 +1,7 @@
-import {
-	getAgentDir,
-	SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
-const THINKING_LEVELS = new Set<ThinkingLevel>([
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
+const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 export interface PiModelDefaults {
 	provider: string | undefined;
@@ -31,7 +20,9 @@ export class PiSettingsConfigurationError extends Error {
 	readonly category = "invalid_settings" as const;
 
 	constructor(readonly scopes: readonly ("global" | "project")[]) {
-		super(`Pi settings unavailable (invalid_settings: ${scopes.join(",") || "unknown"}). Fix Pi settings, then restart.`);
+		super(
+			`Pi settings unavailable (invalid_settings: ${scopes.join(",") || "unknown"}). Fix Pi settings, then restart.`,
+		);
 		this.name = "PiSettingsConfigurationError";
 	}
 }
@@ -54,7 +45,8 @@ export function loadPiModelDefaults(
 	if (
 		(rawProvider !== undefined && (typeof rawProvider !== "string" || !rawProvider.trim())) ||
 		(rawModel !== undefined && (typeof rawModel !== "string" || !rawModel.trim())) ||
-		(rawThinking !== undefined && (typeof rawThinking !== "string" || !THINKING_LEVELS.has(rawThinking as ThinkingLevel)))
+		(rawThinking !== undefined &&
+			(typeof rawThinking !== "string" || !THINKING_LEVELS.has(rawThinking as ThinkingLevel)))
 	) {
 		throw new PiSettingsConfigurationError(["global", "project"]);
 	}
@@ -63,7 +55,7 @@ export function loadPiModelDefaults(
 		provider: typeof rawProvider === "string" ? rawProvider.trim() : undefined,
 		model: typeof rawModel === "string" ? rawModel.trim() : undefined,
 		// This is Pi's own SDK fallback when defaultThinkingLevel is absent.
-		thinkingLevel: typeof rawThinking === "string" ? rawThinking as ThinkingLevel : "medium",
+		thinkingLevel: typeof rawThinking === "string" ? (rawThinking as ThinkingLevel) : "medium",
 	};
 }
 

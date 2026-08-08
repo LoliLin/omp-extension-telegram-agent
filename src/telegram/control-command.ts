@@ -71,11 +71,8 @@ export function parseTelegramControlCommand(
 	const payload = extractUpdateMessage(update);
 	if (!payload) return null;
 	const message = payload.message as Record<string, unknown>;
-	const source = typeof message.text === "string"
-		? message.text
-		: typeof message.caption === "string"
-			? message.caption
-			: null;
+	const source =
+		typeof message.text === "string" ? message.text : typeof message.caption === "string" ? message.caption : null;
 	const entities = typeof message.text === "string" ? message.entities : message.caption_entities;
 	if (source == null || !Array.isArray(entities)) return null;
 	const entity = entities.find((candidate) => {
@@ -83,7 +80,8 @@ export function parseTelegramControlCommand(
 		const value = candidate as Record<string, unknown>;
 		return value.type === "bot_command" && value.offset === 0;
 	}) as Record<string, unknown> | undefined;
-	if (!entity || typeof entity.length !== "number" || !Number.isSafeInteger(entity.length) || entity.length <= 0) return null;
+	if (!entity || typeof entity.length !== "number" || !Number.isSafeInteger(entity.length) || entity.length <= 0)
+		return null;
 	const commandToken = source.slice(0, entity.length);
 	const match = commandToken.match(/^\/([a-z0-9_]+)(?:@([a-z0-9_]{5,32}))?$/i);
 	if (!match || !COMMAND_TOKENS.has(match[1]!.toLowerCase())) return null;
@@ -106,14 +104,14 @@ export function parseTelegramControlCommand(
 	if (typeof messageId !== "number" || !Number.isSafeInteger(messageId) || messageId <= 0) return null;
 	const from = message.from as Record<string, unknown> | undefined;
 	const senderId = typeof from?.id === "number" && Number.isSafeInteger(from.id) && from.id > 0 ? from.id : null;
-	const username = typeof from?.username === "string" && /^[a-z0-9_]{5,32}$/i.test(from.username)
-		? `@${from.username.toLowerCase()}` as `@${string}`
-		: null;
+	const username =
+		typeof from?.username === "string" && /^[a-z0-9_]{5,32}$/i.test(from.username)
+			? (`@${from.username.toLowerCase()}` as `@${string}`)
+			: null;
 
 	const remainder = source.slice(entity.length);
-	const action = remainder && !/^\s/.test(remainder)
-		? { kind: "usage" } as const
-		: parseControlArguments(token, remainder.trim());
+	const action =
+		remainder && !/^\s/.test(remainder) ? ({ kind: "usage" } as const) : parseControlArguments(token, remainder.trim());
 	return {
 		chatId,
 		messageId,
@@ -206,30 +204,33 @@ export class TelegramControlCommandService {
 	/** Persist and expose a sent control reply so it remains outside every future provider epoch. */
 	consumeReply(botId: string, chatId: number, messageId: number): void {
 		const existing = this.db
-			.query(`SELECT 1 FROM agent_events WHERE kind = ? AND json_extract(payload, '$.chat_id') = ? AND json_extract(payload, '$.message_id') = ? LIMIT 1`)
+			.query(
+				`SELECT 1 FROM agent_events WHERE kind = ? AND json_extract(payload, '$.chat_id') = ? AND json_extract(payload, '$.message_id') = ? LIMIT 1`,
+			)
 			.get(CONTROL_REPLY_EVENT, chatId, messageId);
 		if (!existing) {
-			this.db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (?, ?, ?, ?)").run(
-				botId,
-				this.now(),
-				CONTROL_REPLY_EVENT,
-				JSON.stringify({ chat_id: chatId, message_id: messageId }),
-			);
+			this.db
+				.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (?, ?, ?, ?)")
+				.run(botId, this.now(), CONTROL_REPLY_EVENT, JSON.stringify({ chat_id: chatId, message_id: messageId }));
 		}
 		this.consumeEveryRuntime(messageId);
 	}
 
 	private claim(command: ParsedTelegramControlCommand): boolean {
 		const existing = this.db
-			.query(`SELECT 1 FROM agent_events WHERE kind = ? AND json_extract(payload, '$.chat_id') = ? AND json_extract(payload, '$.message_id') = ? LIMIT 1`)
+			.query(
+				`SELECT 1 FROM agent_events WHERE kind = ? AND json_extract(payload, '$.chat_id') = ? AND json_extract(payload, '$.message_id') = ? LIMIT 1`,
+			)
 			.get(CONTROL_COMMAND_CLAIM_EVENT, command.chatId, command.messageId);
 		if (existing) return false;
-		this.db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (?, ?, ?, ?)").run(
-			command.replyBotId,
-			this.now(),
-			CONTROL_COMMAND_CLAIM_EVENT,
-			JSON.stringify({ chat_id: command.chatId, message_id: command.messageId, command: command.action.kind }),
-		);
+		this.db
+			.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (?, ?, ?, ?)")
+			.run(
+				command.replyBotId,
+				this.now(),
+				CONTROL_COMMAND_CLAIM_EVENT,
+				JSON.stringify({ chat_id: command.chatId, message_id: command.messageId, command: command.action.kind }),
+			);
 		return true;
 	}
 
@@ -253,7 +254,9 @@ export class TelegramControlCommandService {
 		for (const bot of this.bots) {
 			const snapshot = this.runtimes.get(bot.id)?.controlSnapshot();
 			const aggregate = this.db
-				.query("SELECT COUNT(*) runs, COALESCE(SUM(context_tokens), 0) context_tokens, COALESCE(SUM(output_tokens), 0) output_tokens, COALESCE(SUM(cost), 0) cost FROM llm_runs WHERE bot_id = ?")
+				.query(
+					"SELECT COUNT(*) runs, COALESCE(SUM(context_tokens), 0) context_tokens, COALESCE(SUM(output_tokens), 0) output_tokens, COALESCE(SUM(cost), 0) cost FROM llm_runs WHERE bot_id = ?",
+				)
 				.get(bot.id) as { runs: number; context_tokens: number; output_tokens: number; cost: number };
 			lines.push(
 				`${bounded(bot.id)} · ${bounded(bot.name)} · ${snapshot?.state ?? "unavailable"}`,
@@ -261,7 +264,8 @@ export class TelegramControlCommandService {
 				`routing_p=${bot.routingP} cooldown_ms=${bot.samplingCooldownMs}`,
 				`runs=${aggregate.runs} context=${aggregate.context_tokens} output=${aggregate.output_tokens} cost=$${aggregate.cost.toFixed(4)}`,
 			);
-			if (snapshot?.lastCompact) lines.push(`last_compact=${snapshot.lastCompact.outcome} at=${snapshot.lastCompact.at}`);
+			if (snapshot?.lastCompact)
+				lines.push(`last_compact=${snapshot.lastCompact.outcome} at=${snapshot.lastCompact.at}`);
 		}
 		return { text: boundedReply(lines.join("\n")), outcome: "ok" };
 	}
@@ -271,13 +275,24 @@ export class TelegramControlCommandService {
 		const bot = this.bots.find((candidate) => candidate.id === botId);
 		if (!bot) return { text: `未知 bot：${bounded(botId)}`, outcome: "unknown_bot" };
 		try {
-			updateBotConfigField(this.rootDir, botId, parameter === "routing_p" ? "routing_p" : "sampling_cooldown_ms", value);
+			updateBotConfigField(
+				this.rootDir,
+				botId,
+				parameter === "routing_p" ? "routing_p" : "sampling_cooldown_ms",
+				value,
+			);
 		} catch (error) {
-			return { text: boundedReply(`未修改：${error instanceof Error ? error.message : String(error)}`), outcome: "config_write_failed" };
+			return {
+				text: boundedReply(`未修改：${error instanceof Error ? error.message : String(error)}`),
+				outcome: "config_write_failed",
+			};
 		}
 		if (parameter === "routing_p") bot.routingP = value;
 		else bot.samplingCooldownMs = value;
-		return { text: `${bounded(botId)}.${parameter} = ${value}（已写入 telegram.config.ts，重启后仍然生效）`, outcome: "ok" };
+		return {
+			text: `${bounded(botId)}.${parameter} = ${value}（已写入 telegram.config.ts，重启后仍然生效）`,
+			outcome: "ok",
+		};
 	}
 
 	private async compact(botId: string): Promise<{ text: string; outcome: string }> {
@@ -290,7 +305,7 @@ export class TelegramControlCommandService {
 	}
 
 	private isAdmin(sender: ControlSender): boolean {
-		return this.admins.some((admin) => typeof admin === "number" ? admin === sender.id : admin === sender.username);
+		return this.admins.some((admin) => (typeof admin === "number" ? admin === sender.id : admin === sender.username));
 	}
 
 	private consumeEveryRuntime(messageId: number): void {
@@ -300,15 +315,17 @@ export class TelegramControlCommandService {
 			} catch {
 				// The durable claim/reply marker remains the flush authority even if local
 				// obligation cleanup races shutdown.
-				log.error("telegram_control", "context_exclusion_failed", { bot_id: botId, message_id: messageId, category: "local_failure" });
+				log.error("telegram_control", "context_exclusion_failed", {
+					bot_id: botId,
+					message_id: messageId,
+					category: "local_failure",
+				});
 			}
 		}
 	}
 
 	private audit(command: ParsedTelegramControlCommand, authorized: boolean, outcome: string, startedAt: number): void {
-		const target = command.action.kind === "compact" || command.action.kind === "set"
-			? command.replyBotId
-			: null;
+		const target = command.action.kind === "compact" || command.action.kind === "set" ? command.replyBotId : null;
 		const finishedAt = this.now();
 		this.db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (?, ?, ?, ?)").run(
 			command.replyBotId,
@@ -326,7 +343,11 @@ export class TelegramControlCommandService {
 		);
 	}
 
-	private result(command: ParsedTelegramControlCommand, text: string | null, duplicate: boolean): TelegramControlResult {
+	private result(
+		command: ParsedTelegramControlCommand,
+		text: string | null,
+		duplicate: boolean,
+	): TelegramControlResult {
 		return {
 			chatId: command.chatId,
 			replyToMessageId: command.messageId,
@@ -338,7 +359,10 @@ export class TelegramControlCommandService {
 
 	private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
 		const result = this.mutationTail.then(operation, operation);
-		this.mutationTail = result.then(() => {}, () => {});
+		this.mutationTail = result.then(
+			() => {},
+			() => {},
+		);
 		return result;
 	}
 }
@@ -346,9 +370,15 @@ export class TelegramControlCommandService {
 /** IDs marked here stay out of provider suffixes across every context generation. */
 export function consumedControlMessageIds(db: Database, chatId: number): Set<number> {
 	const rows = db
-		.query(`SELECT DISTINCT json_extract(payload, '$.message_id') message_id FROM agent_events WHERE kind IN (?, ?) AND json_extract(payload, '$.chat_id') = ?`)
+		.query(
+			`SELECT DISTINCT json_extract(payload, '$.message_id') message_id FROM agent_events WHERE kind IN (?, ?) AND json_extract(payload, '$.chat_id') = ?`,
+		)
 		.all(CONTROL_COMMAND_CLAIM_EVENT, CONTROL_REPLY_EVENT, chatId) as { message_id: unknown }[];
-	return new Set(rows.flatMap((row) => typeof row.message_id === "number" && Number.isSafeInteger(row.message_id) ? [row.message_id] : []));
+	return new Set(
+		rows.flatMap((row) =>
+			typeof row.message_id === "number" && Number.isSafeInteger(row.message_id) ? [row.message_id] : [],
+		),
+	);
 }
 
 function isHuman(sender: ControlSender): boolean {
@@ -361,11 +391,16 @@ function isMutation(action: TelegramControlAction): boolean {
 
 function compactFailureText(code: Exclude<ManualCompactResult, { ok: true }>["code"]): string {
 	switch (code) {
-		case "busy": return "busy，请稍后重试";
-		case "stopping": return "正在停止";
-		case "unavailable": return "runtime unavailable";
-		case "nothing_to_compact": return "没有足够上下文可压缩";
-		case "failed": return "compact 失败（详情仅保留在本机日志）";
+		case "busy":
+			return "busy，请稍后重试";
+		case "stopping":
+			return "正在停止";
+		case "unavailable":
+			return "runtime unavailable";
+		case "nothing_to_compact":
+			return "没有足够上下文可压缩";
+		case "failed":
+			return "compact 失败（详情仅保留在本机日志）";
 	}
 }
 

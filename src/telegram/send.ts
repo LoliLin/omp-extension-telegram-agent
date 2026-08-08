@@ -3,11 +3,7 @@
 import type { Database } from "bun:sqlite";
 import { TelegramApiError } from "./api.ts";
 import { insertSentMessage } from "./ingest.ts";
-import {
-	formatTelegramMarkdown,
-	TelegramMarkdownError,
-	type TelegramMessageEntity,
-} from "./markdown.ts";
+import { formatTelegramMarkdown, TelegramMarkdownError, type TelegramMessageEntity } from "./markdown.ts";
 import type { CanonicalMessage } from "./normalize.ts";
 
 export interface TextSendApi {
@@ -59,7 +55,14 @@ export function localFailureCategory(error: unknown): "sqlite_busy" | "sqlite_cl
 
 export interface TelegramCreateFailure {
 	outcome: "rejected" | "unknown";
-	category: "invalid_request" | "telegram_4xx" | "rate_limited" | "timeout" | "server_error" | "non_json" | "network_error";
+	category:
+		| "invalid_request"
+		| "telegram_4xx"
+		| "rate_limited"
+		| "timeout"
+		| "server_error"
+		| "non_json"
+		| "network_error";
 }
 
 /**
@@ -129,15 +132,17 @@ export function isDeterministicEntityRejection(error: unknown): error is Telegra
 	if (!(error instanceof TelegramApiError)) return false;
 	const description = error.description.toLowerCase();
 	if (description.includes("non-json") || error.code !== 400) return false;
-	return description.includes("can't parse")
-		|| description.includes("cannot parse")
-		|| description.includes("failed to parse")
-		|| description.includes("parse error")
-		|| description.includes("message entity")
-		|| description.includes("message entities")
-		|| description.includes("entity offset")
-		|| description.includes("entity length")
-		|| description.includes("entities are not valid");
+	return (
+		description.includes("can't parse") ||
+		description.includes("cannot parse") ||
+		description.includes("failed to parse") ||
+		description.includes("parse error") ||
+		description.includes("message entity") ||
+		description.includes("message entities") ||
+		description.includes("entity offset") ||
+		description.includes("entity length") ||
+		description.includes("entities are not valid")
+	);
 }
 
 /** Agent Markdown send with one safe entity-free fallback and exactly-once persistence. */

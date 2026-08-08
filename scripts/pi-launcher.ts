@@ -30,7 +30,9 @@ export async function ensurePiDependencies(rootDir: string, io: PiLauncherIO = d
 
 	const status = await io.run([process.execPath, "install", "--frozen-lockfile"], rootDir);
 	if (status !== 0) {
-		throw new PiBootstrapError(`Dependency bootstrap failed with exit code ${status}. Run: bun install --frozen-lockfile`);
+		throw new PiBootstrapError(
+			`Dependency bootstrap failed with exit code ${status}. Run: bun install --frozen-lockfile`,
+		);
 	}
 	if (!io.exists(cliPath)) {
 		throw new PiBootstrapError(`Dependency bootstrap completed but ${PI_CLI_RELATIVE_PATH} is missing.`);

@@ -89,7 +89,14 @@ function extractMedia(msg: any): MediaInfo | null {
 	for (const kind of ["animation", "video", "document", "voice", "audio"] as const) {
 		const m = msg[kind];
 		if (m) {
-			return { kind, file_unique_id: m.file_unique_id, file_id: m.file_id, mime: m.mime_type, width: m.width, height: m.height };
+			return {
+				kind,
+				file_unique_id: m.file_unique_id,
+				file_id: m.file_id,
+				mime: m.mime_type,
+				width: m.width,
+				height: m.height,
+			};
 		}
 	}
 	return null;

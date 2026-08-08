@@ -1,12 +1,4 @@
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	readdirSync,
-	rmSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
 export const MDBOOK_VERSION = "0.5.4";
@@ -230,9 +222,7 @@ export function checkGeneratedHtmlLinks(siteDir: string): LinkReport {
 
 function assertClean(report: LinkReport, label: string): void {
 	if (report.issues.length === 0) return;
-	const details = report.issues
-		.map((issue) => `- ${issue.file}: ${issue.href} (${issue.reason})`)
-		.join("\n");
+	const details = report.issues.map((issue) => `- ${issue.file}: ${issue.href} (${issue.reason})`).join("\n");
 	throw new Error(`${label} found ${report.issues.length} broken link(s):\n${details}`);
 }
 
@@ -253,7 +243,9 @@ async function requireMdBook(rootDir: string, runner: CommandRunner): Promise<st
 	const binary = process.env.MDBOOK_BIN || "mdbook";
 	const result = await runner.run([binary, "--version"], rootDir);
 	if (result.exitCode !== 0) {
-		throw new Error(`mdBook ${MDBOOK_VERSION} is required. Install it with: cargo install mdbook --version ${MDBOOK_VERSION} --locked`);
+		throw new Error(
+			`mdBook ${MDBOOK_VERSION} is required. Install it with: cargo install mdbook --version ${MDBOOK_VERSION} --locked`,
+		);
 	}
 	const output = `${result.stdout}\n${result.stderr}`;
 	if (!new RegExp(`(?:^|\\D)v?${MDBOOK_VERSION.replaceAll(".", "\\.")}(?:\\D|$)`).test(output)) {
@@ -289,19 +281,29 @@ export async function buildDocumentation(rootDir: string, runner: CommandRunner 
 	return siteDir;
 }
 
-export async function checkDocumentation(rootDir: string, runner: CommandRunner = defaultRunner): Promise<LinkReport[]> {
+export async function checkDocumentation(
+	rootDir: string,
+	runner: CommandRunner = defaultRunner,
+): Promise<LinkReport[]> {
 	const siteDir = await buildDocumentation(rootDir, runner);
 	const source = checkRepositoryMarkdownLinks(rootDir);
 	const generated = checkGeneratedHtmlLinks(siteDir);
 	assertClean(source, "Markdown source check");
 	assertClean(generated, "Generated site check");
 	verifyLanguageSwitches(siteDir);
-	writeFileSync(resolve(siteDir, "verification.json"), `${JSON.stringify({
-		mdbookVersion: MDBOOK_VERSION,
-		books: BOOKS.map((book) => book.language),
-		source: { files: source.files, links: source.links },
-		generated: { files: generated.files, links: generated.links },
-	}, null, 2)}\n`);
+	writeFileSync(
+		resolve(siteDir, "verification.json"),
+		`${JSON.stringify(
+			{
+				mdbookVersion: MDBOOK_VERSION,
+				books: BOOKS.map((book) => book.language),
+				source: { files: source.files, links: source.links },
+				generated: { files: generated.files, links: generated.links },
+			},
+			null,
+			2,
+		)}\n`,
+	);
 	return [source, generated];
 }
 
@@ -314,7 +316,9 @@ if (import.meta.main) {
 			console.log(`Built zh/en documentation in ${relative(rootDir, siteDir)} with mdBook ${MDBOOK_VERSION}.`);
 		} else if (command === "check") {
 			const [source, generated] = await checkDocumentation(rootDir);
-			console.log(`Documentation OK: ${source.files} Markdown files / ${source.links} links; ${generated.files} HTML files / ${generated.links} links.`);
+			console.log(
+				`Documentation OK: ${source.files} Markdown files / ${source.links} links; ${generated.files} HTML files / ${generated.links} links.`,
+			);
 		} else {
 			throw new Error("Usage: bun run scripts/docs-site.ts <build|check>");
 		}

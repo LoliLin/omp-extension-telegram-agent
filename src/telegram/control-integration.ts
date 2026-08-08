@@ -1,7 +1,14 @@
 import type { Database } from "bun:sqlite";
 import { log } from "../observability/log.ts";
 import type { ParsedTelegramControlCommand, TelegramControlResult } from "./control-command.ts";
-import { classifyTelegramCreateFailure, localFailureCategory, retrySqliteBusy, sendTextAndPersist, SentMessagePersistenceError, type TextSendApi } from "./send.ts";
+import {
+	classifyTelegramCreateFailure,
+	localFailureCategory,
+	retrySqliteBusy,
+	sendTextAndPersist,
+	SentMessagePersistenceError,
+	type TextSendApi,
+} from "./send.ts";
 
 export interface TelegramControlCommandPort {
 	handle(command: ParsedTelegramControlCommand): Promise<TelegramControlResult>;
@@ -54,24 +61,31 @@ export class TelegramControlCoordinator {
 				result.replyToMessageId,
 			);
 			try {
-				await retrySqliteBusy(() => this.commands.consumeReply(
-					result.replyBotId,
-					canonical.chat_id,
-					canonical.message_id,
-				));
+				await retrySqliteBusy(() =>
+					this.commands.consumeReply(result.replyBotId, canonical.chat_id, canonical.message_id),
+				);
 			} catch (error) {
-				this.warn("reply_marker", { bot_id: result.replyBotId, message_id: canonical.message_id, category: localFailureCategory(error) });
+				this.warn("reply_marker", {
+					bot_id: result.replyBotId,
+					message_id: canonical.message_id,
+					category: localFailureCategory(error),
+				});
 			}
 			try {
 				this.onSent?.({ botId: result.replyBotId, chatId: canonical.chat_id, messageId: canonical.message_id });
 			} catch {
-				this.warn("reply_broadcast", { bot_id: result.replyBotId, message_id: canonical.message_id, category: "local_failure" });
+				this.warn("reply_broadcast", {
+					bot_id: result.replyBotId,
+					message_id: canonical.message_id,
+					category: "local_failure",
+				});
 			}
 			return { outcome: "sent", botId: result.replyBotId, chatId: canonical.chat_id, messageId: canonical.message_id };
 		} catch (error) {
-			const category = error instanceof SentMessagePersistenceError
-				? localFailureCategory(error.cause)
-				: classifyTelegramCreateFailure(error).category;
+			const category =
+				error instanceof SentMessagePersistenceError
+					? localFailureCategory(error.cause)
+					: classifyTelegramCreateFailure(error).category;
 			this.warn("reply", { bot_id: result.replyBotId, message_id: result.replyToMessageId, category });
 			return { outcome: "failed", category };
 		}
@@ -92,13 +106,16 @@ export const TELEGRAM_CONTROL_MENU = [
 /** Startup capability only: every bot attempts the same menu, failures never block polling. */
 export async function publishTelegramControlMenus(
 	apis: ReadonlyMap<string, TelegramMenuApi>,
-	warn: (fields: Record<string, unknown>) => void = (fields) => log.warn("telegram_control", "menu_publish_failed", fields),
+	warn: (fields: Record<string, unknown>) => void = (fields) =>
+		log.warn("telegram_control", "menu_publish_failed", fields),
 ): Promise<void> {
-	await Promise.all([...apis].map(async ([botId, api]) => {
-		try {
-			await api.setMyCommands(TELEGRAM_CONTROL_MENU);
-		} catch {
-			warn({ bot_id: botId, category: "request_failed" });
-		}
-	}));
+	await Promise.all(
+		[...apis].map(async ([botId, api]) => {
+			try {
+				await api.setMyCommands(TELEGRAM_CONTROL_MENU);
+			} catch {
+				warn({ bot_id: botId, category: "request_failed" });
+			}
+		}),
+	);
 }

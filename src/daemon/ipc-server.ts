@@ -235,8 +235,7 @@ export class IpcServer {
 
 	private handleRequest(socket: SocketLike, req: ClientRequest): void {
 		if (req.type === "hello") {
-			const filter =
-				typeof req.filter === "string" && this.botNames.has(req.filter) ? req.filter : null;
+			const filter = typeof req.filter === "string" && this.botNames.has(req.filter) ? req.filter : null;
 			if (req.filter && !filter) log.warn("ipc", "unknown_filter", { filter: req.filter });
 			this.filters.set(socket, filter);
 			const frame = encodeFrame({
@@ -306,26 +305,25 @@ export class IpcServer {
 				 ORDER BY date DESC, message_id DESC LIMIT ?4`,
 			)
 			.all(ts, rank, id, limit) as MessageRow[];
-		const evts = (filter
-			? this.db
-					.query(
-						`SELECT * FROM agent_events
+		const evts = (
+			filter
+				? this.db
+						.query(
+							`SELECT * FROM agent_events
 						 WHERE bot_id = ?5 AND ((ts < ?1) OR (?2 = 0 AND ts = ?1 AND id < ?3) OR (?2 = 1 AND ts = ?1))
 						 ORDER BY ts DESC, id DESC LIMIT ?4`,
-					)
-					.all(ts, rank, id, limit, filter)
-			: this.db
-					.query(
-						`SELECT * FROM agent_events
+						)
+						.all(ts, rank, id, limit, filter)
+				: this.db
+						.query(
+							`SELECT * FROM agent_events
 						 WHERE (ts < ?1) OR (?2 = 0 AND ts = ?1 AND id < ?3) OR (?2 = 1 AND ts = ?1)
 						 ORDER BY ts DESC, id DESC LIMIT ?4`,
-					)
-					.all(ts, rank, id, limit)) as { id: number; bot_id: string; ts: number; kind: string; payload: string }[];
+						)
+						.all(ts, rank, id, limit)
+		) as { id: number; bot_id: string; ts: number; kind: string; payload: string }[];
 
-		const items: TimelineItem[] = [
-			...msgs.map((m) => this.msgToItem(m)),
-			...evts.map((e) => this.evtToItem(e)),
-		];
+		const items: TimelineItem[] = [...msgs.map((m) => this.msgToItem(m)), ...evts.map((e) => this.evtToItem(e))];
 		items.sort((a, b) => keyOf(a) - keyOf(b) || rankOf(a) - rankOf(b) || idOf(a) - idOf(b));
 		return items.slice(-limit);
 	}
@@ -348,9 +346,9 @@ export class IpcServer {
 			stickerEmoji = media.sticker_emoji ?? null;
 			if (media.file_unique_id) {
 				fileUniqueId = media.file_unique_id;
-				const row = this.db.query("SELECT local_path, vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as
-					| { local_path: string | null; vision: string | null }
-					| null;
+				const row = this.db
+					.query("SELECT local_path, vision FROM media WHERE file_unique_id = ?")
+					.get(media.file_unique_id) as { local_path: string | null; vision: string | null } | null;
 				if (row) {
 					mediaPath = row.local_path ?? null;
 					if (row.vision) {

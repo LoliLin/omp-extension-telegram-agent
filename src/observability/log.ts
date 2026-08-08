@@ -1,13 +1,4 @@
-import {
-	chmodSync,
-	existsSync,
-	openSync,
-	closeSync,
-	readSync,
-	renameSync,
-	rmSync,
-	statSync,
-} from "node:fs";
+import { chmodSync, existsSync, openSync, closeSync, readSync, renameSync, rmSync, statSync } from "node:fs";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFields = Readonly<Record<string, unknown>>;
@@ -19,7 +10,8 @@ export const MAX_LOG_LINE_BYTES = 4096;
 export const DEFAULT_LOG_MAX_BYTES = 8 * 1024 * 1024;
 export const DEFAULT_LOG_GENERATIONS = 3;
 
-const SENSITIVE_KEY = /(?:^|_)(?:token|secret|password|authorization|cookie|api[_-]?key|prompt|content|body|response|query|url|path|stack|persona)(?:$|_)/i;
+const SENSITIVE_KEY =
+	/(?:^|_)(?:token|secret|password|authorization|cookie|api[_-]?key|prompt|content|body|response|query|url|path|stack|persona)(?:$|_)/i;
 const TELEGRAM_TOKEN = /\b\d{5,}:[A-Za-z0-9_-]{10,}\b/g;
 const PROVIDER_KEY = /\b(?:sk|tf)-[A-Za-z0-9_-]{8,}\b/gi;
 const URL = /\bhttps?:\/\/[^\s]+/gi;
@@ -36,7 +28,11 @@ export interface LogRecord {
 }
 
 function safeName(input: string, fallback: string): string {
-	const normalized = input.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_").slice(0, 64);
+	const normalized = input
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9_.-]+/g, "_")
+		.slice(0, 64);
 	return normalized || fallback;
 }
 
@@ -96,13 +92,17 @@ export function formatLogRecord(
 
 export type LogSink = (line: string) => void;
 
-let sink: LogSink = (line) => { process.stdout.write(line); };
+let sink: LogSink = (line) => {
+	process.stdout.write(line);
+};
 
 /** Test seam and foreground embedding hook. Production keeps the stdout JSONL sink. */
 export function setLogSink(next: LogSink): () => void {
 	const previous = sink;
 	sink = next;
-	return () => { sink = previous; };
+	return () => {
+		sink = previous;
+	};
 }
 
 export function writeLog(level: LogLevel, component: string, event: string, fields: LogFields = {}): void {
@@ -159,19 +159,33 @@ export function readStructuredLogTail(logPath: string, maxBytes = 64 * 1024, max
 		const raw = buffer.toString("utf8");
 		const lines = raw.split("\n");
 		if (start > 0) lines.shift();
-		return lines.slice(-maxRecords - 1).flatMap((line): LogRecord[] => {
-			try {
-				const parsed = JSON.parse(line) as Partial<LogRecord>;
-				if (parsed.schema !== LOG_SCHEMA_VERSION || typeof parsed.ts !== "string"
-					|| typeof parsed.level !== "string" || typeof parsed.component !== "string" || typeof parsed.event !== "string") return [];
-				return [parsed as LogRecord];
-			} catch {
-				return [];
-			}
-		}).slice(-maxRecords);
+		return lines
+			.slice(-maxRecords - 1)
+			.flatMap((line): LogRecord[] => {
+				try {
+					const parsed = JSON.parse(line) as Partial<LogRecord>;
+					if (
+						parsed.schema !== LOG_SCHEMA_VERSION ||
+						typeof parsed.ts !== "string" ||
+						typeof parsed.level !== "string" ||
+						typeof parsed.component !== "string" ||
+						typeof parsed.event !== "string"
+					)
+						return [];
+					return [parsed as LogRecord];
+				} catch {
+					return [];
+				}
+			})
+			.slice(-maxRecords);
 	} catch {
 		return [];
 	} finally {
-		if (fd != null) try { closeSync(fd); } catch { /* already closed */ }
+		if (fd != null)
+			try {
+				closeSync(fd);
+			} catch {
+				/* already closed */
+			}
 	}
 }

@@ -66,11 +66,11 @@ function payloadSegments(payload: unknown): { system: unknown; tools: unknown; m
 		: Array.isArray(record.input)
 			? record.input
 			: [];
-	const systemMessages = rawMessages.filter((entry) =>
-		entry && typeof entry === "object" && (entry as Record<string, unknown>).role === "system"
+	const systemMessages = rawMessages.filter(
+		(entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).role === "system",
 	);
-	const messages = rawMessages.filter((entry) =>
-		!(entry && typeof entry === "object" && (entry as Record<string, unknown>).role === "system")
+	const messages = rawMessages.filter(
+		(entry) => !(entry && typeof entry === "object" && (entry as Record<string, unknown>).role === "system"),
 	);
 	const system = record.system ?? record.instructions ?? systemMessages;
 	const tools = record.tools ?? [];
@@ -101,14 +101,10 @@ export function observeProviderPayload(
 		const previousSnapshot = (previous as ObservationWithSnapshot)[PAYLOAD_SNAPSHOT];
 		if (previous.systemHash !== systemHash) {
 			firstDivergentSegment = "system";
-			firstDivergentByteOffset = previousSnapshot
-				? firstByteDifference(previousSnapshot.systemJson, systemJson)
-				: null;
+			firstDivergentByteOffset = previousSnapshot ? firstByteDifference(previousSnapshot.systemJson, systemJson) : null;
 		} else if (previous.toolsHash !== toolsHash) {
 			firstDivergentSegment = "tools";
-			firstDivergentByteOffset = previousSnapshot
-				? firstByteDifference(previousSnapshot.toolsJson, toolsJson)
-				: null;
+			firstDivergentByteOffset = previousSnapshot ? firstByteDifference(previousSnapshot.toolsJson, toolsJson) : null;
 		} else {
 			const max = Math.max(previous.messageHashes.length, messageHashes.length);
 			for (let index = 0; index < max; index++) {
@@ -117,16 +113,12 @@ export function observeProviderPayload(
 				firstDivergentMessageIndex = index;
 				const previousJson = previousSnapshot?.messageJson[index] ?? "";
 				const currentJson = messageJson[index] ?? "";
-				firstDivergentByteOffset = previousSnapshot
-					? firstByteDifference(previousJson, currentJson)
-					: null;
+				firstDivergentByteOffset = previousSnapshot ? firstByteDifference(previousJson, currentJson) : null;
 				break;
 			}
 			if (!firstDivergentSegment && previous.fullPayloadHash !== fullPayloadHash) {
 				firstDivergentSegment = "payload";
-				firstDivergentByteOffset = previousSnapshot
-					? firstByteDifference(previousSnapshot.fullJson, fullJson)
-					: null;
+				firstDivergentByteOffset = previousSnapshot ? firstByteDifference(previousSnapshot.fullJson, fullJson) : null;
 			}
 		}
 	}

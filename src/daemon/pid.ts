@@ -36,8 +36,16 @@ function processCommand(pid: number): string | null {
 
 function processCwd(pid: number): string | null {
 	try {
-		const output = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], { encoding: "utf8", timeout: 3000 });
-		return output.split("\n").find((line) => line.startsWith("n"))?.slice(1) ?? null;
+		const output = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
+			encoding: "utf8",
+			timeout: 3000,
+		});
+		return (
+			output
+				.split("\n")
+				.find((line) => line.startsWith("n"))
+				?.slice(1) ?? null
+		);
 	} catch {
 		return null;
 	}
@@ -52,10 +60,11 @@ function daemonEntry(command: string): string | null {
 	const unquoted = entry.replace(/^["']|["']$/g, "");
 	if (/(?:^|\/)daemon\/index(?:\.ts)?$/.test(unquoted)) return unquoted;
 	if (
-		/(?:^|\/)main(?:\.ts)?$/.test(unquoted)
-		&& args[runOffset + 1] === "start"
-		&& args.slice(runOffset + 2).includes("--foreground")
-	) return unquoted;
+		/(?:^|\/)main(?:\.ts)?$/.test(unquoted) &&
+		args[runOffset + 1] === "start" &&
+		args.slice(runOffset + 2).includes("--foreground")
+	)
+		return unquoted;
 	return null;
 }
 

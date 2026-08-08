@@ -12,16 +12,19 @@ export function claimRoutingDecision(
 	decision: RoutingDecision & { target: string },
 	routeVersion: number,
 ): boolean {
-	const accepted = db.query(`
+	const accepted = db
+		.query(`
 		SELECT 1
 		  FROM routing_claims
 		 WHERE chat_id = ? AND message_id = ?
 		   AND status IN ('started', 'coalesced')
 		 LIMIT 1
-	`).get(decision.chatId, decision.messageId);
+	`)
+		.get(decision.chatId, decision.messageId);
 	if (accepted) return false;
 	const now = Date.now();
-	const result = db.query(`
+	const result = db
+		.query(`
 		INSERT INTO routing_claims
 			(chat_id, message_id, bot_id, route_version, reason, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
@@ -30,15 +33,8 @@ export function claimRoutingDecision(
 			status = 'pending',
 			updated_at = excluded.updated_at
 		WHERE routing_claims.status NOT IN ('started', 'coalesced')
-	`).run(
-		decision.chatId,
-		decision.messageId,
-		decision.target,
-		routeVersion,
-		decision.reason,
-		now,
-		now,
-	);
+	`)
+		.run(decision.chatId, decision.messageId, decision.target, routeVersion, decision.reason, now, now);
 	return result.changes > 0;
 }
 

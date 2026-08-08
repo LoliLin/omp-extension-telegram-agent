@@ -123,10 +123,11 @@ export function validateFirstRunDraft(draft: FirstRunDraft): NormalizedDraft {
 	if (!ENV_KEY.test(draft.bot.tokenEnv)) invalid.push("bot.token_env");
 	if (!TELEGRAM_TOKEN.test(draft.bot.token)) invalid.push("bot.token");
 	if (
-		!draft.bot.personaText.trim()
-		|| draft.bot.personaText.includes("\0")
-		|| Buffer.byteLength(draft.bot.personaText, "utf8") > MAX_PERSONA_BYTES
-	) invalid.push("bot.persona");
+		!draft.bot.personaText.trim() ||
+		draft.bot.personaText.includes("\0") ||
+		Buffer.byteLength(draft.bot.personaText, "utf8") > MAX_PERSONA_BYTES
+	)
+		invalid.push("bot.persona");
 	if (invalid.length > 0) throw new OnboardingValidationError([...new Set(invalid)]);
 
 	return {
@@ -157,10 +158,7 @@ export function mergeEnvSource(source: string, updates: Readonly<Record<string, 
 	return `${output.join("\n")}\n`;
 }
 
-function renderFirstRunConfig(
-	draft: NormalizedDraft,
-	modelSelection?: { provider: string; model: string },
-): string {
+function renderFirstRunConfig(draft: NormalizedDraft, modelSelection?: { provider: string; model: string }): string {
 	const value = (input: string | number | boolean) => JSON.stringify(input);
 	const pinnedModel = modelSelection
 		? `\tprovider: ${value(modelSelection.provider)},\n\tmodel: ${value(modelSelection.model)},\n`
@@ -204,7 +202,11 @@ ${pinnedModel}	reasoning_effort: "off",
 }
 
 /** Write a complete first-run deployment or replace it only after explicit confirmation upstream. */
-export function writeFirstRunDeployment(rootDir: string, draft: FirstRunDraft, options: OnboardingWriteOptions = {}): {
+export function writeFirstRunDeployment(
+	rootDir: string,
+	draft: FirstRunDraft,
+	options: OnboardingWriteOptions = {},
+): {
 	summary: DeploymentSummary;
 	backupPaths: string[];
 } {
@@ -296,7 +298,8 @@ export function replaceExistingConfigSource(
 	source: string,
 	options: OnboardingWriteOptions & { confirmed: boolean },
 ): { summary: DeploymentSummary; backupPath: string } {
-	if (!options.confirmed) throw new OnboardingWriteError("replacement was not confirmed; original configuration was preserved");
+	if (!options.confirmed)
+		throw new OnboardingWriteError("replacement was not confirmed; original configuration was preserved");
 	const root = resolve(rootDir);
 	const target = resolve(path);
 	const ops = options.fileOps ?? nodeConfigFileOps;
@@ -347,7 +350,8 @@ function replaceBotFieldValue(source: string, botId: string, field: BotControlCo
 	const idLine = /^[ \t]*id:[ \t]*["']([A-Za-z0-9_-]+)["'][ \t]*,?[ \t]*$/gm;
 	const anchors = [...source.matchAll(idLine)];
 	const anchor = anchors.filter((match) => match[1] === botId);
-	if (anchor.length !== 1) throw new OnboardingWriteError(`config source must contain exactly one id anchor for bot "${botId}"`);
+	if (anchor.length !== 1)
+		throw new OnboardingWriteError(`config source must contain exactly one id anchor for bot "${botId}"`);
 	const start = anchor[0]!.index!;
 	const rest = anchors.find((match) => match.index > start);
 	const end = rest?.index ?? source.length;
@@ -376,7 +380,9 @@ function installAtomically(
 	const allProtected = [...new Set([...files.map((file) => file.path), ...retirePaths])];
 	const existing = allProtected.filter((path) => ops.exists(path));
 	if (mode === "create" && existing.length > 0) {
-		throw new OnboardingWriteError(`existing files were preserved: ${existing.map((path) => basename(path)).join(", ")}`);
+		throw new OnboardingWriteError(
+			`existing files were preserved: ${existing.map((path) => basename(path)).join(", ")}`,
+		);
 	}
 	for (const path of existing) assertRegularFile(path, ops);
 	const backups = existing.map((path) => ({ original: path, backup: `${path}.bak-${nonce}` }));
@@ -388,7 +394,8 @@ function installAtomically(
 		temporary: join(dirname(file.path), `.${basename(file.path)}.tmp-${nonce}`),
 	}));
 	for (const file of staged) {
-		if (ops.exists(file.temporary)) throw new OnboardingWriteError(`temporary file already exists: ${basename(file.temporary)}`);
+		if (ops.exists(file.temporary))
+			throw new OnboardingWriteError(`temporary file already exists: ${basename(file.temporary)}`);
 		ops.mkdir(dirname(file.path));
 	}
 
@@ -434,7 +441,9 @@ function installAtomically(
 		try {
 			rollback();
 		} catch {
-			throw new OnboardingWriteError("configuration write failed and automatic rollback was incomplete; inspect local backup files");
+			throw new OnboardingWriteError(
+				"configuration write failed and automatic rollback was incomplete; inspect local backup files",
+			);
 		}
 		throw new OnboardingWriteError("configuration write failed; original files were restored");
 	}

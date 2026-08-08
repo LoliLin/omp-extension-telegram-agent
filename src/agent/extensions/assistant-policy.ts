@@ -27,9 +27,7 @@ export function applyAssistantPersistencePolicy(
 	return protocolContent.length === message.content.length ? message : { ...message, content: protocolContent };
 }
 
-export function makeAssistantPersistencePolicyExtension(
-	onUnpublishedText?: (text: string) => void,
-): InlineExtension {
+export function makeAssistantPersistencePolicyExtension(onUnpublishedText?: (text: string) => void): InlineExtension {
 	return {
 		name: "tg-assistant-persistence",
 		hidden: true,

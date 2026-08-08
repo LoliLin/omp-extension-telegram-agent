@@ -14,19 +14,19 @@ function parseIpv4(hostname: string): [number, number, number, number] | undefin
 
 function isBlockedIpv4([a, b, c]: [number, number, number, number]): boolean {
 	return (
-		a === 0
-		|| a === 10
-		|| (a === 100 && b >= 64 && b <= 127)
-		|| a === 127
-		|| (a === 169 && b === 254)
-		|| (a === 172 && b >= 16 && b <= 31)
-		|| (a === 192 && b === 0 && c === 0)
-		|| (a === 192 && b === 0 && c === 2)
-		|| (a === 192 && b === 168)
-		|| (a === 198 && (b === 18 || b === 19))
-		|| (a === 198 && b === 51 && c === 100)
-		|| (a === 203 && b === 0 && c === 113)
-		|| a >= 224
+		a === 0 ||
+		a === 10 ||
+		(a === 100 && b >= 64 && b <= 127) ||
+		a === 127 ||
+		(a === 169 && b === 254) ||
+		(a === 172 && b >= 16 && b <= 31) ||
+		(a === 192 && b === 0 && c === 0) ||
+		(a === 192 && b === 0 && c === 2) ||
+		(a === 192 && b === 168) ||
+		(a === 198 && (b === 18 || b === 19)) ||
+		(a === 198 && b === 51 && c === 100) ||
+		(a === 203 && b === 0 && c === 113) ||
+		a >= 224
 	);
 }
 
@@ -46,7 +46,8 @@ function parseIpv6(hostname: string): number[] | undefined {
 	const missing = 8 - left.length - right.length;
 	if ((halves.length === 1 && missing !== 0) || (halves.length === 2 && missing < 1)) return undefined;
 	const words = [...left, ...Array(missing).fill("0"), ...right].map((word) => Number.parseInt(word, 16));
-	if (words.length !== 8 || words.some((word) => !Number.isInteger(word) || word < 0 || word > 0xffff)) return undefined;
+	if (words.length !== 8 || words.some((word) => !Number.isInteger(word) || word < 0 || word > 0xffff))
+		return undefined;
 	return words;
 }
 
@@ -73,8 +74,18 @@ export function parsePublicHttpUrl(input: string, maxChars = 2_048): PublicHttpU
 		return null;
 	}
 	if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password) return null;
-	const hostname = parsed.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
-	if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "local" || hostname.endsWith(".local")) return null;
+	const hostname = parsed.hostname
+		.replace(/^\[|\]$/g, "")
+		.replace(/\.$/, "")
+		.toLowerCase();
+	if (
+		!hostname ||
+		hostname === "localhost" ||
+		hostname.endsWith(".localhost") ||
+		hostname === "local" ||
+		hostname.endsWith(".local")
+	)
+		return null;
 	const ipv4 = parseIpv4(hostname);
 	if (ipv4 && isBlockedIpv4(ipv4)) return null;
 	const ipv6 = parseIpv6(hostname);

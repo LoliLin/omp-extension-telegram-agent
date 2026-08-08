@@ -10,7 +10,9 @@ const cleanup = new Set<string>();
 afterEach(() => {
 	for (const path of cleanup) {
 		for (const suffix of ["", "-wal", "-shm"]) {
-			try { unlinkSync(`${path}${suffix}`); } catch {}
+			try {
+				unlinkSync(`${path}${suffix}`);
+			} catch {}
 		}
 	}
 	cleanup.clear();
@@ -39,7 +41,11 @@ describe("database migrations", () => {
 			tools_hash TEXT,
 			messages_hash TEXT
 		)`);
-		legacy.query("INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, cost) VALUES ('A', 1, 'm', 1, 100, 80, 20, 5, 0.01)").run();
+		legacy
+			.query(
+				"INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, cost) VALUES ('A', 1, 'm', 1, 100, 80, 20, 5, 0.01)",
+			)
+			.run();
 		legacy.close();
 
 		for (let pass = 0; pass < 2; pass++) {

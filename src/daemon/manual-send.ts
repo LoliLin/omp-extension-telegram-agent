@@ -112,7 +112,11 @@ export class ManualSendService {
 			try {
 				this.onSent?.({ botId, chatId: canonical.chat_id, messageId: canonical.message_id });
 			} catch (error) {
-				log.error("manual_send", "broadcast_failed", { bot_id: botId, request_id: requestId, category: errorCategory(error) });
+				log.error("manual_send", "broadcast_failed", {
+					bot_id: botId,
+					request_id: requestId,
+					category: errorCategory(error),
+				});
 			}
 			log.info("manual_send", "committed", { bot_id: botId, request_id: requestId, message_id: canonical.message_id });
 			return { requestId, botId, ok: true, chatId: canonical.chat_id, messageId: canonical.message_id };
@@ -128,7 +132,11 @@ export class ManualSendService {
 				};
 			}
 			const telegramCode = error instanceof TelegramApiError ? error.code : null;
-			log.error("manual_send", "telegram_create_failed", { bot_id: botId, request_id: requestId, telegram_code: telegramCode ?? "unknown" });
+			log.error("manual_send", "telegram_create_failed", {
+				bot_id: botId,
+				request_id: requestId,
+				telegram_code: telegramCode ?? "unknown",
+			});
 			return {
 				requestId,
 				botId,

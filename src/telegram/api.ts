@@ -88,11 +88,7 @@ export class BotApi {
 		return this.call<true>("setMyCommands", { commands });
 	}
 
-	sendMessage(
-		chatId: number,
-		text: string,
-		replyToMessageId?: number,
-	): Promise<Record<string, unknown>> {
+	sendMessage(chatId: number, text: string, replyToMessageId?: number): Promise<Record<string, unknown>> {
 		return this.call("sendMessage", {
 			chat_id: chatId,
 			text,
@@ -114,11 +110,7 @@ export class BotApi {
 		});
 	}
 
-	sendSticker(
-		chatId: number,
-		fileId: string,
-		replyToMessageId?: number,
-	): Promise<Record<string, unknown>> {
+	sendSticker(chatId: number, fileId: string, replyToMessageId?: number): Promise<Record<string, unknown>> {
 		return this.call("sendSticker", {
 			chat_id: chatId,
 			sticker: fileId,
@@ -128,14 +120,13 @@ export class BotApi {
 
 	/** Current deployment's group-capable processing indicator; draft Thinking is private-only. */
 	sendChatAction(chatId: number): Promise<true> {
-		return this.call<true>(
-			"sendChatAction",
-			{ chat_id: chatId, action: "typing" },
-			CHAT_ACTION_TIMEOUT_MS,
-		);
+		return this.call<true>("sendChatAction", { chat_id: chatId, action: "typing" }, CHAT_ACTION_TIMEOUT_MS);
 	}
 
-	getFile(fileId: string, signal?: AbortSignal): Promise<{ file_id: string; file_unique_id: string; file_path?: string }> {
+	getFile(
+		fileId: string,
+		signal?: AbortSignal,
+	): Promise<{ file_id: string; file_unique_id: string; file_path?: string }> {
 		return this.call("getFile", { file_id: fileId }, CALL_TIMEOUT_MS, signal);
 	}
 

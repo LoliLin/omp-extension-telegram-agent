@@ -57,7 +57,11 @@ export async function ensureStickerCatalog(
 		try {
 			stickers = await fetchStickerSet(api, setName);
 		} catch (err) {
-			log.error("sticker_catalog", "set_fetch_failed", { bot_id: botId, set_name: setName, category: errorCategory(err) });
+			log.error("sticker_catalog", "set_fetch_failed", {
+				bot_id: botId,
+				set_name: setName,
+				category: errorCategory(err),
+			});
 			continue;
 		}
 		for (const s of stickers) {
@@ -76,9 +80,9 @@ export async function ensureStickerCatalog(
 				s.file_unique_id,
 			);
 			// short_id from rowid: stable, unique, race-free
-			const row = db.query("SELECT rowid FROM media WHERE file_unique_id = ?").get(s.file_unique_id) as
-				| { rowid: number }
-				| null;
+			const row = db.query("SELECT rowid FROM media WHERE file_unique_id = ?").get(s.file_unique_id) as {
+				rowid: number;
+			} | null;
 			if (row) {
 				db.query("UPDATE media SET short_id = ? WHERE file_unique_id = ? AND short_id IS NULL").run(
 					`s${row.rowid}`,
@@ -106,11 +110,18 @@ export async function ensureStickerCatalog(
 	const sendable = counts.sendable ?? 0;
 	const missingMapping = counts.catalog_rows - sendable;
 	log.info("sticker_catalog", "catalog_ready", {
-		bot_id: botId, fetched: total, catalog: counts.catalog_rows, sendable, missing_file_id: missingMapping,
+		bot_id: botId,
+		fetched: total,
+		catalog: counts.catalog_rows,
+		sendable,
+		missing_file_id: missingMapping,
 	});
 	if (missingMapping > 0) {
 		log.warn("sticker_catalog", "mapping_incomplete", {
-			bot_id: botId, catalog: counts.catalog_rows, sendable, missing_file_id: missingMapping,
+			bot_id: botId,
+			catalog: counts.catalog_rows,
+			sendable,
+			missing_file_id: missingMapping,
 		});
 	}
 	return { total, sendable, missingMapping, truncated };
@@ -124,7 +135,8 @@ interface CatalogRow {
 
 /** Sendable catalog stickers for this bot in its configured sets, deterministically ordered. */
 function catalogRows(db: Database, botId: string, sets: readonly string[]): CatalogRow[] {
-	return db.query(`
+	return db
+		.query(`
 		SELECT sticker_set, sticker_emoji, short_id
 		  FROM media m
 		 WHERE kind = 'sticker' AND short_id IS NOT NULL
@@ -134,7 +146,8 @@ function catalogRows(db: Database, botId: string, sets: readonly string[]): Cata
 		      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
 		   )
 		 ORDER BY sticker_set, rowid
-	`).all(JSON.stringify([...sets]), botId) as CatalogRow[];
+	`)
+		.all(JSON.stringify([...sets]), botId) as CatalogRow[];
 }
 
 /**

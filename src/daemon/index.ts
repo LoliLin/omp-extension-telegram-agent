@@ -33,7 +33,9 @@ const config = loadConfig(rootDir);
 // (REQ-OPS-0001 R4). Released on shutdown; stale pid files are taken over.
 const pidFd = acquirePidLock(config.dataDir);
 const visualModel = config.vision?.enabled ? parsePiModelReference(config.auxiliaryVisualModel)! : null;
-const compactionModels = config.bots.map((bot) => parsePiModelReference(bot.compactionModel ?? config.auxiliaryVisualModel)!);
+const compactionModels = config.bots.map(
+	(bot) => parsePiModelReference(bot.compactionModel ?? config.auxiliaryVisualModel)!,
+);
 const { sharedModelRuntime, sharedVisionExecutor } = await (async () => {
 	try {
 		const runtime = await createSharedModelRuntime([
@@ -66,8 +68,10 @@ function runRetentionMaintenance(): void {
 	const retention = applyRetention(db, retentionConfig);
 	if (Object.values(retention).some((count) => count > 0)) {
 		log.info("daemon", "retention_pruned", {
-			agent_events: retention.agentEvents, llm_runs: retention.llmRuns,
-			raw_updates: retention.rawUpdates, message_events: retention.messageEvents,
+			agent_events: retention.agentEvents,
+			llm_runs: retention.llmRuns,
+			raw_updates: retention.rawUpdates,
+			message_events: retention.messageEvents,
 		});
 	}
 	db.exec("PRAGMA optimize; PRAGMA wal_checkpoint(PASSIVE);");
@@ -90,8 +94,11 @@ if (!config.routerSecret) {
 // resolve bot identities (getMe) so we can recognize own messages and mentions
 for (const bot of config.bots) {
 	log.info("daemon", "bot_configured", {
-		bot_id: bot.id, provider: bot.provider, model: bot.model,
-		reasoning: bot.reasoningEffort, auth: piAuthSource(sharedModelRuntime, bot.provider),
+		bot_id: bot.id,
+		provider: bot.provider,
+		model: bot.model,
+		reasoning: bot.reasoningEffort,
+		auth: piAuthSource(sharedModelRuntime, bot.provider),
 	});
 }
 const composition = await composeDeployment(db, config, {
@@ -105,7 +112,11 @@ const composition = await composeDeployment(db, config, {
 		return runtime;
 	},
 	onIdentity: (bot, identity) => {
-		log.info("daemon", "bot_identity_ready", { bot_id: bot.id, telegram_user_id: identity.userId, username: identity.username });
+		log.info("daemon", "bot_identity_ready", {
+			bot_id: bot.id,
+			telegram_user_id: identity.userId,
+			username: identity.username,
+		});
 	},
 });
 const { botApis, runtimes, identities, botNames, botUserIds, replyBotTargets } = composition;
@@ -126,29 +137,31 @@ function recordRouteMetric(metric: string, botId: string, messageId: number): vo
 
 // IPC server for TUI attach/detach
 let ipc!: IpcServer;
-const manualSend = new ManualSendService(
-	db,
-	Number(`-100${config.groupPeerId}`),
-	botApis,
-	({ chatId, messageId }) => {
-		const row = db.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?").get(chatId, messageId) as MessageRow | null;
-		if (row) ipc.broadcast(ipc.msgToItem(row));
-	},
-);
-ipc = new IpcServer(
-	db,
-	join(config.dataDir, "daemon.sock"),
-	botNames,
-	botUserIds,
-	(request) => manualSend.send(request),
+const manualSend = new ManualSendService(db, Number(`-100${config.groupPeerId}`), botApis, ({ chatId, messageId }) => {
+	const row = db
+		.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
+		.get(chatId, messageId) as MessageRow | null;
+	if (row) ipc.broadcast(ipc.msgToItem(row));
+});
+ipc = new IpcServer(db, join(config.dataDir, "daemon.sock"), botNames, botUserIds, (request) =>
+	manualSend.send(request),
 );
 for (const [botId, rt] of runtimes) {
 	rt.eventSink = (kind, payload) => {
-		ipc.broadcast({ kind: "evt", ts: Date.now(), botId, botName: botNames.get(botId) ?? botId, evtKind: kind, payload: JSON.stringify(payload) });
+		ipc.broadcast({
+			kind: "evt",
+			ts: Date.now(),
+			botId,
+			botName: botNames.get(botId) ?? botId,
+			evtKind: kind,
+			payload: JSON.stringify(payload),
+		});
 	};
 	rt.sentMessageSink = (rawMsg) => {
 		const m = rawMsg as { chat: { id: number }; message_id: number };
-		const row = db.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?").get(m.chat.id, m.message_id) as MessageRow | null;
+		const row = db
+			.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
+			.get(m.chat.id, m.message_id) as MessageRow | null;
 		if (row) ipc.broadcast(ipc.msgToItem(row));
 	};
 	rt.usageSink = (run) => ipc.broadcastUsage(run);
@@ -161,32 +174,37 @@ const photoCache = new PhotoCacheQueue(db, botApis, {
 	cacheDir: join(config.dataDir, "media"),
 	onReady: (fileUniqueId, mediaPath) => ipc.broadcastMediaReady({ fileUniqueId, mediaPath }),
 	onTelemetry: (event) => {
-		log.info("media_cache", event.event, { kind: event.kind, outcome: event.outcome, bytes_bucket: event.bytesBucket, queue_depth: event.queueDepth });
+		log.info("media_cache", event.event, {
+			kind: event.kind,
+			outcome: event.outcome,
+			bytes_bucket: event.bytesBucket,
+			queue_depth: event.queueDepth,
+		});
 	},
 });
 const photoBackfillCount = photoCache.scheduleBackfill();
 log.info("media_cache", "startup_scheduled", { scheduled: photoBackfillCount, limit: 100, concurrency: 2 });
 
-const telegramControl = new TelegramControlCommandService(
-	db,
-	config.bots,
-	rootDir,
-	runtimes,
-	config.telegramAdmins,
-);
+const telegramControl = new TelegramControlCommandService(db, config.bots, rootDir, runtimes, config.telegramAdmins);
 const telegramControlCoordinator = new TelegramControlCoordinator(
 	db,
 	telegramControl,
 	botApis,
 	({ chatId, messageId }) => {
-		const row = db.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?").get(chatId, messageId) as MessageRow | null;
+		const row = db
+			.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
+			.get(chatId, messageId) as MessageRow | null;
 		if (row) ipc.broadcast(ipc.msgToItem(row));
 	},
 );
 const controlTasks = new Set<Promise<unknown>>();
 function runTelegramControl(command: NonNullable<ReturnType<typeof parseTelegramControlCommand>>): void {
 	const task = telegramControlCoordinator.handle(command).catch(() => {
-		log.error("telegram_control", "coordinator_failed", { bot_id: command.replyBotId, message_id: command.messageId, category: "local_failure" });
+		log.error("telegram_control", "coordinator_failed", {
+			bot_id: command.replyBotId,
+			message_id: command.messageId,
+			category: "local_failure",
+		});
 	});
 	controlTasks.add(task);
 	void task.finally(() => controlTasks.delete(task));
@@ -218,11 +236,20 @@ function route(result: IngestResult): void {
 	const claimedDecision = decision as typeof decision & { target: string };
 	const routeVersion = result.routeVersion ?? 1;
 	if (!claimRoutingDecision(db, claimedDecision, routeVersion)) {
-		log.info("routing", "duplicate_claim_suppressed", { bot_id: decision.target, message_id: row.message_id, route_version: routeVersion });
+		log.info("routing", "duplicate_claim_suppressed", {
+			bot_id: decision.target,
+			message_id: row.message_id,
+			route_version: routeVersion,
+		});
 		return;
 	}
 	const dispatched = dispatchRoutingDecision(decision, runtimes);
-	finishRoutingClaim(db, claimedDecision, routeVersion, dispatched.outcome === "nobody" ? "missing_runtime" : dispatched.outcome);
+	finishRoutingClaim(
+		db,
+		claimedDecision,
+		routeVersion,
+		dispatched.outcome === "nobody" ? "missing_runtime" : dispatched.outcome,
+	);
 	if (decision.reason === "probability") {
 		const metric =
 			dispatched.outcome === "started"
@@ -234,7 +261,13 @@ function route(result: IngestResult): void {
 						: `route_probability_${dispatched.outcome}`;
 		recordRouteMetric(metric, decision.target, row.message_id);
 	} else {
-		log.info("routing", "decision", { bot_id: decision.target, message_id: row.message_id, reason: decision.reason, outcome: dispatched.outcome, route_version: routeVersion });
+		log.info("routing", "decision", {
+			bot_id: decision.target,
+			message_id: row.message_id,
+			reason: decision.reason,
+			outcome: dispatched.outcome,
+			route_version: routeVersion,
+		});
 	}
 }
 
@@ -242,7 +275,12 @@ const pollers = composePollers(
 	db,
 	config,
 	(result, update, botId) => {
-		log.info("telegram_ingest", "update_committed", { bot_id: botId, kind: result.kind, chat_id: result.chatId, message_id: result.messageId });
+		log.info("telegram_ingest", "update_committed", {
+			bot_id: botId,
+			kind: result.kind,
+			chat_id: result.chatId,
+			message_id: result.messageId,
+		});
 		const command = parseTelegramControlCommand(update, botId, identities);
 		if (command) runTelegramControl(command);
 		else route(result);
@@ -278,10 +316,7 @@ async function shutdown(signal: string) {
 	for (const rt of runtimes.values()) await rt.stop();
 	await photoCacheStop;
 	if (controlTasks.size > 0) {
-		await Promise.race([
-			Promise.allSettled([...controlTasks]),
-			new Promise((resolve) => setTimeout(resolve, 5_000)),
-		]);
+		await Promise.race([Promise.allSettled([...controlTasks]), new Promise((resolve) => setTimeout(resolve, 5_000))]);
 	}
 	ipc.stop();
 	releasePidLock(pidFd, config.dataDir);

@@ -75,7 +75,8 @@ export class VisionScheduler {
 			const task = this.foregroundQueue.shift() ?? this.backgroundQueue.shift();
 			if (!task) return;
 			this.active++;
-			void task.run()
+			void task
+				.run()
 				.then(task.resolve, task.reject)
 				.finally(() => {
 					this.active--;

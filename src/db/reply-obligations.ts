@@ -8,27 +8,15 @@ export interface ReplyObligation {
 	messageId: number;
 }
 
-export function createReplyObligation(
-	db: Database,
-	botId: string,
-	chatId: number,
-	messageId: number,
-): boolean {
+export function createReplyObligation(db: Database, botId: string, chatId: number, messageId: number): boolean {
 	const result = db
-		.query(
-			"INSERT OR IGNORE INTO reply_obligations (bot_id, chat_id, message_id, created_at) VALUES (?, ?, ?, ?)",
-		)
+		.query("INSERT OR IGNORE INTO reply_obligations (bot_id, chat_id, message_id, created_at) VALUES (?, ?, ?, ?)")
 		.run(botId, chatId, messageId, Date.now());
 	return result.changes > 0;
 }
 
 /** Pending rows in Telegram chronology; an obligation without a message cannot enter context. */
-export function listReplyObligations(
-	db: Database,
-	botId: string,
-	chatId: number,
-	limit = 64,
-): ReplyObligation[] {
+export function listReplyObligations(db: Database, botId: string, chatId: number, limit = 64): ReplyObligation[] {
 	return db
 		.query(
 			`SELECT o.chat_id AS chatId, o.message_id AS messageId
@@ -41,11 +29,7 @@ export function listReplyObligations(
 		.all(botId, chatId, Math.max(1, Math.floor(limit))) as ReplyObligation[];
 }
 
-export function removeReplyObligations(
-	db: Database,
-	botId: string,
-	obligations: readonly ReplyObligation[],
-): void {
+export function removeReplyObligations(db: Database, botId: string, obligations: readonly ReplyObligation[]): void {
 	if (obligations.length === 0) return;
 	const remove = db.query("DELETE FROM reply_obligations WHERE bot_id = ? AND chat_id = ? AND message_id = ?");
 	const transaction = db.transaction(() => {

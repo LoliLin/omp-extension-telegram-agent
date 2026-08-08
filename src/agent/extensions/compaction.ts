@@ -1,8 +1,4 @@
-import type {
-	CompactionResult,
-	InlineExtension,
-	SessionBeforeCompactEvent,
-} from "@earendil-works/pi-coding-agent";
+import type { CompactionResult, InlineExtension, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 
 type SessionBeforeCompactResult = { cancel?: boolean; compaction?: CompactionResult };
 
