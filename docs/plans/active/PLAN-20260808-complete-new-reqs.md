@@ -1,12 +1,12 @@
 # PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
 
 - **Status:** Active
-- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-PLAT-0001, REQ-DOC-0001
+- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-PLAT-0001, REQ-DOC-0001, REQ-ONBOARD-0001
 - **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
 
 ## 结果
 
-REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegram plugin 能从 Pi editor 发消息、实时补视觉理解、使用 lifetime 原生 footer stats 与分级命令补全；router 有 busy/cooldown gate；sticker 候选满足 per-bot sendability；平台外围收口为可配置 N-bot/provider。每个 task 是一个独立签名 commit。
+REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegram plugin 能从 Pi editor 发消息、实时补视觉理解、使用 lifetime 原生 footer stats 与分级命令补全；router 有 busy/cooldown gate；sticker 候选满足 per-bot sendability；平台外围收口为可配置 N-bot/provider；fresh clone 可从 `bun run pi` + `/tg config` 进入双语用户旅程，真实 persona 不再被新 HEAD 跟踪。每个 task 是一个独立签名 commit。
 
 ## 已确认边界
 
@@ -43,11 +43,17 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10k** — 增加 rich JSON migration、统一 inbound/edit/sent normalize 与有界纯文本 projector；validates: TG-0003 AC4–AC6；commit: rich message data plane
 - [x] **T10l** — 将 agent `send.message` 接到 `sendRichMessage` Rich Markdown、确定性 plain fallback并 bump cache epoch；validates: TG-0003 AC1–AC3/AC7/AC8；commit: rich outbound contract
 - [x] **T10o** — 持久化 reply parent identity/obligation并保证 busy、overflow、restart 后进入目标 bot suffix；validates: REPLY-0001 AC1–AC8；commit: reply provider delivery
+- [x] **T10q** — 调查并正式化 fresh-clone `/tg config`、TypeScript 本机配置、提示词隐私、双语 mdBook/Pages 与成本设计概览；validates: ONBOARD-0001 documented scope/AC；commit: docs/research only
 - [ ] **T10p** — 增加串行 graceful CLI/Pi restart 与原 filter feed重连；validates: OPS-0002 AC1–AC7；commit: daemon restart workflow
 - [ ] **T10m** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
 - [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification
-- [ ] **T13** — 将 README/package/project/runbook/example 重写为用户视角平台指南 + example deployment，明确单 deployment 单群边界；validates: PLAT-0001 AC6 + DOC-0001 AC1–AC6；commit: docs/metadata only
+- [ ] **T13a** — 将 Pi dependencies/lock 改为可获取版本并增加 `bun run pi` 幂等 bootstrap/fresh-clone fixture；validates: ONBOARD-0001 AC1；commit: portable launcher
+- [ ] **T13b** — 加入 typed `telegram.config.ts` loader/legacy JSON兼容；从 HEAD 取消跟踪真实persona并提供默认忽略与通用中英模板；validates: ONBOARD-0001 AC3/AC6；commit: typed config and prompt privacy
+- [ ] **T13c** — 建立可取消、原子写入且不泄露 secret 的 config draft/writer，覆盖 validate/editor/backup-replace；validates: ONBOARD-0001 AC2/AC4；commit: onboarding config core
+- [ ] **T13d** — 用 Pi 原生 dialogs 实现 `/tg config`，成功后复用受控 readiness 并建立 live feed；validates: ONBOARD-0001 AC2/AC5；commit: native setup wizard
+- [ ] **T13e** — 将双语 README/package/project/runbook/example 重写为用户旅程，加入双语用户指南、成本设计概览与机器维护指南；validates: PLAT-0001 AC6 + DOC-0001 AC1–AC6 + ONBOARD-0001 AC7/AC9/AC11；commit: docs/metadata only
+- [ ] **T13f** — 配置双 mdBook build/link check 与最小权限 GitHub Pages CI/deploy；validates: ONBOARD-0001 AC8/AC10；commit: docs publishing
 - [ ] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
 
 ## 每个 commit 的固定流程
@@ -84,7 +90,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - T10o: **NONE**；reply identity/obligation属于确定性data plane，正常burst不新增call，只有超过batch上限的真实reply backlog才有必要分批。
 - T10p: **NONE**；restart不改provider/session协议或epoch，不新增LLM call/token。
 - T10m: **NONE**；Telegram control command 与回复均由 deterministic control plane 消费，不进入 provider context；只有显式 compact 使用既有 summary 调用。
-- T11–T13: 现有 deployment **NONE**；provider choice 是配置边界，现有 golden 必须不变；README 不进入 provider context。
+- T11–T13f: 现有 deployment **NONE**；provider/persona choice 是显式配置边界，bootstrap/wizard/docs 不进入 provider context，现有 golden 必须不变。
 
 ## 风险
 
@@ -95,6 +101,9 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - restart并发或旧socket假ready：control lock、PID身份校验、旧资源消失后才spawn并用新连接验证。
 - cache bump误更新非 sticker grammar：逐项 hash diff，只有预期 system hash变化。
 - 多原子 commit 与脏工作树混淆：每次显式 staging并审查 staged paths。
+- onboarding 覆盖半份配置或泄露 secret：内存校验、同目录原子 rename、existing-file deny-by-default、脱敏 transcript fixture。
+- TypeScript config 执行不一致或被误认为沙箱：Node/Pi + Bun 双 runtime fixture，文档明确只加载受信本地代码；legacy JSON 保持兼容。
+- 双语文档漂移：schema examples/link checker做机械 gate，两个 book 同一 CI；用户概览只链接内部权威细节。
 
 ## 完成记录
 

@@ -424,3 +424,11 @@
 - startup待session/IPC sink ready后逐bot恢复；file DB A/B隔离、already-exposed崩溃边界幂等清理。created/coalesced/recovered/delivered event只含message id；没有fixed Telegram fallback、Assistant偷发或额外纠错LLM。
 - targeted ingest/router/runtime/poller/cache 70 tests / 2680 assertions；全量246 / 3772、typecheck与cache v5 golden通过。真实A/B reply provider trace留T14。
 - Cache impact: **NONE**——稳定prefix/grammar/hash与正常burst call数不变；只有真实reply backlog>40才产生必要的有界normal flush。
+
+## 2026-08-08 (46) — 调查 fresh-clone onboarding 与双语用户文档（文档）
+
+- 用户的 clone→`bun run pi`→`/tg config`、typed本机配置、提示词模板/隐私、中英 README/mdBook、机器维护指南与成本设计概览 raw notes 已正式化为 `REQ-ONBOARD-0001`，并拆成六个原子实现 task。
+- 调查确认真正阻塞不只是 README：package/lock 依赖本机 `../pi`，extension 缺少无配置可用的向导，JSON不承载类型/注释，实际小雪/小雨persona仍被Git跟踪。公开registry已有当前`@earendil-works/pi-*`版本；Pi原生dialog API足够完成setup，无需自绘UI。
+- 新用户主配置固定为 ignored `telegram.config.ts` + tracked typed example，legacy JSON继续兼容。配置contract是内存全量验证、同目录原子rename、existing-file deny-by-default；已有TS只做validate、Pi editor原文编辑或备份后替换，不声称能安全merge任意表达式。secret只进mode 0600 `.env`。
+- persona只从后续HEAD退出并改用通用中英模板；既有Git历史仍含旧文件，未经用户单独授权不做history rewrite。双语mdBook各用独立book root，Pages PR只验证、默认分支最小权限部署。
+- Cache impact: **NONE（docs/research only）**。后续bootstrap/wizard/docs/repo hygiene同样不改变provider grammar或正常turn token；persona/provider变化是用户显式配置。

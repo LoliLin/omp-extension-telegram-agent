@@ -46,6 +46,7 @@
 
 - [ ] [REQ-PLAT-0001](REQ-PLAT-0001.md) 收口为通用、快速、简洁的可配置 bot 平台（P1，已完成代码库调查/未实现）
 - [ ] [REQ-DOC-0001](REQ-DOC-0001.md) README 从用户视角解释平台、配置、使用与边界（P1，已调查/未实现）
+- [ ] [REQ-ONBOARD-0001](REQ-ONBOARD-0001.md) clone → `bun run pi` → `/tg config`、TypeScript 本机配置、提示词隐私与双语 mdBook 用户文档（P1，已调查/未实现）
 
 ## 顺序与依赖
 
@@ -71,4 +72,5 @@
 - REQ-STICKER-0002 是 REQ-STICKER-0001 的 per-bot sendability 回归修复，并会触发 cache schema bump
 - REQ-PLAT-0001 复用 REQ-CONF-0001 已完成的 N-bot 核心，不重复重写 daemon composition
 - REQ-DOC-0001 等待 PLAT-0001 的 provider/config schema 稳定后再写最终 README，避免文档抢跑
+- REQ-ONBOARD-0001 依赖 PLAT-0001 的 provider schema、DOC-0001 的用户旅程与 OPS-0002 的受控 readiness；新默认是 ignored `telegram.config.ts`，legacy JSON 保持兼容；真实 persona 只从后续 HEAD 退出，不偷偷改写 Git 历史
 - REQ-STICKER-0001 的 R3 与 REQ-AGENT-0001 的 R7（send 先校验后发）协同

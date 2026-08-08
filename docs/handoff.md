@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：REPLY-0001 durable provider delivery已实现；下一步做deployment-wide一键restart，再做Telegram control plane。
+2026-08-08：REPLY-0001 durable provider delivery已实现；fresh-clone `/tg config` / typed本机配置 / 双语文档 / persona隐私已正式化为ONBOARD-0001；下一步做deployment-wide一键restart。
 
 ## 已完成
 
@@ -32,6 +32,7 @@
 14. **已实现 `REQ-TG-0003`**：T10k统一≤256 KiB source与有界projector；T10l把agent文字接到final `sendRichMessage`，确认parse/method拒绝才单次literal fallback，unknown outcome绝不重发。manual compose仍plain；tool-only说明触发cache 4→5，targeted 61/730通过，真实群留T14。
 15. **已实现 `REQ-REPLY-0001`**：只存嵌入父sender numeric id；canonical+obligation在offset前原子提交。reason/chat/message id穿过dispatch，reply优先占≤40 batch；45 reply按40+5提交，busy/cooldown/stopping/file reopen与A/B隔离已锁。provider成功才清，绝无内容兜底/额外纠错call；targeted 70/2680通过，真实trace留T14。
 16. **已调查 `REQ-OPS-0002`**：当前所有bot共享daemon，故一键操作定义为deployment-wide `/tg restart`；PID身份校验→graceful stop→资源释放→规范start/ready，并恢复调用前Pi feed filter，绝不热重建单runtime。
+17. **已调查 `REQ-ONBOARD-0001`**：当前`file:../pi`、手工JSON配置、tracked真实persona与单语内部索引阻断fresh clone。实施拆为portable launcher、typed local config/prompt privacy、atomic config core、Pi原生`/tg config`、双语用户/成本/维护指南和mdBook Pages六个原子task；legacy JSON兼容，不偷偷改写Git历史。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 
@@ -53,4 +54,4 @@ attach 默认只读；仅显式 compose 时 interactive editor 发 Telegram，of
 - 本次 native UI 重写：Cache impact **NONE**，IPC/DB/provider grammar 未变。
 - 新的 UI-0005/UI-0006 设计也要求 NONE。
 - STICKER-0002 是 **INTENTIONAL** cache change：schema 已从 2 bump 到 3，golden 通过；daemon 下次受控重启会自动开新 epoch。
-- 原子提交规范已在 `c32d937` 固化；native transcript 重写已签名提交为 `19819c9`。剩余6个既有PLAN task，另有用户刚写入REQ-LIST的clone→`bun run pi`→`/tg config` onboarding raw note待正式化；均会逐项实现/提交。
+- 原子提交规范已在 `c32d937` 固化；native transcript 重写已签名提交为 `19819c9`。ONBOARD-0001 已拆成六个可独立验证/提交的实施 task；另有用户新写入的 Pi 卡片 UI raw note 待下一原子文档任务正式化。
