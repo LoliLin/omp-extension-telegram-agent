@@ -31,8 +31,9 @@
 
 ### agent_events — bot 内部行为
 
-- 每条：bot、时间、kind（assistant_text / thinking / tool_call / tool_result / vision / usage / compaction / error / send_degraded）、payload(JSON)
+- 每条：bot、时间、kind（assistant_text / thinking / tool_call / tool_result / vision / usage / compaction / error / send_degraded / telegram_control_*）、payload(JSON)
 - `send_degraded` 是发送commit boundary后的有界诊断：只存overall outcome、已知message ids与至多8个component/outcome/stage/category，不存正文、token、请求URL或完整异常。
+- Telegram control用`telegram_control_claim`按`(chat_id,message_id)`提供crash-safe at-most-once claim，用`telegram_control_reply`标记canonical回复；两者只存numeric identity并被所有runtime flush当作跨epoch永久消费证据。`telegram_control`审计仅存command/target、canonical sender id/规范化username、authorized/outcome/duration，不存命令正文、token、path、persona或异常stack。
 - TUI 的 `Bot X · LOCAL` 区域数据源
 
 ### llm_runs / telemetry — provider 遥测

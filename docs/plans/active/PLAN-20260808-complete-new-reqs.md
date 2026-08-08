@@ -59,7 +59,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10ac** — sticker使用24×12原生Image上限并锁Kitty wire、转换/vision与多宽度回归；validates: UI-0013 AC1–AC4；commit: compact sticker presentation
 - [x] **T10ad** — 用T10ac真实commit hash记录UI-0013完成并在REQ-LIST勾选；validates: UI-0013 traceability；commit: completion record
 - [x] **T10m1** — 校验/规范化Telegram admin allowlist，并用`bot_state`实现routing/cooldown effective override、原子概率校验与重启恢复；validates: CMD-0001 AC2/AC3/AC7；commit: control configuration state
-- [ ] **T10m2** — 实现entity-driven `/tg` parser、权限/输出/串行mutation服务及BotRuntime安全manual compact/consume接口；validates: CMD-0001 AC1/AC2/AC4/AC6；commit: deterministic command service
+- [x] **T10m2** — 实现entity-driven `/tg` parser、权限/输出/串行mutation服务及BotRuntime安全manual compact/consume接口；validates: CMD-0001 AC1/AC2/AC4/AC6；commit: deterministic command service
 - [ ] **T10m3** — 接入poller/daemon、canonical reply/broadcast/exposure与best-effort菜单，锁一次执行和零provider context；validates: CMD-0001 AC5/AC8；commit: Telegram control integration
 - [ ] **T10m4** — 用行为commit hash记录CMD-0001完成并在REQ-LIST勾选；validates: CMD-0001 traceability；commit: completion record
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config

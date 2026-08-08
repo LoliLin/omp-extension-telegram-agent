@@ -105,6 +105,7 @@ interface FakeSession {
 	sent: string[];
 	listener: ((e: unknown) => void) | null;
 	sendUserMessage: (text: string) => Promise<void>;
+	compact: (...args: unknown[]) => Promise<{ tokensBefore: number }>;
 }
 
 /** Attach a fake AgentSession and wire the event subscription. */
@@ -113,16 +114,21 @@ function attachFakeSession(
 	opts: {
 		send?: (text: string) => Promise<void>;
 		contextEntries?: () => unknown[];
+		compact?: (...args: unknown[]) => Promise<{ tokensBefore: number }>;
+		isStreaming?: boolean;
 	} = {},
 ): FakeSession {
 	const fake: FakeSession = {
 		sent: [],
 		listener: null,
 		sendUserMessage: opts.send ?? (async (t: string) => { fake.sent.push(t); }),
+		compact: opts.compact ?? (async () => ({ tokensBefore: 100 })),
 	};
 	(rt as any).session = {
 		subscribe: (l: (e: unknown) => void) => { fake.listener = l; },
 		sendUserMessage: (t: string) => fake.sendUserMessage(t),
+		compact: (...args: unknown[]) => fake.compact(...args),
+		isStreaming: opts.isStreaming ?? false,
 		sessionManager: { buildContextEntries: () => opts.contextEntries?.() ?? [] },
 		dispose: async () => {},
 	};
@@ -377,6 +383,87 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		expect(out).toContain("#21 "); // the old "last 40" heuristic would have treated 21..60 as exposed
 		expect(out).toContain("#53 "); // forged assistant line was not marked exposed
 		expect(out).toContain("#60 ");
+	});
+
+	test("REQ-CMD-0001 manual compact calls Pi once only while idle and preserves the unified epoch handler", async () => {
+		const rt = makeRuntime();
+		let calls = 0;
+		const fake = attachFakeSession(rt, {
+			compact: async (...args) => {
+				calls++;
+				expect(args).toEqual([]);
+				fake.listener!({
+					type: "compaction_end",
+					reason: "manual",
+					aborted: false,
+					willRetry: false,
+					result: { summary: "bounded", firstKeptEntryId: "x", tokensBefore: 321 },
+				});
+				return { tokensBefore: 321 };
+			},
+		});
+		expect(await rt.compactForControl()).toEqual({ ok: true, epoch: 2, tokensBefore: 321 });
+		expect(calls).toBe(1);
+		expect(rt.controlSnapshot()).toMatchObject({ state: "idle", epoch: 2, model: "test-model", lastCompact: { outcome: "ok" } });
+
+		(rt as any).flushing = true;
+		expect(await rt.compactForControl()).toEqual({ ok: false, code: "busy" });
+		(rt as any).flushing = false;
+		(rt as any).stopping = true;
+		expect(await rt.compactForControl()).toEqual({ ok: false, code: "stopping" });
+		expect(calls).toBe(1);
+	});
+
+	test("REQ-CMD-0001 compact coalesces explicit traffic, skips probability, and drains after completion", async () => {
+		const rt = makeRuntime();
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const fake = attachFakeSession(rt, {
+			compact: async () => {
+				await gate;
+				fake.listener!({
+					type: "compaction_end",
+					reason: "manual",
+					aborted: false,
+					willRetry: false,
+					result: { summary: "bounded", firstKeptEntryId: "x", tokensBefore: 100 },
+				});
+				return { tokensBefore: 100 };
+			},
+		});
+		const compact = rt.compactForControl();
+		expect(rt.controlSnapshot().state).toBe("compacting");
+		insertMsg({ message_id: 71, text: "arrived during compact" });
+		expect(rt.trigger("explicit")).toBe("coalesced");
+		expect(rt.trigger("probability")).toBe("skipped_busy");
+		release();
+		expect(await compact).toMatchObject({ ok: true });
+		await (rt as any).flushPromise;
+		expect(fake.sent).toHaveLength(1);
+		expect(fake.sent[0]).toContain("#71 ");
+	});
+
+	test("REQ-CMD-0001 durable claim stays excluded after compaction resets epoch exposure", async () => {
+		const rt = makeRuntime();
+		const fake = attachFakeSession(rt);
+		insertMsg({ message_id: 81, text: "/tg status" });
+		db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('A', 1, 'telegram_control_claim', ?)").run(
+			JSON.stringify({ chat_id: CHAT, message_id: 81, command: "status" }),
+		);
+		rt.consumeControlMessage(81);
+		fake.listener!({
+			type: "compaction_end",
+			reason: "manual",
+			aborted: false,
+			willRetry: false,
+			result: { summary: "bounded", firstKeptEntryId: "x", tokensBefore: 100 },
+		});
+		insertMsg({ message_id: 82, date: 1754600001, text: "ordinary" });
+		expect(rt.trigger()).toBe("started");
+		await (rt as any).flushPromise;
+		expect(fake.sent).toHaveLength(1);
+		expect(fake.sent[0]).not.toContain("#81 ");
+		expect(fake.sent[0]).toContain("#82 ");
 	});
 
 	test("R7: executeSend validates the sticker before any network send", async () => {

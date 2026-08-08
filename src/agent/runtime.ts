@@ -55,6 +55,7 @@ import {
 } from "../db/reply-obligations.ts";
 import type { RoutingTrigger, TriggerResult, TriggerSource } from "./router.ts";
 import type { AgentStreamFrame, AgentStreamToolCall } from "../ipc.ts";
+import { consumedControlMessageIds } from "../telegram/control-command.ts";
 
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
 const EXPOSED_KEY = "exposed_ids";
@@ -62,6 +63,19 @@ const EPOCH_KEY = "context_epoch";
 const STREAM_TEXT_MAX = 4096;
 const STREAM_TOOL_ARGS_MAX = 2048;
 const STREAM_TOOLS_MAX = 4;
+
+export type RuntimeControlState = "idle" | "busy" | "cooldown" | "stopping" | "compacting";
+
+export interface RuntimeControlSnapshot {
+	state: RuntimeControlState;
+	epoch: number;
+	model: string;
+	lastCompact: { at: number; outcome: "ok" | "failed" } | null;
+}
+
+export type ManualCompactResult =
+	| { ok: true; epoch: number; tokensBefore: number }
+	| { ok: false; code: "busy" | "stopping" | "unavailable" | "nothing_to_compact" | "failed" };
 
 interface SendFailure {
 	failed_component: "message" | "sticker";
@@ -105,6 +119,8 @@ export class BotRuntime {
 	private flushPromise: Promise<void> | null = null;
 	private cooldownUntil = 0;
 	private cooldownAfterFlush = false;
+	private controlCompacting = false;
+	private lastControlCompact: RuntimeControlSnapshot["lastCompact"] = null;
 	private readonly monotonicNow: () => number;
 	private exposed = new Set<number>();
 	private epoch = 1;
@@ -742,10 +758,10 @@ export class BotRuntime {
 		return successfulSendResult(sentIds);
 	}
 
-	/** Lifecycle state used only by deterministic probability scheduling. */
+	/** Lifecycle state used by deterministic scheduling and the Telegram control plane. */
 	samplingState(now = this.monotonicNow()): "idle" | "busy" | "cooldown" | "stopping" {
 		if (this.stopping) return "stopping";
-		if (this.flushing) return "busy";
+		if (this.flushing || this.controlCompacting) return "busy";
 		if (now < this.cooldownUntil) return "cooldown";
 		return "idle";
 	}
@@ -781,6 +797,10 @@ export class BotRuntime {
 		if (state === "stopping") return "skipped_stopping";
 		if (source === "probability" && state !== "idle") {
 			return state === "busy" ? "skipped_busy" : "skipped_cooldown";
+		}
+		if (this.controlCompacting) {
+			this.pendingTrigger = true;
+			return "coalesced";
 		}
 		if (this.flushing) {
 			// re-entrant trigger while a flush is in flight (e.g. slow vision await):
@@ -841,7 +861,8 @@ export class BotRuntime {
 		const rows = this.db
 			.query("SELECT * FROM messages WHERE chat_id = ? ORDER BY date, message_id")
 			.all(chatId) as MessageRow[];
-		const fresh = rows.filter((r) => !this.exposed.has(r.message_id));
+		const consumedControl = consumedControlMessageIds(this.db, chatId);
+		const fresh = rows.filter((r) => !this.exposed.has(r.message_id) && !consumedControl.has(r.message_id));
 		if (fresh.length === 0) return false;
 
 		const obligationIds = new Set(obligations.map((obligation) => obligation.messageId));
@@ -886,6 +907,49 @@ export class BotRuntime {
 			this.recordEvent("reply_obligation_recovered", { message_id: obligation.messageId });
 		}
 		return this.trigger("explicit");
+	}
+
+	/** Public read model for deterministic Telegram status output. */
+	controlSnapshot(): RuntimeControlSnapshot {
+		return {
+			state: this.controlCompacting ? "compacting" : this.samplingState(),
+			epoch: this.epoch,
+			model: this.bot.model,
+			lastCompact: this.lastControlCompact,
+		};
+	}
+
+	/** Keep a control command/reply out of the current epoch; durable exclusion is audit-backed. */
+	consumeControlMessage(messageId: number): void {
+		if (!Number.isSafeInteger(messageId) || messageId <= 0) return;
+		this.markExposed([messageId]);
+		const chatId = Number(`-100${this.config.groupPeerId}`);
+		removeReplyObligations(this.db, this.bot.id, [{ chatId, messageId }]);
+	}
+
+	/** Manual compact that never passes instructions and never aborts an active response. */
+	async compactForControl(): Promise<ManualCompactResult> {
+		if (this.stopping) return { ok: false, code: "stopping" };
+		if (!this.session) return { ok: false, code: "unavailable" };
+		if (this.flushing || this.running || this.controlCompacting || this.session.isStreaming) {
+			return { ok: false, code: "busy" };
+		}
+		this.controlCompacting = true;
+		try {
+			const result = await this.session.compact();
+			this.lastControlCompact = { at: Date.now(), outcome: "ok" };
+			return { ok: true, epoch: this.epoch, tokensBefore: result.tokensBefore };
+		} catch (error) {
+			this.lastControlCompact = { at: Date.now(), outcome: "failed" };
+			const message = error instanceof Error ? error.message : String(error);
+			return { ok: false, code: /Nothing to compact|Already compacted/.test(message) ? "nothing_to_compact" : "failed" };
+		} finally {
+			this.controlCompacting = false;
+			if (this.pendingTrigger && !this.stopping) {
+				this.pendingTrigger = false;
+				this.trigger("explicit");
+			}
+		}
 	}
 
 	/** Lazy vision: resolve media descriptions only now that they enter this bot's context. */

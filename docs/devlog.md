@@ -509,3 +509,11 @@
 - forced Kitty回归锁定方形sticker实际24×12、photo实际32×16；40/80/120列逐行不溢出，sticker label/emoji/vision文案保留。既有WebP异步转换用例同时确认转换完成后的同一卡片仍为24×12。
 - extension/engine targeted 51 tests / 586 assertions；全量287 / 4196、typecheck、cache v5 golden与diff check通过。真实Kitty/Ghostty视觉smoke并入T14。
 - Cache impact: **NONE**——只改变TUI `ImageOptions`；图片bytes、IPC/SQLite/session/provider grammar、vision/LLM调用、context epoch及每turn token均不变。
+
+## 2026-08-08 (57) — 建立确定性 Telegram control service
+
+- 新增offset-zero `bot_command` entity parser：支持`/tg`与已知bot username suffix、大小写规范化、caption/edit识别及严格arity/type；未知suffix和非首位entity不接管。help/bots/status仅限canonical human sender，compact/set/reset再经numeric或规范化username allowlist，bot/anonymous/missing身份均不能mutation。
+- service先以`(chat_id,message_id)`写crash-safe claim，再用全局promise queue串行全部mutation。回复≤3500字符，只从allowlisted runtime/config/telemetry字段构造；审计只含command/target/sender identity/authorized/outcome/duration。edit只消费不执行，replay/second handler不重复mutation。
+- BotRuntime新增只读control snapshot、跨runtime consume接口及manual compact lock。只有idle session无instructions调用一次Pi `compact()`；busy/stopping为零调用，compact期间explicit只coalesce、probability skip，完成后再drain。claim/reply audit id被flush永久排除，因此统一compaction handler清epoch exposure后也不会泄入provider。
+- command/state/flush targeted 31 tests / 324 assertions；全量298 / 4272、typecheck、cache v5 golden与diff check通过。poller/daemon canonical reply、IPC broadcast与`setMyCommands`留T10m3。
+- Cache impact: **NONE**——控制消息走确定性side channel并被suffix过滤；system/tool/message/summary grammar、context epoch与普通聊天token/call不变。只有用户显式compact复用既有aux summary调用。
