@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { spawn } from "node:child_process";
 import {
+	convertToPng,
 	FooterComponent,
 	VERSION,
 	type ExtensionAPI,
@@ -11,11 +12,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import * as Tui from "@earendil-works/pi-tui";
 import { loadConfig, type BotConfig } from "../../src/config.ts";
-import type { AgentStreamFrame, BotStats, EvtItem, TimelineItem } from "../../src/ipc.ts";
+import type { AgentStreamFrame, BotStats, EvtItem, MsgItem, TimelineItem } from "../../src/ipc.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
+	mediaFileRevision,
 	readMediaImage,
 	TimelineClient,
+	type MediaImage,
 	type TimelineEvent,
 	type TimelineHooks,
 	type TimelinePort,
@@ -26,6 +29,10 @@ const MIN_PI_VERSION = "0.84.1";
 const MAX_ACTIVE_STREAMS = 32;
 const MAX_ENDED_STREAMS = 64;
 const PROCESS_OUTPUT_MAX_BYTES = 64 * 1024;
+export const MEDIA_CACHE_MAX_ENTRIES = 32;
+export const MEDIA_CACHE_MAX_BASE64_BYTES = 32 * 1024 * 1024;
+export const MEDIA_CACHE_MAX_ITEM_BASE64_BYTES = 8 * 1024 * 1024;
+export const MEDIA_CONVERSION_MAX_PENDING = 32;
 
 type TimelineFactory = (filter: string | null, hooks: TimelineHooks) => TimelinePort;
 export interface ProcessRunResult {
@@ -35,6 +42,169 @@ export interface ProcessRunResult {
 }
 type ProcessRunner = (command: string, args: readonly string[], options: { cwd: string }) => Promise<ProcessRunResult>;
 type FeedEntry = { instanceId: string; filter: string | null };
+
+export type MediaConverter = (
+	base64Data: string,
+	mimeType: string,
+) => Promise<{ data: string; mimeType: string } | null>;
+
+type MediaReadyListener = (filename: string) => void;
+type MediaCacheState =
+	| { kind: "ready"; image: MediaImage; base64Bytes: number }
+	| { kind: "failed"; base64Bytes: 0 };
+
+interface PendingMediaConversion {
+	listeners: Set<MediaReadyListener>;
+	promise: Promise<void>;
+}
+
+export interface NativeMediaCacheLimits {
+	maxEntries?: number;
+	maxTotalBase64Bytes?: number;
+	maxItemBase64Bytes?: number;
+	maxPending?: number;
+}
+
+/** Pi-owned image rendering with Kitty-only async PNG preparation and bounded local state. */
+export class NativeMediaCache {
+	private readonly states = new Map<string, MediaCacheState>();
+	private readonly pending = new Map<string, PendingMediaConversion>();
+	private totalBytesValue = 0;
+	readonly limits: Required<NativeMediaCacheLimits>;
+
+	constructor(
+		private readonly converter: MediaConverter = convertToPng,
+		private readonly capabilities: () => Tui.TerminalCapabilities = () => Tui.getCapabilities(),
+		limits: NativeMediaCacheLimits = {},
+	) {
+		const positive = (value: number | undefined, fallback: number) => {
+			const candidate = value ?? fallback;
+			return Number.isFinite(candidate) ? Math.max(1, Math.floor(candidate)) : fallback;
+		};
+		this.limits = {
+			maxEntries: positive(limits.maxEntries, MEDIA_CACHE_MAX_ENTRIES),
+			maxTotalBase64Bytes: positive(limits.maxTotalBase64Bytes, MEDIA_CACHE_MAX_BASE64_BYTES),
+			maxItemBase64Bytes: positive(limits.maxItemBase64Bytes, MEDIA_CACHE_MAX_ITEM_BASE64_BYTES),
+			maxPending: positive(limits.maxPending, MEDIA_CONVERSION_MAX_PENDING),
+		};
+	}
+
+	get size(): number { return this.states.size; }
+	get totalBase64Bytes(): number { return this.totalBytesValue; }
+	get pendingCount(): number { return this.pending.size; }
+
+	resolve(message: MsgItem, listener?: MediaReadyListener): MediaImage | null {
+		const source = readMediaImage(message);
+		if (!source) return null;
+		if (source.mime === "image/png") return source;
+		let protocol: Tui.ImageProtocol;
+		try {
+			protocol = this.capabilities().images;
+		} catch {
+			return null;
+		}
+		if (protocol !== "kitty") return source;
+
+		const cached = this.touch(source.revision);
+		if (cached) return cached.kind === "ready" ? cached.image : null;
+		const inFlight = this.pending.get(source.revision);
+		if (inFlight) {
+			if (listener) inFlight.listeners.add(listener);
+			return null;
+		}
+		if (this.pending.size >= this.limits.maxPending) {
+			this.remember(source.revision, { kind: "failed", base64Bytes: 0 });
+			return null;
+		}
+
+		const listeners = new Set<MediaReadyListener>();
+		if (listener) listeners.add(listener);
+		const entry: PendingMediaConversion = { listeners, promise: Promise.resolve() };
+		this.pending.set(source.revision, entry);
+		entry.promise = this.prepare(source, entry);
+		return null;
+	}
+
+	unsubscribe(listener: MediaReadyListener): void {
+		for (const conversion of this.pending.values()) conversion.listeners.delete(listener);
+	}
+
+	private async prepare(source: MediaImage, entry: PendingMediaConversion): Promise<void> {
+		let shouldNotify = false;
+		try {
+			const converted = await this.converter(source.base64, source.mime);
+			if (mediaFileRevision(source.filename) !== source.revision) {
+				shouldNotify = true;
+				return;
+			}
+			if (!this.isValidPng(converted)) {
+				this.remember(source.revision, { kind: "failed", base64Bytes: 0 });
+				return;
+			}
+			const image = { ...source, base64: converted.data, mime: "image/png" };
+			this.remember(source.revision, { kind: "ready", image, base64Bytes: converted.data.length });
+			shouldNotify = true;
+		} catch {
+			if (mediaFileRevision(source.filename) === source.revision) {
+				this.remember(source.revision, { kind: "failed", base64Bytes: 0 });
+			} else shouldNotify = true;
+		} finally {
+			if (this.pending.get(source.revision) === entry) this.pending.delete(source.revision);
+			if (shouldNotify) {
+				for (const listener of entry.listeners) {
+					try {
+						listener(source.filename);
+					} catch {
+						// Host lifecycle callbacks are isolated from the shared conversion promise.
+					}
+				}
+			}
+			entry.listeners.clear();
+		}
+	}
+
+	private isValidPng(value: { data: string; mimeType: string } | null): value is { data: string; mimeType: "image/png" } {
+		if (!value || value.mimeType !== "image/png" || !value.data || value.data.length > this.limits.maxItemBase64Bytes) {
+			return false;
+		}
+		const bytes = Buffer.from(value.data, "base64");
+		const hasSignature = bytes.length >= 8
+			&& bytes[0] === 0x89
+			&& bytes[1] === 0x50
+			&& bytes[2] === 0x4e
+			&& bytes[3] === 0x47
+			&& bytes[4] === 0x0d
+			&& bytes[5] === 0x0a
+			&& bytes[6] === 0x1a
+			&& bytes[7] === 0x0a;
+		if (!hasSignature) return false;
+		const dimensions = Tui.getPngDimensions(value.data);
+		return dimensions != null && dimensions.widthPx > 0 && dimensions.heightPx > 0;
+	}
+
+	private touch(key: string): MediaCacheState | undefined {
+		const state = this.states.get(key);
+		if (!state) return undefined;
+		this.states.delete(key);
+		this.states.set(key, state);
+		return state;
+	}
+
+	private remember(key: string, state: MediaCacheState): void {
+		const previous = this.states.get(key);
+		if (previous) this.totalBytesValue -= previous.base64Bytes;
+		this.states.delete(key);
+		this.states.set(key, state);
+		this.totalBytesValue += state.base64Bytes;
+		while (this.states.size > this.limits.maxEntries || this.totalBytesValue > this.limits.maxTotalBase64Bytes) {
+			const oldest = this.states.keys().next().value as string | undefined;
+			if (!oldest) break;
+			const evicted = this.states.get(oldest);
+			this.states.delete(oldest);
+			this.totalBytesValue -= evicted?.base64Bytes ?? 0;
+		}
+	}
+}
 
 export type TgCommandDispatch =
 	| "attach"
@@ -204,6 +374,7 @@ export interface TelegramExtensionOptions {
 	processRunner?: ProcessRunner;
 	idFactory?: () => string;
 	requestIdFactory?: () => string;
+	mediaCache?: NativeMediaCache;
 }
 
 export function supportsPiVersion(value: string): boolean {
@@ -272,7 +443,9 @@ function cardHeader(identity: string, metadata: string, theme: Theme, color: Par
 	], { gap: 2 });
 }
 
-export function itemComponent(item: TimelineItem, theme: Theme): Tui.Component {
+export type MediaImageResolver = (item: MsgItem) => MediaImage | null;
+
+export function itemComponent(item: TimelineItem, theme: Theme, resolveMedia: MediaImageResolver = readMediaImage): Tui.Component {
 	const box = new Tui.Box(1, 0, (text) => theme.bg(item.kind === "msg" && !item.isBot ? "userMessageBg" : "customMessageBg", text));
 	if (item.kind === "evt") {
 		box.addChild(cardHeader(`${item.botName} · bot ${item.botId}`, `LOCAL · ${fmtClock(item.ts)}`, theme, "warning"));
@@ -286,7 +459,7 @@ export function itemComponent(item: TimelineItem, theme: Theme): Tui.Component {
 	if (item.text) box.addChild(new Tui.Text(theme.fg(item.isBot ? "customMessageText" : "userMessageText", sanitize(item.text)), 0, 0));
 	if (item.mediaKind) {
 		box.addChild(new Tui.Text(theme.fg("muted", `[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]`), 0, 0));
-		const image = readMediaImage(item);
+		const image = resolveMedia(item);
 		if (image) box.addChild(new Tui.Image(image.base64, image.mime, { fallbackColor: (text) => theme.fg("muted", text) }, { maxWidthCells: 56, maxHeightCells: 16, filename: basename(image.filename) }));
 		if (item.mediaDesc?.trim()) box.addChild(new Tui.Text(theme.fg("muted", `视觉理解 · ${sanitize(item.mediaDesc.trim())}`), 0, 0));
 	}
@@ -427,19 +600,27 @@ export class TelegramFeed extends Tui.Container {
 	private readonly streamContent = new Tui.Container();
 	private readonly items: TimelineItem[] = [];
 	private readonly itemKeys = new Set<string>();
+	private readonly cardSlots = new Map<string, Tui.Container>();
 	private readonly streams = new Map<string, Extract<AgentStreamFrame, { phase: "update" }>>();
 	private readonly endedStreams = new Set<string>();
 	private statsValue: Record<string, BotStats> = {};
 	private statusValue = "connecting...";
 	private closed = false;
+	private mediaGeneration = 0;
+	private mediaListener: MediaReadyListener;
+	private readonly mediaResolver: MediaImageResolver;
 
 	constructor(
 		readonly filter: string | null,
 		private readonly theme: Theme,
 		private readonly factory: TimelineFactory,
 		private readonly changed: (event: TimelineEvent, feed: TelegramFeed) => void,
+		private readonly mediaCache: NativeMediaCache,
+		private readonly requestRender: () => void,
 	) {
 		super();
+		this.mediaListener = this.createMediaListener();
+		this.mediaResolver = (item) => this.mediaCache.resolve(item, this.mediaListener);
 		const header = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
 		header.addChild(new Tui.Text(theme.bold(theme.fg("accent", filter ? `Telegram · bot ${filter}` : "Telegram · all bots")), 0, 0));
 		header.addChild(new Tui.Text(theme.fg("dim", "Pi transcript owns scrolling, resize, selection and images · /tg more · /tg detach"), 0, 0));
@@ -458,6 +639,7 @@ export class TelegramFeed extends Tui.Container {
 
 	suspendForRestart(): void {
 		this.clientValue.dispose();
+		this.invalidateMediaListener();
 		this.clearStreams();
 		this.setStatus("restarting Telegram daemon...");
 	}
@@ -467,6 +649,8 @@ export class TelegramFeed extends Tui.Container {
 		this.closed = false;
 		this.setStatus("reconnecting Telegram feed...");
 		this.clientValue = this.factory(this.filter, { onEvent: (event) => this.onEvent(event) });
+		this.rebuildItems();
+		this.requestRender();
 		return this.clientValue.connect();
 	}
 
@@ -474,6 +658,7 @@ export class TelegramFeed extends Tui.Container {
 		if (this.closed) return;
 		this.closed = true;
 		this.clientValue.dispose();
+		this.invalidateMediaListener();
 		this.clearStreams();
 		this.setStatus(reason);
 	}
@@ -514,11 +699,7 @@ export class TelegramFeed extends Tui.Container {
 	}
 
 	private rememberItem(item: TimelineItem): boolean {
-		const key = item.kind === "msg"
-			? `m:${item.chatId}:${item.messageId}`
-			: item.evtId != null
-				? `e:${item.evtId}`
-				: `e?:${item.botId}:${item.ts}:${item.evtKind}:${item.payload}`;
+		const key = this.itemKey(item);
 		if (this.itemKeys.has(key)) return false;
 		this.itemKeys.add(key);
 		return true;
@@ -529,7 +710,10 @@ export class TelegramFeed extends Tui.Container {
 		for (const item of items) {
 			const day = fmtDay(item.ts);
 			if (day !== previousDay) this.content.addChild(new Tui.Text(this.theme.fg("dim", `──────── ${day} ────────`), 1, 0));
-			this.content.addChild(itemComponent(item, this.theme));
+			const slot = new Tui.Container();
+			slot.addChild(itemComponent(item, this.theme, this.mediaResolver));
+			this.cardSlots.set(this.itemKey(item), slot);
+			this.content.addChild(slot);
 			this.content.addChild(new Tui.Spacer(1));
 			previousDay = day;
 		}
@@ -537,7 +721,28 @@ export class TelegramFeed extends Tui.Container {
 
 	private rebuildItems(): void {
 		this.content.clear();
+		this.cardSlots.clear();
 		this.appendItems(this.items);
+	}
+
+	private itemKey(item: TimelineItem): string {
+		if (item.kind === "msg") return `m:${item.chatId}:${item.messageId}`;
+		return item.evtId != null
+			? `e:${item.evtId}`
+			: `e?:${item.botId}:${item.ts}:${item.evtKind}:${item.payload}`;
+	}
+
+	private refreshMedia(filename: string): void {
+		let refreshed = false;
+		for (const item of this.items) {
+			if (item.kind !== "msg" || item.mediaPath !== filename) continue;
+			const slot = this.cardSlots.get(this.itemKey(item));
+			if (!slot) continue;
+			slot.clear();
+			slot.addChild(itemComponent(item, this.theme, this.mediaResolver));
+			refreshed = true;
+		}
+		if (refreshed) this.requestRender();
 	}
 
 	private applyStream(stream: AgentStreamFrame): void {
@@ -585,6 +790,20 @@ export class TelegramFeed extends Tui.Container {
 	private setStatus(value: string): void {
 		this.statusValue = value;
 	}
+
+	private createMediaListener(): MediaReadyListener {
+		const generation = this.mediaGeneration;
+		return (filename) => {
+			if (this.closed || generation !== this.mediaGeneration) return;
+			this.refreshMedia(filename);
+		};
+	}
+
+	private invalidateMediaListener(): void {
+		this.mediaCache.unsubscribe(this.mediaListener);
+		this.mediaGeneration++;
+		this.mediaListener = this.createMediaListener();
+	}
 }
 
 function detachedEntry(data: FeedEntry, theme: Theme, supported: boolean): Tui.Component {
@@ -600,6 +819,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	const hostVersion = options.hostVersion ?? VERSION;
 	const supported = supportsPiVersion(hostVersion);
 	const factory = options.timelineFactory ?? ((filter, hooks) => new TimelineClient(join(rootDir, "data", "daemon.sock"), filter, hooks));
+	const mediaCache = options.mediaCache ?? new NativeMediaCache();
 	const runProcess = options.processRunner ?? runChildProcess;
 	const makeId = options.idFactory ?? randomUUID;
 	const makeRequestId = options.requestIdFactory ?? randomUUID;
@@ -690,7 +910,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		const existing = feeds.get(data.instanceId);
 		if (existing) return existing;
 		if (!supported || pending?.data.instanceId !== data.instanceId) return detachedEntry(data, theme, supported);
-		const feed = new TelegramFeed(data.filter, theme, factory, pending.changed);
+		const feed = new TelegramFeed(data.filter, theme, factory, pending.changed, mediaCache, () => requestHostRender?.());
 		pending = null;
 		feeds.set(data.instanceId, feed);
 		active = feed;

@@ -479,3 +479,11 @@
 - `send_degraded`与process warning只含component/outcome/stage/category/known ids，不含正文、token或完整异常。完整成功仍返回原有固定`ok`；Pi agent loop回归证明两种terminal result都只产生一次provider call。
 - 双SQLite连接真实复现`#19614`：Telegram create与feed broadcast各一次，canonical锁重试耗尽后不抛给模型，poller echo重放两次仍只有一行。另覆盖transient lock恢复、sticker-only closed DB、组合第二段（包括远端返回但无可用id）、全部unknown类别、preflight零网络与四类本地副作用隔离；相关33 tests / 190 assertions、全量268 / 3949、typecheck、cache v5 golden与diff check通过。真实群组合smoke并入T14。
 - Cache impact: **NONE**——tool name/description/schema、system/message/summary grammar与epoch不变；正常路径新增0 provider token/call，异常路径减少一次或更多重复provider turn与Telegram副作用。
+
+## 2026-08-08 (53) — 用 Pi 原生转换修复 Kitty/Ghostty 媒体
+
+- terminal capability只读Pi `getCapabilities()`；PNG直接进入`Tui.Image`，Kitty路径的JPEG/GIF/WebP则异步调用coding-agent公开`convertToPng()`。首帧保留media label，成功后只替换引用同一文件的native card并请求host render；没有自写terminal判断、escape、placement或尺寸逻辑。
+- source继续限1 MiB，以path/size/mtime组成revision。相同revision共享in-flight；ready/failed状态使用32项、32 MiB LRU，单项8 MiB、pending 32。坏PNG、reject/null/超限只退回文本且同revision不循环；文件变更后才重新准备。
+- feed detach/restart/session shutdown会移除旧listener并推进generation；迟到completion不能触碰旧TUI，新feed和restart后的保留卡片可复用已完成PNG。WebM保持文字占位，iTerm2/null完全服从Pi原始Image/fallback路径。
+- forced Kitty wire回归验证payload为PNG signature，覆盖JPEG/GIF/WebP/PNG、duplicate/vision/history/width、Ghostty/tmux/iTerm2/null、失败/file change/LRU/pending/lifecycle；Pi真实converter将仓库2×2 WebP转为PNG。targeted extension/engine 50 tests / 469 assertions，全量279 / 4041、typecheck、cache v5 golden与diff check通过；真实Kitty/Ghostty终端smoke留T14。
+- Cache impact: **NONE**——只改变extension本地显示payload准备；IPC/SQLite/session/provider grammar与bytes、vision/LLM调用、context epoch及每turn token均不变。

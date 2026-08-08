@@ -53,7 +53,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10w** — 调查并正式化Kitty/Ghostty媒体协议与Pi原生PNG转换边界；validates: UI-0012 documented scope/AC；commit: docs/research only
 - [x] **T10x** — 隔离远端committed/partial/unknown与本地副作用失败，阻止同turn重发并补恢复回归；validates: SEND-0002 AC1–AC7；commit: send commit boundary
 - [x] **T10y** — 用T10x真实commit hash记录SEND-0002完成并在REQ-LIST勾选；validates: SEND-0002 traceability；commit: completion record
-- [ ] **T10z** — 复用Pi公开`convertToPng`做Kitty异步去重转换、有界LRU与原卡片重绘；validates: UI-0012 AC1–AC7；commit: native media compatibility
+- [x] **T10z** — 复用Pi公开`convertToPng`做Kitty异步去重转换、有界LRU与原卡片重绘；validates: UI-0012 AC1–AC7；commit: native media compatibility
 - [ ] **T10aa** — 用T10z真实commit hash记录UI-0012完成并在REQ-LIST勾选；validates: UI-0012 traceability；commit: completion record
 - [ ] **T10m** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config

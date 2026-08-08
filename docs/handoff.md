@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：SEND-0002 已实现远端 commit/no-retry 边界并通过真实 SQLite lock 回归；下一步实现 Kitty/Ghostty 的 Pi 原生媒体转换。
+2026-08-08：UI-0012 已用 Pi 原生 capability/converter/Image 完成 Kitty/Ghostty 媒体兼容；下一步实现 Telegram deterministic admin commands。
 
 ## 已完成
 
@@ -12,7 +12,7 @@
 - `src/plugin/timeline.ts` 只保留 IPC、history cursor、dedupe、stats 与有界媒体读取；旧 `src/tui/engine.ts` 已删除。
 - `/tg attach [bot]`、显式 `/tg compose <bot|off>`、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]` 与 daemon commands 可用。
 - package manifest、项目 Pi launcher、fullscreen settings、native Image 和 Pi `FooterComponent` telemetry 已落地。
-- 全量验证：268 tests pass / 0 fail / 3949 assertions；`bun run check`、cache v5 golden通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Rich/reply/组合发送trace留T14。
+- 全量验证：279 tests pass / 0 fail / 4041 assertions；`bun run check`、cache v5 golden通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Kitty/Ghostty媒体、Rich/reply/组合发送trace留T14。
 
 ## 当前实施队列
 
@@ -35,11 +35,11 @@
 17. **已调查 `REQ-ONBOARD-0001`**：当前`file:../pi`、手工JSON配置、tracked真实persona与单语内部索引阻断fresh clone。实施拆为portable launcher、typed local config/prompt privacy、atomic config core、Pi原生`/tg config`、双语用户/成本/维护指南和mdBook Pages六个原子task；legacy JSON兼容，不偷偷改写Git历史。
 18. **已实现 `REQ-UI-0011`**：message/event/stream复用Pi `HStack/TruncatedText` header；身份leading、metadata trailing，bot id优先。40/60/80/120 columns覆盖CJK/emoji/长username与OSC，普通消息仍两行；真实Pi 80/40 columns和当前/浅色主题通过，production extension精确`+15/-15`净零行。
 19. **已实现 `REQ-SEND-0002`（`bd4be62`）**：Telegram create后canonical SQLite按25/100/250ms仅本地重试；committed/partial/unknown统一固定`no_retry`+terminate，exposure/broadcast/event/typing失败隔离并只记脱敏诊断。真实双连接lock复现`#19614`路径只有一次create，poller echo最终一行；33 targeted / 190 assertions、全量268 / 3949通过，真实组合发送留T14。
-20. **已调查 `REQ-UI-0012`**：Pi已把Kitty/Ghostty判为kitty protocol，但底层固定`f=100`只接受PNG；插件却原样传WebP/JPEG。实施跟随Pi自己的ToolExecution模式：公开`convertToPng`异步归一化、同revision去重、有界LRU，成功后仍由`Tui.Image`原位渲染。
+20. **已实现 `REQ-UI-0012`**：只服从Pi capability；Kitty路径以公开`convertToPng`异步归一化JPEG/GIF/WebP并继续由`Tui.Image`渲染。path/size/mtime revision共享in-flight，32项/32 MiB LRU、8 MiB单项、32 pending及失败记忆有界；完成只替换相关卡片，detach/restart/shutdown迟到callback失效。targeted 50/469、全量279/4041通过，真实Kitty/Ghostty smoke留T14。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 
-建议顺序：Kitty/Ghostty媒体修复 → Telegram admin commands → PLAT provider/config → 参数化 e2e/composition → onboarding/双语文档 → T14 总验收。
+建议顺序：Telegram admin commands → PLAT provider/config → 参数化 e2e/composition → onboarding/双语文档 → T14 总验收。
 
 ## 使用方式
 
@@ -59,3 +59,4 @@ attach 默认只读；仅显式 compose 时 interactive editor 发 Telegram，of
 - STICKER-0002 是 **INTENTIONAL** cache change：schema 已从 2 bump 到 3，golden 通过；daemon 下次受控重启会自动开新 epoch。
 - 原子提交规范已在 `c32d937` 固化；ONBOARD-0001 已拆成六个实施task；全部按目标测试→显式暂存→签名commit推进。
 - SEND-0002 是 **NONE**：tool schema/system/serialization/cache epoch逐字节不变；正常成功仍是`ok`，只有异常路径用固定terminal `no_retry`省掉重复provider turn与Telegram消息。
+- UI-0012 是 **NONE**：只在本地Pi TUI按terminal capability准备显示PNG；IPC/DB/provider bytes、vision调用与context epoch不变。

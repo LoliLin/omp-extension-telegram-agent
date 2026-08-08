@@ -31,6 +31,18 @@ export interface MediaImage {
 	base64: string;
 	mime: string;
 	filename: string;
+	revision: string;
+}
+
+/** Local-only file identity used to invalidate prepared display payloads after replacement. */
+export function mediaFileRevision(filename: string): string | null {
+	try {
+		const stat = statSync(filename);
+		if (!stat.isFile() || stat.size <= 0 || stat.size > MEDIA_MAX_BYTES) return null;
+		return `${filename}\0${stat.size}\0${stat.mtimeMs}`;
+	} catch {
+		return null;
+	}
 }
 
 /** Read a daemon-provided local image for Pi's Image component. */
@@ -39,9 +51,11 @@ export function readMediaImage(message: MsgItem): MediaImage | null {
 	const mime = IMAGE_MIME[(message.mediaPath.split(".").pop() ?? "").toLowerCase()];
 	if (!mime) return null;
 	try {
-		const size = statSync(message.mediaPath).size;
-		if (size <= 0 || size > MEDIA_MAX_BYTES) return null;
-		return { base64: readFileSync(message.mediaPath).toString("base64"), mime, filename: message.mediaPath };
+		const revision = mediaFileRevision(message.mediaPath);
+		if (!revision) return null;
+		const base64 = readFileSync(message.mediaPath).toString("base64");
+		if (mediaFileRevision(message.mediaPath) !== revision) return null;
+		return { base64, mime, filename: message.mediaPath, revision };
 	} catch {
 		return null;
 	}

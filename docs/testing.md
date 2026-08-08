@@ -65,6 +65,7 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | 固定 sticker set（REQ-STICKER-0001） | ✅ | 2026-08-07 test/sticker.test.ts 10 条：catalog 加载（media/short_id/file_id）、确定性序列化（含 [未识别]）、120 上限截断、坏 set 名不阻塞、send 解析 catalog id、动态候选排除 catalog sticker + 位置锁定在消息之后、visionless short_id 不崩；golden：目录块 hash 锁定（CACHE_SCHEMA_VERSION=2）；真实群冒烟：双 set 下载（114+98 个 sticker）vision 后台预识别 |
 | sticker per-bot 可发送性（REQ-STICKER-0002） | ✅ unit / ⏳ real smoke | 2026-08-08 `test/sticker.test.ts` 用 A:s144 与 B:s241–s244 复现生产泄漏，锁 fixed/dynamic/shared/A-only mapping；部分 set fetch、candidate invariant preflight 与 cache v3 golden 一并覆盖。真实群各 bot 自身目录发送留到总验收。 |
 | Pi 原生 transcript（REQ-UI-0001/2/4） | ✅ | 2026-08-08：package discovery/version guard、TUI-only custom entry、restore 不重连、单例 attach/more/detach、filter/cleanup、原生 `Image`；生产代码无手写 viewport/`handleInput()`/ANSI；真实 Pi fullscreen attach/more/detach smoke 通过。611 行是 `19819c9` 完成 UI-0004 时的基线，后续 compose/vision/footer 功能独立追踪，不把新增需求误算为旧 hack。 |
+| Kitty/Ghostty原生媒体兼容（REQ-UI-0012） | ✅ unit / ⏳ real terminal smoke | 2026-08-08 extension/engine 50 pass / 469 assertions：forced Kitty首帧不发送raw WebP，完成后同一卡片的Pi Kitty payload解码为PNG signature；JPEG/GIF/WebP转换、PNG零转换、duplicate/vision/history/width去重、Ghostty/tmux/iTerm2/null能力、WebM fallback、reject/null/坏PNG/8 MiB上限、file revision、32项/32 MiB LRU、32 pending与detach/restart lifecycle均覆盖。真实Pi converter把仓库2×2 WebP转为PNG；全量279 / 4041、typecheck、cache v5 golden与diff check通过。真实Kitty/Ghostty sticker/photo resize/scroll留T14。 |
 | Pi 原生 telemetry footer（REQ-UI-0003/7 T9b） | ✅ unit / ⏳ real smoke | 2026-08-08 targeted 53 pass：factory 返回真实 `FooterComponent`，精确 `↑13k ↓817 R20k CH60.6% $0.002 1.5%/1.0M`、global aggregate/latest model、24/80 列、compose status、session 不变、active/standalone 单 owner 与全 lifecycle restore；无 production stats widget/custom renderer，typecheck/cache golden 通过。真实 Pi TTY 留 T14。 |
 | Pi 原生 `/tg` 分级补全（REQ-UI-0008 T10） | ✅ unit / ⏳ real smoke | 2026-08-08 targeted extension/cache 28 pass：共享递归 tree 驱动 help/parser/completion，A/B/C 动态 id/name、off、partial/whitespace、leaf、config error 与 future third-level 均覆盖，所有 suggestion 可被同 parser 接受；typecheck/cache golden 通过。真实菜单 Tab/选择留 T14。 |
 | lifetime telemetry completeness（REQ-UI-0009 T10b） | ✅ unit / ⏳ real smoke | 2026-08-08 DB/runtime/IPC/plugin/cache targeted 70 pass：legacy file migration 幂等、cacheWrite/reasoning/latency persist+push、file DB close/reopen + daemon rebuild、removed bot exclusion、baseline/live once、Pi 原生 `W/CH`、session isolation、status detail/zero run；typecheck/cache golden 通过。真实 deployment restart/footer/status 留 T14。 |
@@ -76,7 +77,7 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |
 | threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ⏳ Phase 9 | - |
-| 当前全量回归 | ✅ | 2026-08-08 `bun test`：268 pass / 0 fail / 3949 assertions；`bun run check` 通过；cache v5 golden 6/6 |
+| 当前全量回归 | ✅ | 2026-08-08 `bun test`：279 pass / 0 fail / 4041 assertions；`bun run check` 通过；cache v5 golden 6/6 |
 
 ## 已知 flaky
 

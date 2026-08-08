@@ -1,15 +1,20 @@
 process.env.TZ = "Asia/Singapore";
 
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FooterComponent, initTheme, type Theme } from "@earendil-works/pi-coding-agent";
+import { convertToPng, FooterComponent, initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import * as Tui from "@earendil-works/pi-tui";
 import {
 	completeTgArguments,
 	formatTgHelp,
 	itemComponent,
+	MEDIA_CACHE_MAX_BASE64_BYTES,
+	MEDIA_CACHE_MAX_ENTRIES,
+	MEDIA_CACHE_MAX_ITEM_BASE64_BYTES,
+	MEDIA_CONVERSION_MAX_PENDING,
+	NativeMediaCache,
 	parseTgArguments,
 	registerTelegramExtension,
 	streamComponent,
@@ -29,6 +34,42 @@ const theme = {
 } as Theme;
 
 beforeAll(() => initTheme(undefined, false));
+afterEach(() => Tui.resetCapabilitiesCache());
+
+const TINY_PNG =
+	"iVBORw0KGgoAAAANSUhEUgAAAAIAAAACAQMAAABIeJ9nAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURf8AAP///0EdNBEAAAABYktHRAH/Ai3eAAAAB3RJTUUH6gEOADM5Ddoh/wAAAAxJREFUCNdjYGBgAAAABAABJzQnCgAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyNi0wMS0xNFQwMDo1MTo1NyswMDowMOnKzHgAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjYtMDEtMTRUMDA6NTE6NTcrMDA6MDCYl3TEAAAAKHRFWHRkYXRlOnRpbWVzdGFtcAAyMDI2LTAxLTE0VDAwOjUxOjU3KzAwOjAwz4JVGwAAAABJRU5ErkJggg==";
+const TINY_JPEG =
+	"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAACAAIDAREAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAVAQEBAAAAAAAAAAAAAAAAAAAGCf/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AD3VTB3/2Q==";
+const TINY_GIF = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+// Deterministic 2x2 WebP generated from Pi's red-circle fixture with cwebp.
+const TINY_WEBP = "UklGRjAAAABXRUJQVlA4ICQAAABwAQCdASoCAAIAAgA0JZACdAF1AAD++DLAHxcv9qflZ7vuAAA=";
+
+let mediaFixtureSequence = 0;
+function writeMediaFixture(extension: string, base64: string): string {
+	const path = join(tmpdir(), `tg-media-${process.pid}-${++mediaFixtureSequence}.${extension}`);
+	writeFileSync(path, Buffer.from(base64, "base64"));
+	return path;
+}
+
+async function waitForMedia(predicate: () => boolean): Promise<void> {
+	for (let attempt = 0; attempt < 100; attempt++) {
+		if (predicate()) return;
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+	}
+	throw new Error("timed out waiting for media conversion");
+}
+
+function pngSignature(base64: string): string {
+	return Buffer.from(base64, "base64").subarray(0, 8).toString("hex");
+}
+
+function firstKittyPayload(rendered: string): string | null {
+	const start = rendered.indexOf("\x1b_G");
+	if (start < 0) return null;
+	const separator = rendered.indexOf(";", start);
+	const end = rendered.indexOf("\x1b\\", separator);
+	return separator < 0 || end < 0 ? null : rendered.slice(separator + 1, end);
+}
 
 class FakeTimeline implements TimelinePort {
 	isConnected = false;
@@ -793,6 +834,372 @@ describe("native Pi Telegram extension", () => {
 		expect(botHeader).toContain("Alice · bot helper");
 		expect(botHeader).not.toContain("@telegram_name");
 		expect(itemComponent({ ...message, replyTo: null, text: "one line" }, theme).render(80)).toHaveLength(2);
+	});
+
+	test("Kitty never receives raw WebP and redraws the same feed with converted PNG", async () => {
+		Tui.setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		const path = writeMediaFixture("webp", TINY_WEBP);
+		let conversionCalls = 0;
+		let resolveConversion!: (value: { data: string; mimeType: string } | null) => void;
+		const conversion = new Promise<{ data: string; mimeType: string } | null>((resolve) => { resolveConversion = resolve; });
+		const cache = new NativeMediaCache(async () => {
+			conversionCalls++;
+			return await conversion;
+		});
+		const host = makeHost({ mediaCache: cache });
+		try {
+			await host.command("attach A");
+			host.clients[0]!.emit({
+				type: "append",
+				items: [
+					{ ...message, text: null, mediaKind: "sticker", stickerEmoji: "👋", mediaPath: path },
+					{ ...message, messageId: 6, text: "unrelated card" },
+				],
+			});
+			const feed = host.entries[0]!.component as TelegramFeed;
+			const content = feed.children[2] as Tui.Container;
+			const mediaSlot = content.children[1] as Tui.Container;
+			const unrelatedSlot = content.children[3] as Tui.Container;
+			const mediaCardBefore = mediaSlot.children[0];
+			const unrelatedCardBefore = unrelatedSlot.children[0];
+			const firstFrame = feed.render(80).join("\n");
+			expect(firstFrame).toContain("[sticker 👋]");
+			expect(firstFrame).not.toContain("\x1b_G");
+			expect(conversionCalls).toBe(1);
+			expect(cache.pendingCount).toBe(1);
+
+			const rendersBeforeCompletion = host.renderRequests.count;
+			resolveConversion({ data: TINY_PNG, mimeType: "image/png" });
+			await waitForMedia(() => cache.pendingCount === 0);
+
+			const convertedFrame = feed.render(80).join("\n");
+			const payload = firstKittyPayload(convertedFrame);
+			expect(host.entries).toHaveLength(1);
+			expect(host.renderRequests.count).toBeGreaterThan(rendersBeforeCompletion);
+			expect(payload).not.toBeNull();
+			expect(pngSignature(payload!)).toBe("89504e470d0a1a0a");
+			expect(conversionCalls).toBe(1);
+			expect(mediaSlot.children[0]).not.toBe(mediaCardBefore);
+			expect(unrelatedSlot.children[0]).toBe(unrelatedCardBefore);
+		} finally {
+			host.shutdown();
+			unlinkSync(path);
+		}
+	});
+
+	test("JPEG, GIF, and duplicate WebP share conversion state while PNG stays zero-copy", async () => {
+		Tui.setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		const paths = [
+			writeMediaFixture("webp", TINY_WEBP),
+			writeMediaFixture("jpg", TINY_JPEG),
+			writeMediaFixture("gif", TINY_GIF),
+			writeMediaFixture("png", TINY_PNG),
+		];
+		const convertedMimes: string[] = [];
+		const cache = new NativeMediaCache(async (_data, mime) => {
+			convertedMimes.push(mime);
+			return { data: TINY_PNG, mimeType: "image/png" };
+		});
+		const host = makeHost({ mediaCache: cache });
+		try {
+			await host.command("attach A");
+			const mediaBase = { ...message, text: null, mediaKind: "photo", fileUniqueId: "same-revision" };
+			host.clients[0]!.emit({
+				type: "append",
+				items: [
+					{ ...mediaBase, messageId: 20, mediaPath: paths[0] },
+					{ ...mediaBase, messageId: 21, mediaPath: paths[0] },
+					{ ...mediaBase, messageId: 22, mediaPath: paths[1] },
+					{ ...mediaBase, messageId: 23, mediaPath: paths[2] },
+					{ ...mediaBase, messageId: 24, mediaPath: paths[3] },
+				],
+			});
+			await waitForMedia(() => cache.pendingCount === 0);
+			expect(convertedMimes.sort()).toEqual(["image/gif", "image/jpeg", "image/webp"]);
+
+			// Vision rebuild, history prepend, repeated widths, and duplicate cards all reuse the same revisions.
+			host.clients[0]!.emit({ type: "vision", fileUniqueId: "same-revision", text: "媒体描述" });
+			host.clients[0]!.emit({
+				type: "prepend",
+				items: [{ ...mediaBase, messageId: 19, ts: mediaBase.ts - 1, mediaPath: paths[0] }],
+			});
+			host.entries[0]!.component.render(40);
+			host.entries[0]!.component.render(120);
+			expect(convertedMimes).toHaveLength(3);
+			expect(host.entries[0]!.component.render(80).join("\n").match(/\x1b_G/g)?.length).toBe(6);
+		} finally {
+			host.shutdown();
+			for (const path of paths) unlinkSync(path);
+		}
+	});
+
+	test("Pi capability detection owns Ghostty, iTerm2, tmux, and unsupported decisions", () => {
+		const keys = [
+			"TERM_PROGRAM",
+			"TERMINAL_EMULATOR",
+			"TERM",
+			"COLORTERM",
+			"TMUX",
+			"KITTY_WINDOW_ID",
+			"GHOSTTY_RESOURCES_DIR",
+			"WEZTERM_PANE",
+			"WARP_SESSION_ID",
+			"WARP_TERMINAL_SESSION_UUID",
+			"ITERM_SESSION_ID",
+			"WT_SESSION",
+		] as const;
+		const saved = new Map(keys.map((key) => [key, process.env[key]]));
+		const detect = (values: Partial<Record<(typeof keys)[number], string>>) => {
+			for (const key of keys) delete process.env[key];
+			for (const [key, value] of Object.entries(values)) process.env[key] = value;
+			return Tui.detectCapabilities(() => false);
+		};
+		try {
+			expect(detect({ TERM_PROGRAM: "ghostty" }).images).toBe("kitty");
+			expect(detect({ GHOSTTY_RESOURCES_DIR: "/Applications/Ghostty.app" }).images).toBe("kitty");
+			expect(detect({ TERM_PROGRAM: "ghostty", TMUX: "/tmp/tmux", TERM: "tmux-256color" }).images).toBeNull();
+			expect(detect({ TERM_PROGRAM: "iTerm.app" }).images).toBe("iterm2");
+			expect(detect({ TERM_PROGRAM: "unknown" }).images).toBeNull();
+			const source = readFileSync(join(import.meta.dir, "../.pi/extensions/tg-extension.ts"), "utf8");
+			expect(source).not.toMatch(/TERM_PROGRAM|GHOSTTY_RESOURCES_DIR|KITTY_WINDOW_ID/);
+			expect(source).toContain("Tui.getCapabilities()");
+		} finally {
+			for (const key of keys) {
+				const value = saved.get(key);
+				if (value == null) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	});
+
+	test("iTerm2 and image-null paths keep Pi's raw Image behavior without conversion", () => {
+		const path = writeMediaFixture("webp", TINY_WEBP);
+		let calls = 0;
+		const item = { ...message, kind: "msg" as const, mediaKind: "sticker", mediaPath: path };
+		try {
+			for (const images of ["iterm2", null] as const) {
+				const cache = new NativeMediaCache(
+					async () => { calls++; return { data: TINY_PNG, mimeType: "image/png" }; },
+					() => ({ images, trueColor: true, hyperlinks: true }),
+				);
+				const resolved = cache.resolve(item);
+				expect(resolved?.mime).toBe("image/webp");
+				const card = itemComponent(item, theme, (candidate) => cache.resolve(candidate)) as Tui.Box;
+				expect(card.children.some((child) => child instanceof Tui.Image)).toBe(true);
+				expect(cache.pendingCount).toBe(0);
+			}
+			const unavailable = new NativeMediaCache(
+				async () => { calls++; return { data: TINY_PNG, mimeType: "image/png" }; },
+				() => { throw new Error("capability probe failed"); },
+			);
+			expect(unavailable.resolve(item)).toBeNull();
+			expect(unavailable.pendingCount).toBe(0);
+			expect(calls).toBe(0);
+		} finally {
+			unlinkSync(path);
+		}
+	});
+
+	test("unsupported WebM remains a readable text fallback without conversion", () => {
+		const path = writeMediaFixture("webm", TINY_WEBP);
+		let calls = 0;
+		const cache = new NativeMediaCache(
+			async () => { calls++; return { data: TINY_PNG, mimeType: "image/png" }; },
+			() => ({ images: "kitty", trueColor: true, hyperlinks: true }),
+		);
+		try {
+			const item = { ...message, kind: "msg" as const, text: null, mediaKind: "sticker", stickerEmoji: "🎞", mediaPath: path };
+			const card = itemComponent(item, theme, (candidate) => cache.resolve(candidate)) as Tui.Box;
+			const rendered = card.render(80).join("\n");
+			expect(rendered).toContain("[sticker 🎞]");
+			expect(rendered).not.toContain("\x1b_G");
+			expect(card.children.some((child) => child instanceof Tui.Image)).toBe(false);
+			expect(calls).toBe(0);
+		} finally {
+			unlinkSync(path);
+		}
+	});
+
+	test("converter rejection, null, invalid PNG, and oversized output are remembered without loops", async () => {
+		const path = writeMediaFixture("webp", TINY_WEBP);
+		const kitty = () => ({ images: "kitty" as const, trueColor: true, hyperlinks: true });
+		try {
+			const converters = [
+				async () => { throw new Error("decode failed"); },
+				async () => null,
+				async () => ({ data: Buffer.from("not png").toString("base64"), mimeType: "image/png" }),
+				async () => ({ data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64"), mimeType: "image/png" }),
+				async () => ({ data: `${TINY_PNG}${"A".repeat(MEDIA_CACHE_MAX_ITEM_BASE64_BYTES)}`, mimeType: "image/png" }),
+			];
+			for (const converter of converters) {
+				let calls = 0;
+				const cache = new NativeMediaCache(async () => { calls++; return await converter(); }, kitty);
+				const item = { ...message, kind: "msg" as const, mediaKind: "sticker", mediaPath: path };
+				expect(cache.resolve(item)).toBeNull();
+				await waitForMedia(() => cache.pendingCount === 0);
+				expect(cache.resolve(item)).toBeNull();
+				expect(calls).toBe(1);
+				expect(cache.totalBase64Bytes).toBe(0);
+				const card = itemComponent(item, theme, (candidate) => cache.resolve(candidate)) as Tui.Box;
+				const rendered = card.render(80).join("\n");
+				expect(rendered).toContain("[sticker]");
+				expect(rendered).not.toContain("\x1b_G");
+				expect(card.children.some((child) => child instanceof Tui.Image)).toBe(false);
+			}
+		} finally {
+			unlinkSync(path);
+		}
+	});
+
+	test("a file replacement invalidates an in-flight conversion and retries only the new revision", async () => {
+		const path = writeMediaFixture("webp", TINY_WEBP);
+		let calls = 0;
+		let resolveFirst!: (value: { data: string; mimeType: string } | null) => void;
+		const first = new Promise<{ data: string; mimeType: string } | null>((resolve) => { resolveFirst = resolve; });
+		const cache = new NativeMediaCache(
+			async () => ++calls === 1 ? await first : { data: TINY_PNG, mimeType: "image/png" },
+			() => ({ images: "kitty", trueColor: true, hyperlinks: true }),
+		);
+		const item = { ...message, kind: "msg" as const, mediaKind: "sticker", mediaPath: path };
+		let notifications = 0;
+		try {
+			expect(cache.resolve(item, () => { notifications++; })).toBeNull();
+			writeFileSync(path, Buffer.concat([Buffer.from(TINY_WEBP, "base64"), Buffer.from([0])]));
+			resolveFirst({ data: TINY_PNG, mimeType: "image/png" });
+			await waitForMedia(() => cache.pendingCount === 0);
+			expect(notifications).toBe(1);
+			expect(cache.resolve(item)).toBeNull();
+			await waitForMedia(() => cache.pendingCount === 0);
+			expect(cache.resolve(item)?.mime).toBe("image/png");
+			expect(calls).toBe(2);
+		} finally {
+			unlinkSync(path);
+		}
+	});
+
+	test("completed and pending media state obey exact production bounds and LRU eviction", async () => {
+		const defaults = new NativeMediaCache();
+		expect(defaults.limits).toEqual({
+			maxEntries: MEDIA_CACHE_MAX_ENTRIES,
+			maxTotalBase64Bytes: MEDIA_CACHE_MAX_BASE64_BYTES,
+			maxItemBase64Bytes: MEDIA_CACHE_MAX_ITEM_BASE64_BYTES,
+			maxPending: MEDIA_CONVERSION_MAX_PENDING,
+		});
+
+		const paths = [writeMediaFixture("webp", TINY_WEBP), writeMediaFixture("webp", TINY_WEBP), writeMediaFixture("webp", TINY_WEBP)];
+		let calls = 0;
+		const cache = new NativeMediaCache(
+			async () => { calls++; return { data: TINY_PNG, mimeType: "image/png" }; },
+			() => ({ images: "kitty", trueColor: true, hyperlinks: true }),
+			{ maxEntries: 2, maxTotalBase64Bytes: TINY_PNG.length * 2, maxItemBase64Bytes: TINY_PNG.length },
+		);
+		try {
+			for (let index = 0; index < paths.length; index++) {
+				cache.resolve({ ...message, kind: "msg", messageId: 100 + index, mediaKind: "sticker", mediaPath: paths[index] });
+			}
+			await waitForMedia(() => cache.pendingCount === 0);
+			expect(cache.size).toBe(2);
+			expect(cache.totalBase64Bytes).toBeLessThanOrEqual(TINY_PNG.length * 2);
+			expect(calls).toBe(3);
+
+			// The oldest revision was evicted, so only that revision needs a new conversion.
+			expect(cache.resolve({ ...message, kind: "msg", messageId: 200, mediaKind: "sticker", mediaPath: paths[0] })).toBeNull();
+			await waitForMedia(() => cache.pendingCount === 0);
+			expect(calls).toBe(4);
+		} finally {
+			for (const path of paths) unlinkSync(path);
+		}
+
+		const pendingPaths = [writeMediaFixture("webp", TINY_WEBP), writeMediaFixture("webp", TINY_WEBP), writeMediaFixture("webp", TINY_WEBP)];
+		const releases: Array<(value: { data: string; mimeType: string }) => void> = [];
+		let pendingCalls = 0;
+		const pendingCache = new NativeMediaCache(
+			async () => {
+				pendingCalls++;
+				return await new Promise<{ data: string; mimeType: string }>((resolve) => releases.push(resolve));
+			},
+			() => ({ images: "kitty", trueColor: true, hyperlinks: true }),
+			{ maxPending: 2 },
+		);
+		try {
+			for (let index = 0; index < pendingPaths.length; index++) {
+				pendingCache.resolve({ ...message, kind: "msg", messageId: 300 + index, mediaKind: "sticker", mediaPath: pendingPaths[index] });
+			}
+			expect(pendingCache.pendingCount).toBe(2);
+			expect(pendingCalls).toBe(2);
+			for (const release of releases) release({ data: TINY_PNG, mimeType: "image/png" });
+			await waitForMedia(() => pendingCache.pendingCount === 0);
+		} finally {
+			for (const path of pendingPaths) unlinkSync(path);
+		}
+	});
+
+	test("detach invalidates old callbacks while a new feed reuses completed PNG", async () => {
+		Tui.setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		const path = writeMediaFixture("webp", TINY_WEBP);
+		let calls = 0;
+		let resolveConversion!: (value: { data: string; mimeType: string } | null) => void;
+		const conversion = new Promise<{ data: string; mimeType: string } | null>((resolve) => { resolveConversion = resolve; });
+		const cache = new NativeMediaCache(async () => { calls++; return await conversion; });
+		const host = makeHost({ mediaCache: cache });
+		const mediaItem = { ...message, kind: "msg" as const, text: null, mediaKind: "sticker", mediaPath: path };
+		try {
+			await host.command("attach A");
+			host.clients[0]!.emit({ type: "append", items: [mediaItem] });
+			await host.command("detach");
+			const rendersAfterDetach = host.renderRequests.count;
+			resolveConversion({ data: TINY_PNG, mimeType: "image/png" });
+			await waitForMedia(() => cache.pendingCount === 0);
+			expect(host.renderRequests.count).toBe(rendersAfterDetach);
+
+			await host.command("attach A");
+			host.clients[1]!.emit({ type: "append", items: [{ ...mediaItem, messageId: 6 }] });
+			expect(host.entries[1]!.component.render(80).join("\n")).toContain("\x1b_G");
+			expect(calls).toBe(1);
+		} finally {
+			host.shutdown();
+			unlinkSync(path);
+		}
+	});
+
+	test("restart ignores the old conversion callback and rebuilds retained cards from the shared cache", async () => {
+		Tui.setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		const path = writeMediaFixture("webp", TINY_WEBP);
+		let conversionCalls = 0;
+		let resolveConversion!: (value: { data: string; mimeType: string } | null) => void;
+		const conversion = new Promise<{ data: string; mimeType: string } | null>((resolve) => { resolveConversion = resolve; });
+		let resolveRestart!: (value: { status: number; stdout: string; stderr: string }) => void;
+		const restart = new Promise<{ status: number; stdout: string; stderr: string }>((resolve) => { resolveRestart = resolve; });
+		const cache = new NativeMediaCache(async () => { conversionCalls++; return await conversion; });
+		const host = makeHost({ mediaCache: cache, processRunner: async () => await restart });
+		try {
+			await host.command("attach A");
+			host.clients[0]!.emit({
+				type: "append",
+				items: [{ ...message, text: null, mediaKind: "sticker", mediaPath: path }],
+			});
+			const restartCommand = host.command("restart");
+			const rendersWhileRestarting = host.renderRequests.count;
+			resolveConversion({ data: TINY_PNG, mimeType: "image/png" });
+			await waitForMedia(() => cache.pendingCount === 0);
+			expect(host.renderRequests.count).toBe(rendersWhileRestarting);
+
+			resolveRestart({ status: 0, stdout: "daemon ready (pid 900)", stderr: "" });
+			await restartCommand;
+			expect(host.clients).toHaveLength(2);
+			expect(host.entries[0]!.component.render(80).join("\n")).toContain("\x1b_G");
+			expect(conversionCalls).toBe(1);
+		} finally {
+			host.shutdown();
+			unlinkSync(path);
+		}
+	});
+
+	test("Pi's real converter turns the repository WebP fixture into a 2x2 PNG", async () => {
+		const converted = await convertToPng(TINY_WEBP, "image/webp");
+		expect(converted?.mimeType).toBe("image/png");
+		expect(pngSignature(converted!.data)).toBe("89504e470d0a1a0a");
+		expect(Tui.getPngDimensions(converted!.data)).toEqual({ widthPx: 2, heightPx: 2 });
 	});
 
 	test("a supported local media file becomes Pi's Image component", () => {
