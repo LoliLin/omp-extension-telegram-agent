@@ -32,8 +32,6 @@ function makeBot(): BotConfig {
 		samplingCooldownMs: 2000,
 		provider: "deepseek",
 		model: "m",
-		apiKeyEnv: "test_api_key",
-		providerApiKey: "test-key",
 		reasoningEffort: "medium",
 		compactionThreshold: 128000,
 		compactionKeepRecent: 20000,

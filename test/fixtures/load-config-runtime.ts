@@ -9,7 +9,6 @@ process.stdout.write(JSON.stringify({
 		name: bot.name,
 		provider: bot.provider,
 		model: bot.model,
-		apiKeyEnv: bot.apiKeyEnv,
 		routingP: bot.routingP,
 		samplingCooldownMs: bot.samplingCooldownMs,
 		tools: bot.tools,

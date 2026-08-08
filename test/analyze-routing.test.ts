@@ -243,8 +243,8 @@ describe("routing audit", () => {
 			setDaemonState(db, "router_secret", SECRET);
 			const bot = (id: string): BotConfig => ({
 				id, name: id, token: "unused", personaPath: "/private/persona", routingP: 0.5,
-				samplingCooldownMs: 2000, provider: "unused", model: "unused", apiKeyEnv: "unused",
-				providerApiKey: "unused-private-key", reasoningEffort: "low", compactionThreshold: 1,
+				samplingCooldownMs: 2000, provider: "unused", model: "unused",
+				reasoningEffort: "low", compactionThreshold: 1,
 				compactionKeepRecent: 1, tools: { send: true, search: false, runJs: false }, stickerSets: [],
 			});
 			const input = resolveRoutingAuditInput(db, {

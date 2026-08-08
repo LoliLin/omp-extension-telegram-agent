@@ -3,10 +3,10 @@
 // Three sources:
 //   1. `telegram.config.ts` (preferred) or legacy `bots.config.json` (project root, or env
 //      `bots_config` path) — trusted local bot list:
-//      arbitrary number of bots, persona paths (abs / ~ / relative to project root), per-bot
-//      provider/model/auth-env, routing & tool switches. NO secrets here: credentials are
-//      referenced by env key name.
-//   2. `.env` (`key: value` colon format) — secrets and API keys only.
+//      arbitrary number of bots, persona paths (abs / ~ / relative to project root), optional
+//      Pi provider/model selection, routing & tool switches.
+//   2. `.env` (`key: value` colon format) — Telegram/TinyFish/router secrets only. LLM
+//      credentials belong exclusively to Pi's auth storage (REQ-PLAT-0002).
 //
 // Validation collects ALL errors and throws ConfigError listing each one (REQ-OPS-0001 R2
 // framework, shared with the JSON schema checks per REQ-CONF-0001 R6).
@@ -51,8 +51,6 @@ export interface BotConfig {
 	samplingCooldownMs: number; // probability-only cooldown after a completed run (REQ-ROUTE-0001)
 	provider: string;
 	model: string;
-	apiKeyEnv: string; // env key name only; safe for diagnostics
-	providerApiKey: string; // resolved secret; never log or persist
 	reasoningEffort: string;
 	compactionThreshold: number;
 	compactionKeepRecent: number;
@@ -203,23 +201,13 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 		errors.push(`[config] bots: must be a non-empty array`);
 	}
 	const botList = (Array.isArray(raw.bots) ? raw.bots : []) as RawBotConfig[];
-	const envKeyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 	for (const key of ["provider", "model"] as const) {
 		const value = raw[key];
 		if (value !== undefined && (typeof value !== "string" || value.trim() === "")) {
 			errors.push(`[config] ${key}: expected a non-empty string, got ${JSON.stringify(value)}`);
 		}
 	}
-	for (const key of ["api_key_env", "deepseek_key_env"] as const) {
-		const value = raw[key];
-		if (value !== undefined && (typeof value !== "string" || !envKeyPattern.test(value))) {
-			errors.push(`[config] ${key}: expected an environment key name, got ${JSON.stringify(value)}`);
-		}
-	}
 	const deploymentProvider = typeof raw.provider === "string" && raw.provider.trim() ? raw.provider.trim() : "deepseek";
-	if (deploymentProvider !== "deepseek" && raw.api_key_env === undefined) {
-		errors.push(`[config] api_key_env: required for deployment provider "${deploymentProvider}"`);
-	}
 	if (deploymentProvider !== "deepseek" && raw.model === undefined) {
 		errors.push(`[config] model: required for deployment provider "${deploymentProvider}"`);
 	}
@@ -272,13 +260,7 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 				errors.push(`[config] ${at}.${key}: expected a non-empty string, got ${JSON.stringify(value)}`);
 			}
 		}
-		if (b.api_key_env !== undefined && (typeof b.api_key_env !== "string" || !envKeyPattern.test(b.api_key_env))) {
-			errors.push(`[config] ${at}.api_key_env: expected an environment key name, got ${JSON.stringify(b.api_key_env)}`);
-		}
 		const botProvider = typeof b.provider === "string" && b.provider.trim() ? b.provider.trim() : deploymentProvider;
-		if (botProvider !== deploymentProvider && b.api_key_env === undefined) {
-			errors.push(`[config] ${at}.api_key_env: required when overriding provider to "${botProvider}"`);
-		}
 		if (botProvider !== deploymentProvider && b.model === undefined) {
 			errors.push(`[config] ${at}.model: required when overriding provider to "${botProvider}"`);
 		}
@@ -404,12 +386,6 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 	const tinyfishKeyEnv = typeof raw.tinyfish_key_env === "string" ? raw.tinyfish_key_env : "tiny_fish_api_key";
 	const routerSecretEnv = typeof raw.router_secret_env === "string" ? raw.router_secret_env : "router_secret";
 	const defaultProvider = typeof raw.provider === "string" ? raw.provider.trim() : "deepseek";
-	// Existing configs keep their exact DeepSeek behavior; the generic key wins when present.
-	const defaultApiKeyEnv = typeof raw.api_key_env === "string"
-		? raw.api_key_env
-		: typeof raw.deepseek_key_env === "string"
-			? raw.deepseek_key_env
-			: "deepseek_api_key";
 	const defaultModel = typeof raw.model === "string" ? raw.model : "deepseek-v4-flash";
 	const defaultEffort = typeof raw.reasoning_effort === "string" ? raw.reasoning_effort : "medium";
 	const defaultThreshold = num("compaction_threshold", 128000, 1, Number.MAX_SAFE_INTEGER);
@@ -420,11 +396,10 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 		? raw.telegram_admins.map((value) => normalizeTelegramAdmin(value)!)
 		: [];
 
-	const bots: BotConfig[] = botList.map((b, index) => {
+	const bots: BotConfig[] = botList.map((b) => {
 		const tokenEnv = b.token_env as string;
 		const toolsRaw = (b.tools ?? {}) as Record<string, unknown>;
 		const provider = typeof b.provider === "string" ? b.provider.trim() : defaultProvider;
-		const apiKeyEnv = typeof b.api_key_env === "string" ? b.api_key_env : defaultApiKeyEnv;
 		return {
 			id: b.id as string,
 			name: typeof b.name === "string" && b.name ? b.name : (b.id as string),
@@ -434,8 +409,6 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 			samplingCooldownMs: typeof b.sampling_cooldown_ms === "number" ? b.sampling_cooldown_ms : defaultSamplingCooldown,
 			provider,
 			model: typeof b.model === "string" ? b.model : defaultModel,
-			apiKeyEnv,
-			providerApiKey: needEnv(apiKeyEnv, `bots[${index}].api_key_env "${apiKeyEnv}"`),
 			reasoningEffort: typeof b.reasoning_effort === "string" ? b.reasoning_effort : defaultEffort,
 			compactionThreshold: typeof b.compaction_threshold === "number" ? b.compaction_threshold : defaultThreshold,
 			compactionKeepRecent: typeof b.compaction_keep_recent === "number" ? b.compaction_keep_recent : defaultKeepRecent,

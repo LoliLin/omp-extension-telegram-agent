@@ -1,9 +1,8 @@
 {
-	"//": "Legacy JSON example. Prefer telegram.config.example.ts. Secrets stay in .env; this file contains env key names only.",
+	"//": "Legacy JSON example. Prefer telegram.config.example.ts. LLM authentication belongs to Pi.",
 	"group_peer_id": 1234567890,
 	"router_secret_env": "router_secret",
 	"provider": "deepseek",
-	"api_key_env": "llm_api_key",
 	"tinyfish_key_env": "tinyfish_api_key",
 	"auxiliary_visual_model": "gpt-5.6-luna-low",
 	"db_path": "data/agent.db",

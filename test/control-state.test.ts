@@ -21,8 +21,6 @@ function bot(id: string, routingP: number, cooldownMs: number): BotConfig {
 		samplingCooldownMs: cooldownMs,
 		provider: "deepseek",
 		model: "model",
-		apiKeyEnv: "test_api_key",
-		providerApiKey: "test-key",
 		reasoningEffort: "medium",
 		compactionThreshold: 128_000,
 		compactionKeepRecent: 20_000,

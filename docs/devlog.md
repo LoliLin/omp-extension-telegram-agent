@@ -613,3 +613,10 @@
 - 100,000连续message id两次逐字节相同，0.66/0.34每条恰落一个桶且观测在容差内；fixture另锁duplicate canonical、explicit优先级、empty/1/N-bot、override、无身份、invalid entities、readonly拒写、16 MiB log bound与privacy denylist。
 - 当前deployment验收快照随新增消息得到2,046 probability样本：bot-1 1,372（67.06%）、bot-2 674（32.94%）；daemon partial started 580/289（66.74/33.26%），公开消息406/374（52.05/47.95%）。它相对调查基线多出新样本而仍在同一分布；这再次证明routing_p是response opportunity而不是最终群发言配额，不授权改采样或busy重分配。
 - Cache impact: **NONE**——审计是显式离线本地命令，0 provider/LLM call、0 runtime写入，不改router、system/tools/message/summary grammar、context epoch或每turn token。
+
+## 2026-08-08 (70) — 收回项目provider credential边界
+
+- `BotConfig`与daemon model preflight不再持有provider key或env key；`configureBotModelRuntime()`只用Pi catalog/auth status验证`provider/model`，生产路径已删除`setRuntimeApiKey()`调用。unknown model与unauthenticated provider只暴露固定category和非敏感模型identity。
+- canonical TypeScript schema、typed/legacy examples与`.env.example`删除`api_key_env` / `deepseek_key_env` / provider secret。loader仍接受旧deployment字段但直接丢弃，即使它们引用不存在的env也不会阻断启动；Telegram、TinyFish和router secret边界不变。
+- config/runtime targeted 28 pass / 95 assertions；全量347 / 4709、`bun run check`和cache v5 golden通过。shared Pi runtime/default settings与无密钥向导继续由T13j2/T13j3完成，因此REQ-PLAT-0002尚不勾选。
+- Cache impact: **NONE**——只改变启动时credential/config来源，不改system/tool/message/summary grammar、context epoch或每turn provider调用/token；同一显式模型的provider-visible bytes不变。

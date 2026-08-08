@@ -48,7 +48,6 @@ function makeEnvDir(bots: unknown = VALID_BOTS, extraEnv: Record<string, string>
 	const lines = [
 		"telegram_bot_alpha: 123:AAA",
 		"telegram_bot_beta: 456:BBB",
-		"deepseek_api_key: sk-test",
 		"tiny_fish_api_key: tf-test",
 		...Object.entries(extraEnv).map(([k, v]) => `${k}: ${v}`),
 	];
@@ -83,7 +82,6 @@ function makeTypedExampleDir(): string {
 	const dir = mkdtempSync(join(tmpdir(), "typed-config-example-"));
 	writeFileSync(join(dir, ".env"), [
 		"telegram_bot_token: 123:EXAMPLE",
-		"llm_api_key: sk-example",
 		"tinyfish_api_key: tf-example",
 		"router_secret: fixture-only",
 	].join("\n"));
@@ -107,7 +105,7 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 				return {
 					groupPeerId: config.groupPeerId,
 					telegramAdmins: config.telegramAdmins,
-					bots: config.bots.map(({ token: _token, providerApiKey: _key, personaPath, ...bot }) => ({
+					bots: config.bots.map(({ token: _token, personaPath, ...bot }) => ({
 						...bot,
 						personaPath: personaPath.slice(personaPath.lastIndexOf("/") + 1),
 					})),
@@ -152,8 +150,8 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 		const dir = makeTypedExampleDir();
 		try {
 			const config = loadConfig(dir);
-			expect(config.bots.map((bot) => [bot.id, bot.name, bot.apiKeyEnv])).toEqual([
-				["friend", "Mochi", "llm_api_key"],
+			expect(config.bots.map((bot) => [bot.id, bot.name, bot.provider, bot.model])).toEqual([
+				["friend", "Mochi", "deepseek", "deepseek-v4-flash"],
 			]);
 			expect(config.telegramAdmins).toEqual([]);
 			expect(config.bots[0]!.tools.search).toBe(false);
@@ -286,9 +284,7 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 		try {
 			const config = loadConfig(dir);
 			const a = config.bots[0]!;
-			expect([a.provider, a.model, a.apiKeyEnv, a.providerApiKey]).toEqual([
-				"deepseek", "custom-model", "deepseek_api_key", "sk-test",
-			]);
+			expect([a.provider, a.model]).toEqual(["deepseek", "custom-model"]);
 			expect(a.routingP).toBe(0.3);
 			expect(a.samplingCooldownMs).toBe(0);
 			expect(a.model).toBe("custom-model");
@@ -300,66 +296,72 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 		}
 	});
 
-	test("PLAT AC5: deployment and per-bot provider/model/auth env resolve independently", () => {
-		const globalDir = makeEnvDir(VALID_BOTS, { anthropic_api_key: "sk-ant-test" }, {
+	test("PLAT-0002 R3: deployment and per-bot provider/model selection stays independent of project secrets", () => {
+		const globalDir = makeEnvDir(VALID_BOTS, {}, {
 			provider: "anthropic",
 			model: "claude-sonnet-4-6",
-			api_key_env: "anthropic_api_key",
+			api_key_env: "missing_legacy_key",
 		});
 		const mixedDir = makeEnvDir([
-			{ ...VALID_BOTS[0], api_key_env: "alternate_deepseek_key" },
+			{ ...VALID_BOTS[0], api_key_env: "missing_legacy_deepseek_key" },
 			{
 				...VALID_BOTS[1],
 				provider: "anthropic",
 				model: "claude-sonnet-4-6",
-				api_key_env: "anthropic_api_key",
+				api_key_env: "missing_legacy_anthropic_key",
 			},
-		], { anthropic_api_key: "sk-ant-test", alternate_deepseek_key: "sk-ds-alt" });
+		]);
 		try {
 			const globalBots = loadConfig(globalDir).bots;
-			expect(globalBots.map((bot) => [bot.provider, bot.model, bot.apiKeyEnv, bot.providerApiKey])).toEqual([
-				["anthropic", "claude-sonnet-4-6", "anthropic_api_key", "sk-ant-test"],
-				["anthropic", "claude-sonnet-4-6", "anthropic_api_key", "sk-ant-test"],
+			expect(globalBots.map((bot) => [bot.provider, bot.model])).toEqual([
+				["anthropic", "claude-sonnet-4-6"],
+				["anthropic", "claude-sonnet-4-6"],
 			]);
 			const mixedBots = loadConfig(mixedDir).bots;
-			expect(mixedBots.map((bot) => [bot.provider, bot.model, bot.apiKeyEnv, bot.providerApiKey])).toEqual([
-				["deepseek", "deepseek-v4-flash", "alternate_deepseek_key", "sk-ds-alt"],
-				["anthropic", "claude-sonnet-4-6", "anthropic_api_key", "sk-ant-test"],
+			expect(mixedBots.map((bot) => [bot.provider, bot.model])).toEqual([
+				["deepseek", "deepseek-v4-flash"],
+				["anthropic", "claude-sonnet-4-6"],
 			]);
+			expect(Object.keys(mixedBots[0]!)).not.toContain("apiKeyEnv");
+			expect(Object.keys(mixedBots[0]!)).not.toContain("providerApiKey");
 		} finally {
 			rmSync(globalDir, { recursive: true, force: true });
 			rmSync(mixedDir, { recursive: true, force: true });
 		}
 	});
 
-	test("PLAT R2: provider overrides require explicit model/auth env and missing secrets fail closed", () => {
+	test("PLAT-0002 R3: provider overrides require a model but never a project auth env", () => {
 		const missingShapeDir = makeEnvDir([{ ...VALID_BOTS[0], provider: "anthropic" }]);
-		const missingSecretDir = makeEnvDir([
+		const ignoredSecretDir = makeEnvDir([
 			{
 				...VALID_BOTS[0],
 				provider: "anthropic",
 				model: "claude-sonnet-4-6",
-				api_key_env: "anthropic_api_key",
+				api_key_env: "definitely_not_in_env",
 			},
 		]);
 		try {
-			expect(() => loadConfig(missingShapeDir)).toThrow(/api_key_env[\s\S]*model/);
-			expect(() => loadConfig(missingSecretDir)).toThrow(/anthropic_api_key.*empty or missing/);
+			expect(() => loadConfig(missingShapeDir)).toThrow(/model/);
+			expect(loadConfig(ignoredSecretDir).bots[0]).toMatchObject({
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+			});
 		} finally {
 			rmSync(missingShapeDir, { recursive: true, force: true });
-			rmSync(missingSecretDir, { recursive: true, force: true });
+			rmSync(ignoredSecretDir, { recursive: true, force: true });
 		}
 	});
 
-	test("PLAT R8: deepseek_key_env remains a zero-migration alias", () => {
-		const dir = makeEnvDir(VALID_BOTS, { alternate_deepseek_key: "sk-legacy" }, {
-			deepseek_key_env: "alternate_deepseek_key",
+	test("PLAT-0002 AC3: legacy provider key fields are accepted then discarded", () => {
+		const dir = makeEnvDir(VALID_BOTS, {}, {
+			deepseek_key_env: "missing_legacy_key",
+			api_key_env: "also_missing",
 		});
 		try {
-			expect(loadConfig(dir).bots.map((bot) => [bot.provider, bot.apiKeyEnv, bot.providerApiKey])).toEqual([
-				["deepseek", "alternate_deepseek_key", "sk-legacy"],
-				["deepseek", "alternate_deepseek_key", "sk-legacy"],
-			]);
+			const bots = loadConfig(dir).bots;
+			expect(bots.map((bot) => bot.provider)).toEqual(["deepseek", "deepseek"]);
+			expect(JSON.stringify(bots)).not.toContain("missing_legacy_key");
+			expect(JSON.stringify(bots)).not.toContain("also_missing");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -412,13 +414,12 @@ describe(".env.example (REQ-OPS-0001 R1)", () => {
 	test("example file is colon format and parses to expected keys", () => {
 		const env = parseEnvFile(join(process.cwd(), ".env.example"));
 		expect(env.telegram_bot_token).toBe("123456:REPLACE_WITH_BOTFATHER_TOKEN");
-		expect(env.llm_api_key).toBe("REPLACE_WITH_PROVIDER_KEY");
+		expect(env.llm_api_key).toBeUndefined();
 		expect(env.tinyfish_api_key).toBe("REPLACE_WITH_TINYFISH_KEY");
 		expect(env.router_secret).toBe("REPLACE_WITH_RANDOM_LOCAL_SECRET");
 		expect(env.auxiliary_visual_model).toBeUndefined();
 		expect(Object.keys(env).sort()).toEqual([
 			"gpg_key_passphrase",
-			"llm_api_key",
 			"router_secret",
 			"telegram_bot_token",
 			"tinyfish_api_key",

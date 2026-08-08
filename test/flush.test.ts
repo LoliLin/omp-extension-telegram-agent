@@ -54,8 +54,6 @@ function makeRuntime(options: {
 		samplingCooldownMs: options.samplingCooldownMs ?? 2000,
 		provider: "deepseek",
 		model: "test-model",
-		apiKeyEnv: "test_api_key",
-		providerApiKey: "test-key",
 		reasoningEffort: "medium",
 		compactionThreshold: 128000,
 		compactionKeepRecent: 20000,

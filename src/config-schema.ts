@@ -21,8 +21,6 @@ export interface TelegramBotConfigInput {
 	sampling_cooldown_ms?: number;
 	provider?: string;
 	model?: string;
-	/** Name of the .env entry containing this bot's provider credential. */
-	api_key_env?: string;
 	reasoning_effort?: string;
 	compaction_threshold?: number;
 	compaction_keep_recent?: number;
@@ -36,12 +34,9 @@ export interface TelegramConfigInput {
 	router_secret_env?: string;
 	db_path?: string;
 	tinyfish_key_env?: string;
-	/** Legacy DeepSeek-only alias; prefer api_key_env. */
-	deepseek_key_env?: string;
 	auxiliary_visual_model?: string;
 	provider?: string;
 	model?: string;
-	api_key_env?: string;
 	reasoning_effort?: string;
 	compaction_threshold?: number;
 	compaction_keep_recent?: number;

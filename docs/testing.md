@@ -67,6 +67,7 @@ bun run scripts/analyze-routing.ts                    # 只读、零网络的cur
 | 测试体系修复（REQ-TEST-0001） | ✅ | 2026-08-07：TinyFish 真实调用迁到 env gate（无 .env 时 skip）；cache golden 补 tools hash（7b1983d95e25，与 Phase 6 历史一致）+ compaction summary prompt hash；is_bot 判断下沉到 routeMessage 单一权威点（daemon 前置判断移除）；e2e 脚本按断言 exit code（compaction 未发生 exit≠0、轮询替代固定 sleep、e2e-agent 无 run 完成 exit≠0、manual 版 epoch 未推进 exit≠0）；analyze 脚本同步真实 compaction/回落（60 runs 回放：3 次真实 compaction 正确识别、幻影 0）；盲区补测：run_js 代码长度上限/同步异常、serialize vision 替换/(edited)/text+media/跨天分隔、ingest forward_origin/sender_chat |
 | 配置体系（REQ-CONF-0001 / ONBOARD T13b） | ✅ | 2026-08-08 `telegram.config.ts`与legacy JSON走同一validator/normalizer；Bun和Node+jiti加载同一typed fixture结果等价，双默认文件/坏override扩展fail-fast，typed example真实加载并纳入typecheck。既有单/三bot、外置persona、provider、概率/数值验证保持；私有persona默认ignore且`git ls-files personas`只允许README与中英模板。cache schema仍v5，golden fixture改用公开模板。 |
 | provider 配置（REQ-PLAT-0001 T11） | ✅ | 2026-08-08 deployment/per-bot `provider + model + api_key_env`、DeepSeek零迁移alias、跨provider fail-closed、每bot隔离Pi runtime；DeepSeek/Anthropic catalog与fake auth routing通过，cache v5不变。 |
+| Pi auth唯一来源（REQ-PLAT-0002 T13j1） | ✅ key boundary / ⏳ shared runtime + onboarding | 2026-08-08 canonical schema/examples/`.env.example`不再含provider key；legacy key字段指向不存在env仍可加载且从`BotConfig`丢弃；fake runtime锁0次credential injection并区分unknown/unauthenticated安全错误。config/runtime targeted 28 pass / 95 assertions；全量347 / 4709、typecheck、cache v5 golden通过。 |
 | N-bot composition（REQ-PLAT-0001 T12） | ✅ fake / ⏳ opt-in real C | 2026-08-08 1/2/3-bot真实config loader→identity state→独立runtime→Poller→router→IPC global/filter stats全链；`--bot C`与未知id fail-fast。新增6 tests / 61 assertions；真实C token当前不存在，runbook已记录完整smoke/回滚清单。 |
 | portable Pi launcher（REQ-ONBOARD-0001 T13a） | ✅ bootstrap / ⏳ real Telegram credential smoke | 2026-08-08 四个 Pi package 精确锁定 registry 0.84.1、lock 无 file dependency；launcher fake fresh/installed/failure 共4 tests，项目与无 `.env`/config/persona/node_modules/sibling Pi 的隔离目录均以 `bun run pi --version` 输出0.84.1。 |
 | atomic onboarding config（REQ-ONBOARD-0001 T13c） | ✅ core | 2026-08-08 `test/onboarding-config.test.ts` 7 cases覆盖fresh三文件+final loader/0600、existing deny、peer/token/provider/model/persona validation、第二次rename失败全rollback、confirmed全量backup+env merge、existing validate/editor exact round-trip+confirmed replace及duplicate env key。events仅phase/相对path；secret不进config/event/error。search=false首配不要求TinyFish key。 |
@@ -88,7 +89,7 @@ bun run scripts/analyze-routing.ts                    # 只读、零网络的cur
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |
 | threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ⏳ Phase 9 | - |
-| 当前全量回归 | ✅ | 2026-08-08 `bun test`：347 pass / 0 fail / 4700 assertions；`bun run check` 通过；cache v5 golden 6/6 |
+| 当前全量回归 | ✅ | 2026-08-08 `bun test`：347 pass / 0 fail / 4709 assertions；`bun run check` 通过；cache v5 golden 6/6 |
 
 ## 已知 flaky
 
