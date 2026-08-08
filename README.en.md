@@ -2,90 +2,77 @@
 
 [中文](README.md) · [English](README.en.md) · [中文用户指南](docs/user-guide/zh/src/README.md) · [English user guide](docs/user-guide/en/src/README.md)
 
-Run 1..N configurable AI companions as long-lived members of one Telegram supergroup, with setup, observation, and controls rendered in Pi's native transcript.
+Run 1..N AI bots, each with its own persona, as long-lived members of one Telegram supergroup, joining conversations by probabilistic routing. The Pi terminal UI is the observation and control surface.
 
-One deployment serves one group. Each bot has its own token, persona, provider/model, session, routing, tools, and telemetry. Adding a bot does not require production code changes, and closing Pi does not stop the local daemon.
+The design philosophy is four points, and each one pays off directly:
 
-## Start in three steps
+- **Fast**: a local daemon runs permanently, and incoming messages route straight to the right bot — no queue, no cold start.
+- **Context-optimized**: the provider prefix cache means repeated context is not billed again; group messages only append the incremental part.
+- **Simple**: one configuration file, one structure, no intermediate concepts to learn.
+- **Cheap**: the result of the three above — no unnecessary model calls, no re-sent cached tokens.
 
-1. Prepare a Telegram supergroup ID and at least one BotFather token. Add every bot to the target group and disable BotFather privacy mode so it can receive ordinary group messages.
-2. Install [Bun](https://bun.sh/), clone this repository, and run `bun run pi`. Use Pi's native `/login` to authenticate a model provider and `/model` to select the default model; this project reuses those Pi settings and credentials.
-3. Enter `/tg config` in Pi, confirm the displayed Pi model, choose a public persona template, and provide the Telegram values. The wizard validates and atomically writes local files, then opens the all-bots feed only after the daemon reports ready.
+## Fast deploy
 
-> Pi's current native `input` dialog does not mask passwords. The Telegram token remains visible while you enter it, so use a private terminal and do not record or share the screen. Model authentication remains owned by Pi; `/tg config` never asks for or stores a provider key.
+1. Prepare a Telegram supergroup ID and at least one BotFather token. Add every bot to the group and disable BotFather privacy mode, or it cannot see ordinary group messages.
+2. With [Bun](https://bun.sh/) installed, clone this repository and run `bun run pi`. In Pi, authenticate a model provider with `/login` and pick the default model with `/model`. The project reuses Pi's credentials as-is.
+3. Enter `/tg config` in Pi and follow the wizard: group ID, persona template, token. It validates and writes local files, then opens the all-bots feed once the daemon reports ready.
 
-Read [Installation and first setup](docs/user-guide/en/src/getting-started.md) for the complete preparation flow.
+> Pi's current input dialog does not mask passwords: the Telegram token stays visible while you type it. Use a private terminal; do not record or share your screen.
 
-## What it provides
+The full walkthrough is in [Installation and first setup](docs/user-guide/en/src/getting-started.md).
 
-- Raw Telegram Bot API long polling, canonical SQLite history, and isolated sessions for 1..N agents.
-- Mention, reply, configured-name, and deterministic probability routing with availability and cooldown gates.
-- Telegram-native Markdown formatting via classic message entities, stickers, on-demand media vision, optional search, and constrained JavaScript computation.
-- Pi-native transcript, image components, footer telemetry, hierarchical command completion, and editor compose; the plugin does not implement its own viewport or terminal protocol.
-- Append-only provider context, a stable cached prefix, bounded suffixes, and compaction to avoid unnecessary calls and repeated tokens.
-
-Current boundary: one working directory safely hosts one group deployment. Multiple groups require isolated working directories, data, databases, sessions, PID files, and sockets. This is not a SaaS or multi-tenant service, and configuration is not hot-reloaded. Different config files do not namespace shared history, offsets, or process resources; read [Daily operations: multiple groups](docs/user-guide/en/src/operations.md#why-working-directories-must-be-isolated) for the reason and safe setup.
-
-## Daily use
+## Everyday commands
 
 ```bash
 bun run start      # Start the daemon in the background
-bun run status     # Inspect controlled process state
-bun run pi         # Open project Pi with the Telegram extension
-bun run restart    # Gracefully restart the deployment
-bun run stop       # Stop gracefully
+bun run pi         # Open Pi with the Telegram extension
+bun run status     # Inspect process state
+bun run restart    # Graceful restart
+bun run stop       # Graceful stop
 ```
 
-Enter `/tg ` in Pi to use native command completion:
+In the Telegram group itself, `/help` and `/status` report bot state; `/compact` and `/set` are restricted to admins listed in `telegram_admins`.
 
-| Command | Result |
-| --- | --- |
-| `/tg config` | Set up, validate, edit, or explicitly back up and replace local configuration |
-| `/tg attach [bot]` | Mount the global or one-bot feed and send from the editor |
-| `/tg compose [bot]` | Restore feed scope or pin one bot |
-| `/tg compose off` | Return the editor to the Pi agent |
-| `/tg more` / `/tg detach` | Load older history / disconnect the live feed |
-| `/tg panel [bot\|off]` | Select or restore Pi-native footer telemetry |
-| `/tg status [bot]` | Show lifetime and latest usage details |
-| `/tg start` / `restart` / `stop` / `status-daemon` | Manage the daemon from Pi |
+For the in-Pi `/tg` commands (attach / compose / panel / more, and so on), see [Chatting and observing in Pi](docs/user-guide/en/src/using-pi.md).
 
-After `attach <bot>`, the editor sends directly as that bot. A global attach opens Pi's native selector on every submission when several bots exist, and sends directly when only one exists. `compose <bot>` pins an identity, `compose off` temporarily returns input to Pi, and bare `compose` restores feed scope. An unknown outcome restores the text and closes compose without retrying; inspect the group before sending again.
+## Configuration
 
-## Configuration files
+There is exactly one configuration track: `telegram.config.ts` holds every non-secret setting, `.env` holds secrets such as the Telegram token and `tiny_fish_api_key`, and provider/model authentication stays in Pi, outside this repository. A minimal config:
 
-`/tg config` is the recommended entry point. For manual setup:
+```ts
+import { defineConfig } from "./src/config.ts";
 
-```bash
-cp telegram.config.example.ts telegram.config.ts
-cp .env.example .env
-cp personas/template.en.md personas/friend.local.md
+export default defineConfig({
+	group_peer_id: 1234567890, // supergroup ID
+	bots: [
+		{
+			id: "friend",
+			name: "Mochi", // display name in the group, also a trigger keyword
+			token_env: "telegram_bot_token", // key name in .env
+			persona_path: "personas/template.en.md",
+			routing_p: 0.1, // chance of joining when not addressed
+			sticker_sets: [],
+			tools: { send: true, search: false, run_js: true },
+		},
+	],
+});
 ```
 
-- `telegram.config.ts`: trusted local TypeScript containing non-secret schema and environment-key names, with comments and editor types.
-- `.env`: the project's `key: value` colon format for Telegram tokens, an optional TinyFish key, and the router secret; model credentials do not belong here.
-- `personas/*.local.md`: local personas, ignored by Git by default.
+Every omitted field has a default (see the comments in `telegram.config.example.ts`). Adding a second bot means adding one more entry to `bots` — no code changes. Multiple bots, provider overrides, and routing rules are covered in [Configuration](docs/user-guide/en/src/configuration.md).
 
-Read [Configuration](docs/user-guide/en/src/configuration.md) for a minimal one-bot config, additional bots, provider overrides, and routing rules. Tracked examples contain no valid credentials or private personas.
+One working directory hosts one group; run multiple groups from isolated working directories (why and how: [Daily operations](docs/user-guide/en/src/operations.md)).
 
 ## When something fails
 
-- Pi model not ready before `/tg config` writes: exit the wizard, use Pi `/login` and `/model`, then retry; no deployment files are created.
-- Daemon not ready after `/tg config`: the valid files remain. Run `/tg status-daemon`, inspect `data/daemon.log`, fix Telegram or networking issues, then run `/tg restart`.
-- `unknown bot id`: use dynamic `/tg ` completion or check the bot `id` in `telegram.config.ts`.
-- `restart already in progress`: wait for the controlled restart instead of starting another daemon.
-- Telegram `409`: another poller probably uses the same token; follow the [daemon runbook](docs/runbooks/daemon.md) for a controlled restart.
-- Compose reports an unknown outcome: inspect the Telegram group and retry only if the message is absent.
+- `unknown bot id`: check the `id` in `telegram.config.ts`, or use dynamic `/tg ` completion.
+- `restart already in progress`: wait for the current restart instead of launching a second daemon.
+- Telegram `409`: another poller is using the same token; do a controlled restart per the [daemon runbook](docs/runbooks/daemon.md).
+- For other symptoms, see [Troubleshooting](docs/user-guide/en/src/troubleshooting.md).
 
-Read [Troubleshooting](docs/user-guide/en/src/troubleshooting.md) and the [daemon runbook](docs/runbooks/daemon.md) for recovery procedures.
+## Cost control
 
-## Why it avoids unnecessary calls and tokens
+Routing, deduplication, and state are handled by deterministic code — no model calls spent on them. When the provider prefix cache hits, repeated system prompts and history are not billed as new tokens. Media vision is off by default and budget-capped when enabled. Compaction only runs past a context threshold. Measure the real effect with local telemetry (`bun run debug`); the mechanisms are documented in the [cost design overview](docs/user-guide/en/src/design-cost.md).
 
-Deterministic code owns routing, deduplication, state, and UI. The provider-visible prefix stays stable, dynamic group content enters only a bounded suffix, media vision is off by default and budgeted when enabled, and compaction occurs only at a context boundary. The project promises no fixed savings percentage; use the local telemetry retention window to measure your deployment.
+## Development
 
-Read the [cost design overview](docs/user-guide/en/src/design-cost.md) for the seven mechanisms and their authoritative implementation documents.
-
-## Development and maintenance
-
-Users do not need the internal architecture to complete setup. Contributors and coding agents should start with [AGENTS.md](AGENTS.md) and the [development guide](docs/engineering/development-guide.md). The full map is in the [documentation index](docs/index.md).
-
-The current HEAD tracks only public persona templates. Older Git history may still contain removed deployment personas. The repository has not rewritten history and cannot replace necessary credential rotation.
+To modify the project, start with [AGENTS.md](AGENTS.md) and the [development guide](docs/engineering/development-guide.md). The full documentation index is [docs/index.md](docs/index.md).
