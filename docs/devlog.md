@@ -605,3 +605,11 @@
 - AGENTS只增加一条高信号最少机制规则；development/maintainer把“少一层、一个tool、一次模型调用、一个动态字段”变成动手前检查，同时明确不能借极简削弱transaction、timeout、安全、可观察性或测试。
 - docs test机械检查权威链接、双语四类隔离资源、README入口与六项成本机制；双mdBook/link check和typecheck按目标验证执行。
 - Cache impact: **NONE**——只改开发/用户文档与文档测试，runtime、provider/session/IPC/DB bytes、context epoch、模型调用与每turn token不变。
+
+## 2026-08-08 (69) — 建立脱敏只读routing审计
+
+- 新增`bun run scripts/analyze-routing.ts`：沿production loader取当前effective routing override与daemon router secret，以Bun SQLite readonly模式打开现有DB，不跑schema/migration/PRAGMA write。SQLite只返回canonical chat/message identity与内部trigger code；JavaScript不持有或输出正文、bot identity、peer、secret、message id、persona/path或token。
+- current-effective replay分别聚合probability assignment、mention/reply/name、bot ignored、LLM runs与public messages；可选daemon log按bot序号统计started/busy/cooldown及explicit lifecycle。日志存在也只代表process-local片段，固定标`partial`，缺失标`unavailable`，截断/未知bot/坏行单独计数且不伪造历史0。
+- 100,000连续message id两次逐字节相同，0.66/0.34每条恰落一个桶且观测在容差内；fixture另锁duplicate canonical、explicit优先级、empty/1/N-bot、override、无身份、invalid entities、readonly拒写、16 MiB log bound与privacy denylist。
+- 当前deployment验收快照随新增消息得到2,046 probability样本：bot-1 1,372（67.06%）、bot-2 674（32.94%）；daemon partial started 580/289（66.74/33.26%），公开消息406/374（52.05/47.95%）。它相对调查基线多出新样本而仍在同一分布；这再次证明routing_p是response opportunity而不是最终群发言配额，不授权改采样或busy重分配。
+- Cache impact: **NONE**——审计是显式离线本地命令，0 provider/LLM call、0 runtime写入，不改router、system/tools/message/summary grammar、context epoch或每turn token。
