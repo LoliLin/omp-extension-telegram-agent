@@ -1,60 +1,70 @@
-# REQ-UI-0003: TUI 底部可观测性面板
+# REQ-UI-0003: 用 Pi 原生 widget 呈现实时可观测性
 
-- **Status:** Draft
+- **Status:** Done (2026-08-08)
 - **Priority:** P2
-- **Source:** 用户 REQ-LIST 第 5 条
-- **依赖:** 无硬依赖；若 REQ-UI-0001 完成则在其插件形态上实现（pi 原生支持很多遥测展示）
+- **Source:** 原 TUI 面板需求；2026-08-08 因数组字符串 widget/hard truncation 不符合原生组件要求而重新打开
+- **依赖:** REQ-UI-0004
 
 ## 问题
 
-api 开销、context tokens、累计 token、cache hit 率等数据目前只能在 `llm_runs` 表和日志里查，日常观察一个「住在群里的 bot 健不健康、烧不烧钱」没有直接窗口。
+当前 panel 每次把 ANSI 字符串数组重新传给 `setWidget`，并硬截到 60 字符；它没有使用 Pi theme/组件布局，也继承了旧 Pi 0.83 的错误探针结论。
 
 ## 目标
 
-TUI 最下端固定一个状态面板，实时展示关键可观测性数据，attach 期间随事件更新。
+用 `ctx.ui.setWidget` 的 component factory 和 Pi `Container`/`Text` 组件显示实时 usage，宽度、换行与 theme 全交给 Pi。
 
 ## 非目标
 
-- 不做历史趋势图 / 图表（面板是当前值与累计值，趋势分析仍靠 `analyze-context-window.ts`）。
-- 不改遥测采集本身（`llm_runs` schema 不变）。
+- 不新增 telemetry schema。
+- 不做趋势图。
+- 不把 llm_runs 复制到 Pi session。
 
 ## 需求
 
-- **R1:** 面板内容（每 bot 一栏或全局汇总，视 attach 模式）：最近一次 run 的 context tokens / cache read / cache miss / 成本（可算时）；会话累计 input/output tokens 与累计成本；hit ratio（累计 read/(read+miss)）；当前 context epoch。
-- **R2:** 数据通道：daemon 在 llm_run 落库时经 IPC 推送增量；snapshot 时附带累计值；TUI 不直连 DB。
-- **R3:** attach 到单 bot（REQ-UI-0002）时面板只显示该 bot；全局视角显示双 bot 并列或合计。
-- **R4:** 面板渲染不得影响主滚动区行为（follow=end、分页、LOCAL 标记不回归）。
+- **R1:** 每 bot 显示 epoch、最近 run context/read/miss、累计 input/output/cost、cache hit ratio；无数据时显示明确空态。
+- **R2:** widget 必须使用 component factory；不得传 ANSI 字符串数组、硬编码 60 列或自行 truncate。
+- **R3:** active feed 复用同一 IPC usage 数据；独立 `/tg panel [bot-id]` 可在未 attach 时订阅；切换/关闭 panel 必须 dispose 自己拥有的 socket。
+- **R4:** `/tg panel off` 移除 widget；`/tg status [bot-id]` 提供一次性 Pi 通知，均复用同一格式化逻辑。
+- **R5:** baseline `lastId` 与 live usage 合并仍防双计，数值与 `llm_runs` 一致。
 
 ## 验收标准
 
-- **AC1:** 面板数值与 `llm_runs` 表实时一致（抽一次 run 比对 context tokens / cache read / miss）。
-- **AC2:** 新 run 发生后 1s 内面板更新，无需重进。
-- **AC3:** 累计值跨 attach/detach 正确（daemon 侧累计，TUI 不负责加总）。
-- **AC4:** cache golden 不变；`bun test` + `bun run check` 全绿。
+- **AC1:** fake Pi host 证明 `setWidget` 收到 factory，factory 返回 Pi Component；不存在数组形式与 `truncateToWidth`。
+- **AC2:** 一次 usage push 后 widget 在 1 秒内刷新；窄宽度 render 不抛错。
+- **AC3:** attach filter、panel filter 与 stats 行一致；切换 filter 不保留旧 bot 行。
+- **AC4:** panel off/session shutdown 释放 standalone stats socket；active feed 不因隐藏 panel 被断开。
+- **AC5:** 聚合单测与 DB fixture 一致；`bun test` + `bun run check` + cache golden 通过。
 
 ## 约束
 
-- Cache impact: **NONE**（纯展示层）。
-- 成本：面板是「降低成本」的工具——hit ratio 与成本必须是最显眼的一等指标（与开发指南第三节的全局要求一致）。
+- Cache impact: **NONE**。
+- widget 仅展示 daemon 聚合数据，不直连 DB。
+- Pi host 负责宽度、wrap 与主题。
 
 ## 例子与边界 case
 
-- daemon 重启后累计值口径明确（本次进程累计 vs 全历史累计——建议显示两者或全历史，开工时定）。
-- 无 run 数据时（刚启动）面板显示占位而非报错。
+- 无 run：`A · ep0 · no runs yet`。
+- hit denominator 为 0：显示 `hit 0.0%`。
+- panel A → panel B：dispose A 订阅，只显示 B。
 
 ## 可观察性
 
-- 本 REQ 本身即是可观察性增强。
+本需求本身是可观察性入口；断线时 widget 显示恢复提示。
 
 ## 文档影响
 
-- `docs/architecture.md`（TUI / IPC 小节）、`docs/testing.md`。
+`docs/architecture.md`、`docs/testing.md`、`docs/runbooks/daemon.md`。
 
 ## 待决问题
 
-- 累计口径：进程级 vs 全历史（查 llm_runs 聚合）。倾向全历史 + 本次会话两行，开工时确认。
+无。
 
 ## 追溯
 
-- Plans: 待建
+- Plans: `../plans/completed/PLAN-20260808-native-pi-telegram-ui.md`
 - Commits: 从 `Requirement:` git trailer 查
+
+## 完成证据
+
+- fake Pi host 证明 widget 使用 component factory；active feed stats 复用、standalone panel socket ownership 与 shutdown cleanup 均有回归测试。
+- 全量测试、类型检查与 cache golden 通过。

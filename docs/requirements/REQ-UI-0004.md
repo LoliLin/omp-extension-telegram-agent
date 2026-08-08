@@ -1,79 +1,86 @@
-# REQ-UI-0004: Telegram 前端 pi 插件化——复用 pi 成果，废弃全部自绘前端
+# REQ-UI-0004: Telegram 前端成为真正的 Pi 原生 transcript 插件
 
-- **Status:** Approved
-- **Priority:** P1
-- **Source:** 2026-08-07 用户明确要求：「所有前端相关的轮子都应该在做成 pi 的插件之后废弃」「可以用 pi 命令跑起来」
-
-## 背景与教训
-
-REQ-UI-0001 的意图是「写成 pi 的插件 / 扩展来复用 pi 主程序的成果」，但第一版实现错误地以 R1 研究名义判断「插件形态不适合独立观察者」，转向自绘：`src/tui/index.ts` 用 `ProcessTerminal` + `TuiAltScreen` 自己实现了终端初始化、渲染循环、输入循环、alt-screen 管理、滚动检测——这些全部是 pi 主程序已经做好且持续演进的轮子。用户明确否决该方向。
-
-**原则：前端所有轮子（终端初始化 / 渲染循环 / 输入分发 / 主题 / 图像协议 / 状态栏）一律由 pi 提供；本项目前端 = pi 扩展 + 薄的数据/协议层。自绘 TUI 在插件形态落地后删除，不留双轨。**
+- **Status:** Done (2026-08-08)
+- **Priority:** P0
+- **Source:** 2026-08-08 用户纠正：现有实现把手写 viewport 藏进 `ctx.ui.custom`，不等于“完全用 Pi 组件渲染 Telegram 聊天”
 
 ## 问题
 
-1. 自绘 TUI 重复实现 pi 已有能力：alt-screen、渲染循环、键盘输入循环、resize 处理、图像 placement 生命周期——维护成本高且与 pi 演进脱节。
-2. 观察入口割裂：`bun run src/main.ts attach` 是独立进程，无法与 pi 会话共存（开 pi 就看不到群，看群就开不了 pi）。
-3. 自绘代码量 ~400 行，其中终端/渲染/输入 ~60% 是 pi 已有能力的重复实现。
+当前 `.pi/extensions/tg-extension.ts` 虽然注册了 `/tg`，但 `TgAttachView` 仍自行维护 `lines`、`scrollTop`、终端高度、分页轮询、键盘导航和 `render(): string[]`；`src/tui/engine.ts` 还自行拼 ANSI 颜色与展示文本。它只是运行在 Pi 扩展回调里，聊天窗口本身仍是自绘。
+
+错误实现的直接证据：
+
+- 生产 UI 代码从旧独立 TUI 的 389 行变成 extension + engine 的 617 行，没有减少。
+- 图片因手写 viewport 主动降级，未交给 Pi 的 transcript 图片生命周期管理。
+- 项目依赖的 Pi 0.84.1 已提供 fullscreen transcript 与 Kitty viewport cropping；完成态应直接接入这些宿主能力。
 
 ## 目标
 
-- `pi`（项目目录）→ `/tg attach [bot-id]`：pi 界面内全屏群历史（实时流 / 分页 / LOCAL 标记 / kitty 图像），q/esc 返回 pi，daemon 不受影响。
-- `/tg panel [bot-id]`：pi 界面常驻遥测 widget（复用 REQ-UI-0003 的数据通道）。
-- `/tg status [bot-id]`：一次性遥测汇总。
-- 自绘 TUI（`src/tui/index.ts`、`main.ts attach`）删除；仓库中不再有 ProcessTerminal / TuiAltScreen 使用点。
-- 扩展内**不**自行实现 pi 已有的东西：渲染循环、输入循环、alt-screen、主题系统、图像协议——全部用 pi-tui 组件（Text/Container/ScrollView/Image）与 `ctx.ui.custom` / `ctx.ui.setWidget` 呈现。
+Telegram 观察器是可安装、可自动发现的 Pi package。`/tg attach` 在 Pi 自己的 transcript 中挂载一个 TUI-only Telegram feed；Pi 拥有滚动、resize、输入、主题和图片 placement，项目只负责 IPC 数据、状态和 Pi 组件组合。
 
 ## 非目标
 
-- 不改 daemon / IPC 协议（复用 REQ-IPC/UI-0002/0003 已落地的协议：hello filter / 复合游标 / usage 推送 / mediaPath）。
-- 不做 pi 之外的 Web/原生前端。
-- 不把 pi 扩展作为 daemon 的替代（daemon 仍是后台常驻进程）。
+- 不把 daemon、Telegram ingestion 或 Agent runtime 搬进 Pi 进程。
+- 不改 SQLite、IPC wire format、provider prompt、消息序列化 grammar。
+- 不修改 `../pi` 上游源码来增加私有扩展 API。
+- 不把每条 Telegram 消息复制成 Pi session entry；Pi session 只保存一次 attach 锚点，真实历史仍以 SQLite 为权威。
 
 ## 需求
 
-- **R1:** 项目内 pi 扩展（`.pi/extensions/tg-extension.ts` 或等价，自动发现路径），注册 `/tg` 命令族：`attach [bot-id]` / `panel [bot-id]` / `status [bot-id]`。
-- **R2:** 数据/协议层提取为共享模块（如 `src/tui/engine.ts`）：IPC 客户端（hello filter / snapshot / 分页复合游标 / append / usage）、去重、渲染文本函数（消息行 / LOCAL 事件 / 面板行）、媒体路径解析。扩展与（如有）其他消费者共用；daemon 协议零变化。
-- **R3:** `attach` 视图：`ctx.ui.custom` 返回 pi-tui 组件树（ScrollView + Container + Text/Image）；实时 append、滚到顶部加载更早、日期分隔、消息/事件去重、`Bot X · LOCAL` 标记、kitty 图像内联（Image 组件，非 kitty 自动降级）；q / esc 关闭（done），daemon 存活。
-- **R4:** `panel`：`ctx.ui.setWidget` 常驻遥测（每 bot 或过滤单 bot：epoch / 最近 run / 累计 tokens / 成本 / hit ratio），usage 推送实时刷新；`status`：一次性汇总（notify 或 overlay）。
-- **R5:** 废弃删除：`src/tui/index.ts`、`src/main.ts` 的 attach 分支及相关 CLI 文档；`grep` 验证仓库无 ProcessTerminal / TuiAltScreen / TuiMainScreen 残留。
-- **R6:** 安装与文档：项目 `.pi/extensions/` 自动发现即插即用；runbook 写两种入口（daemon 起停照旧；观察一律 `pi` → `/tg …`）；research.md 修正 R1 结论。
-- **R7:** 扩展容错：daemon 未运行时报错并提示 `bun run src/main.ts start`；连接断开时视图内提示，daemon 重启后可重试；非法 bot-id 列出配置清单（沿用 main.ts 现有校验逻辑，迁入扩展）。
+- **R1 — Pi package 与版本闭环：** `package.json` 声明 `pi.extensions` 与 `pi-package`；项目提供使用本地依赖版本的启动命令。宿主 Pi 低于 0.84.1 时必须明确提示版本不兼容，不得静默走手写降级路径。
+- **R2 — 原生 transcript 接入：** extension 使用 `registerEntryRenderer` + `appendEntry` 挂载一个 TUI-only feed。聊天主视图不得使用 `ctx.ui.custom`、自定义 `render()`、`handleInput()`、行缓冲、scrollTop、终端 rows/columns 或 `truncateToWidth`。
+- **R3 — 组件边界：** feed 只组合 Pi 导出的 `Container`、`Box`、`Text`、`Markdown`、`Image`、`Spacer` 等组件并使用 callback 提供的 `theme`；宿主 transcript 负责滚动、resize、选择、快捷键与 Kitty placement/cropping。
+- **R4 — 薄数据层：** IPC 客户端只做 hello/filter、snapshot、复合游标分页、实时 append、去重、usage 聚合与媒体文件读取；不得含 ANSI 主题、消息卡片文本布局或终端逻辑。模块归属改为 `src/plugin/`，不再叫 `src/tui/`。
+- **R5 — 生命周期：** `/tg attach [bot-id]` 建立唯一 live feed；`/tg more` 取一页更早历史；`/tg detach` 断开 live feed 但保留屏幕内容；session shutdown/reload 必须 dispose socket/timer。公共 extension API 不提供宿主 transcript 的 scroll-top 事件，因此分页使用显式命令，不回退到轮询宿主内部状态。
+- **R6 — session 有界：** 一次 attach 最多追加一个自定义 Pi entry；snapshot、历史页和实时消息只存在于该 entry 的内存组件树，不逐条写入 Pi session，不进入 LLM context。
+- **R7 — 命令与运维：** 保留 `/tg panel|status|start|stop|status-daemon`；daemon 未运行、IPC 断开、非法 bot id、旧 Pi 版本都给出可执行的恢复提示。
+- **R8 — 删除 hack：** 删除 `TgAttachView`、`unitLines`、ANSI 样式常量、手写消息行渲染与 attach 的 polling viewport；extension + 数据层生产代码总行数必须低于当前 617 行基线。
 
 ## 验收标准
 
-- **AC1:** 项目目录运行 `pi` → `/tg attach` 全屏群历史（消息 / LOCAL / 分页 / 实时流）与 `/tg attach A` 单 bot 过滤行为与自绘版一致（对照 REQ-UI-0001 AC2、REQ-UI-0002 AC1）；q/esc 返回 pi 会话；daemon 独立存活。
-- **AC2:** `/tg panel` 常驻 widget 与 `llm_runs` 一致（抽一次 run 比对）；新 run 1s 内刷新；跨 attach/detach 累计正确。
-- **AC3:** `git grep -E "ProcessTerminal|TuiAltScreen" src/` 无结果；`src/tui/index.ts` 与 `main.ts attach` 分支已删除；`bun test` 全绿 + `bun run check` 通过。
-- **AC4:** cache golden 逐字节不变（provider payload 零变化）。
-- **AC5:** 无 pi 会话时 daemon 起停/配置校验等非前端路径行为不变（REQ-OPS/CONF 回归）。
+- **AC1:** `bun run pi` 使用项目声明的 Pi 版本，在项目目录自动加载 `/tg`；低于 0.84.1 的宿主由版本 guard 给出升级提示。
+- **AC2:** `/tg attach` 后，Telegram feed 作为 Pi transcript 的自定义 entry 出现；Pi 的 fullscreen 滚动、鼠标滚轮、resize 和返回 editor 均继续工作，用户无需进入/退出另一个手写窗口。
+- **AC3:** `rg` 在插件生产代码中找不到 `class TgAttachView|scrollTop|viewportRows|handleInput\(|truncateToWidth|\x1b\[`；聊天 entry renderer 返回 Pi 组件树。
+- **AC4:** snapshot、live append、`/tg more`、`/tg detach`、单 bot 过滤与断线提示都有自动化测试；任意时刻最多一个 live feed/socket。
+- **AC5:** Pi session 文件只增加 attach 锚点，不随 Telegram 消息数线性增长；custom entry 不进入 provider context，cache golden 逐字节不变。
+- **AC6:** `wc -l .pi/extensions/tg-extension.ts src/plugin/timeline.ts` 小于 617；`bun test`、`bun run check`、`test/cache.test.ts` 通过。
+- **AC7:** 真实 Pi TTY smoke 看到至少一条真实群消息；若有可读 PNG/JPEG/WebP/GIF，交由 Pi `Image` 内联，非图片能力终端显示 Pi 自带 fallback。
 
 ## 约束
 
-- Cache impact: **NONE**（纯前端形态变化；若实现中触 provider payload = 边界 bug）。
-- 协议兼容：复用现有 IPC 协议与 `src/ipc.ts` 类型，不新增 daemon 侧字段（除非确有必要，且按同 commit 双改原则）。
-- 废弃删除必须在插件形态验收通过后同 commit 完成（不留双轨）。
+- Cache impact: **NONE**。UI custom entry 必须是 TUI-only，不参与 LLM context；任何 provider-visible 差异均为边界 bug。
+- IPC 兼容：wire format 不变；分页继续用现有复合游标。
+- 性能：初始 snapshot 和每次 `/tg more` 各最多 100 条；媒体文件仍有 1 MiB 上限。
+- 安全：只读取 daemon 已经通过 IPC 提供的本地 media path；不新增远程输入执行面。
+- 运维：规范入口是 `bun run pi`，保证使用项目声明的依赖版本。
 
 ## 例子与边界 case
 
-- daemon 未启动时 `/tg attach`：报错提示启动命令，不崩溃。
-- attach 中途 daemon 重启：视图提示断开，重新执行 `/tg attach` 恢复。
-- 三 bot 配置下 `/tg attach C`：只显示 C 的 LOCAL 事件（服务端过滤，同 REQ-UI-0002）。
-- 非 kitty 终端：图像降级为占位符 + vision 描述（Image 组件内置）。
+- 已 attach A 时再次 `/tg attach B`：先 dispose A，再挂载 B，始终只有一个 live socket。
+- `/tg more` 到最早记录：状态显示“已到最早记录”，不再发请求。
+- session reload：历史 attach entry 以 detached 摘要呈现，不自动建立多个 socket；用户显式 `/tg attach` 才连接。
+- daemon 中途退出：feed 保留已有内容并显示断线状态；重启后重新 `/tg attach`。
 
 ## 可观察性
 
-- 扩展加载与命令执行日志走 pi 自身日志。
+- Pi footer status 显示 Telegram attached/detached/disconnected 与过滤 bot。
+- widget 显示 usage；连接失败保留可执行恢复命令。
 
 ## 文档影响
 
-- `docs/architecture.md`（TUI 小节重写为 pi 插件形态）、`docs/runbooks/daemon.md`（入口更新）、`docs/research.md`（R1 结论修正：插件形态成立）、`docs/testing.md`（前端测试策略：engine 单测 + 扩展加载测试 + 手动 /tg 验证）。
+- `docs/research.md`、`docs/architecture.md`、`docs/testing.md`、`docs/runbooks/daemon.md`、`docs/handoff.md`、`docs/devlog.md`。
 
 ## 待决问题
 
-无。
+无。0.84.1 public API 不暴露宿主 transcript scroll-top，显式 `/tg more` 已作为兼容公共 API 的分页交互。
 
 ## 追溯
 
-- Plans: 待建
+- Plans: `../plans/completed/PLAN-20260808-native-pi-telegram-ui.md`
 - Commits: 从 `Requirement:` git trailer 查
+
+## 完成证据
+
+- `bun test`：149 pass / 0 fail；`bun run check` 通过；cache golden 6/6。
+- 真实 Pi fullscreen TTY：`/tg attach A`、`/tg more`、`/tg detach` 均通过，真实群消息与原生组件可见。
+- 静态边界检查无 `TgAttachView` / scroll state / `handleInput()` / ANSI；生产代码 611 行，低于 617 行基线。

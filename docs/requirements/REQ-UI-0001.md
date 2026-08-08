@@ -1,63 +1,70 @@
-# REQ-UI-0001: 基于 pi-tui 插件化重做 Telegram 历史界面
+# REQ-UI-0001: 用 Pi 原生组件呈现 Telegram 消息与媒体
 
-- **Status:** Draft
-- **Priority:** P2
-- **Source:** 用户 REQ-LIST 第 1 条
+- **Status:** Done (2026-08-08)
+- **Priority:** P1
+- **Source:** 用户要求“完全用 Pi 的组件来渲染 Telegram 聊天，同时美观、减少代码”
+- **依赖:** REQ-UI-0004
 
 ## 问题
 
-当前 TUI（`src/tui/index.ts`）虽然依赖 `@earendil-works/pi-tui` 的组件（TuiAltScreen / ScrollView / Text），但实际是自绘的独立界面：媒体只显示占位符，无法展示图像；与 pi-tui 主程序的能力演进脱节。用户判断：写成 pi 的插件 / 扩展来复用 tui 更好，且 pi-tui 原生支持 kitty 图像协议，能直接展示图片。
+当前 engine 拼接 ANSI 字符串，extension 再切成行；这绕过 Pi theme 与消息组件，还导致图片在手写 viewport 中被降级。
 
 ## 目标
 
-Telegram 群历史界面以 pi-tui 的插件 / extension 形态实现，复用其渲染与组件能力；在支持 kitty graphics protocol 的终端中直接显示群里的图片与 sticker。
+群消息、bot 消息、LOCAL 事件、日期分隔与媒体全部由 Pi 组件树表达，并随 Pi theme 与 fullscreen transcript 自适应。
 
 ## 非目标
 
-- 不改 daemon、ingestion、agent 行为（纯 UI 层重构）。
-- 不在 TUI 里做交互式发言（观察者定位不变，除非用户另行提出）。
-- 兼容非 kitty 终端的降级显示即可，不为旧终端做像素级适配。
+- 不解析 Telegram entities 为富文本。
+- 不支持 tgs/webm 动画播放；保留文本/vision 描述降级。
+- 不改变模型看到的 Telegram 序列化内容。
 
 ## 需求
 
-- **R1:** 前期研究：确认 pi-tui / pi-coding-agent 的插件机制、kitty 图像渲染 API、以及插件形态下与本项目 daemon IPC 对接的方式；结论落成研究笔记（参照 docs/research.md 的先例）。
-- **R2:** 群历史视图（消息、reply、quote、edit 标记、`Bot X · LOCAL` 内部行为）在插件形态下复刻，功能不低于现状。
-- **R3:** 图片 / sticker 内联显示：kitty 终端渲染真实图像；非 kitty 终端降级为现有占位符 + vision 描述。
-- **R4:** attach / detach / 历史分页 / 实时事件行为与现状一致或更好（不回归）。
-- **R5:** 媒体文件经 IPC 传输的路径 / 权限设计：daemon 提供本地文件路径或字节流，TUI 进程可读，不扩大本机暴露面（与 REQ-IPC-0001 R4 的 chmod 600 协同）。
+- **R1:** 人类消息、bot 消息和 LOCAL 事件使用可区分但统一的 Pi theme 色彩；不得硬编码 ANSI 颜色。
+- **R2:** sender、username、message id、时间、reply、edited、正文、media kind/emoji/vision 描述完整呈现；不可信文本先走现有 `sanitize()`。
+- **R3:** 可读且不超过 1 MiB 的 PNG/JPEG/WebP/GIF 使用 Pi `Image`；其他媒体或无图像能力时使用 Pi 自带 fallback，并继续显示媒体语义描述。
+- **R4:** 文本换行、宽度裁切、背景填充和图片高度均由 Pi 的 `Text`/`Markdown`/`Box`/`Image` 处理，项目不得自行输出宽度受限行。
+- **R5:** 日期分隔与 prepend 历史页保持时间顺序，snapshot/live 去重。
 
 ## 验收标准
 
-- **AC1:** kitty 终端中 attach 后，群内图片与 sticker 内联可见；非 kitty 终端正常降级。
-- **AC2:** 历史分页、实时流、LOCAL 事件标记、退出后 daemon 存活——与现有 TUI 行为逐项对齐。
-- **AC3:** cache golden 不变（provider payload 零变化，验证 cache invariant 5）。
-- **AC4:** `bun test` + `bun run check` 全绿。
+- **AC1:** 组件级测试证明 text message、reply+edited、LOCAL tool event、date separator 分别返回 Pi 组件且可在窄宽度 render，不超宽、不抛错。
+- **AC2:** 图片 fixture 产生 Pi `Image` 组件；不支持格式、缺文件、超 1 MiB 均稳定降级。
+- **AC3:** Telegram/agent 文本中的 ANSI/OSC 控制序列不能改变 Pi UI。
+- **AC4:** 真实 Pi fullscreen smoke 中消息卡片随 theme 显示；Kitty-capable 终端由 Pi 管理图片 placement/cropping。
+- **AC5:** cache golden 不变；`bun test` + `bun run check` 通过。
 
 ## 约束
 
-- Cache impact: **NONE**（UI-only；若发现必须改 provider payload 才能实现，说明边界设计错了，停下来上报）。
-- 依赖：pi-tui 插件机制的实际能力是本 REQ 的可行性前提，R1 研究不成立则回到自绘方案并把 kitty 支持以最小侵入方式加入现有 TUI。
-- 成本：图像数据不得进入 provider context（显示层与模型层严格分离）。
+- Cache impact: **NONE**。
+- 媒体不进入 provider context；组件只消费 IPC 已有 `mediaPath` / `mediaDesc`。
+- 初次读媒体保持 1 MiB 上限，失败不得阻塞 transcript。
 
 ## 例子与边界 case
 
-- 大图 / 动图（tgs/webm）：降级策略明确，不阻塞渲染。
-- 终端 window resize：图像重排不花屏。
-- daemon 重启后 TUI 重连，图像仍可加载（媒体本地缓存路径稳定）。
+- 多行长文本：Pi `Text` 负责 wrap。
+- sticker webm/tgs：显示 `[sticker 😀] · <vision 描述>`，不伪装为已内联。
+- 非 Kitty 终端：Pi `Image` 自己生成尺寸/文件名 fallback。
 
 ## 可观察性
 
-- 不适用（UI 层）；渲染失败降级时 log 一行。
+组件构建失败只降级为错误卡片，不使 Pi renderer 崩溃。
 
 ## 文档影响
 
-- `docs/architecture.md`（TUI 小节重写）、`docs/research.md` 或新研究笔记。
+`docs/architecture.md`、`docs/testing.md`。
 
 ## 待决问题
 
-- pi-tui 插件 API 形态（R1 的输出）。**R1 完成前不动工 R2–R5。**
+无。
 
 ## 追溯
 
-- Plans: 待建
+- Plans: `../plans/completed/PLAN-20260808-native-pi-telegram-ui.md`
 - Commits: 从 `Requirement:` git trailer 查
+
+## 完成证据
+
+- component 测试覆盖 text、LOCAL、窄宽度、控制序列与原生 `Image`；真实 Pi fullscreen smoke 通过。
+- `bun test` 149/149、`bun run check`、cache golden 均通过。

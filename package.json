@@ -4,7 +4,12 @@
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Two persona Telegram group-chat bots living in a group, powered by Pi coding agent",
+	"keywords": ["pi-package"],
+	"pi": {
+		"extensions": ["./.pi/extensions/tg-extension.ts"]
+	},
 	"scripts": {
+		"pi": "node node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
 		"start": "bun run src/main.ts start",
 		"status": "bun run src/main.ts status",
 		"attach": "bun run src/main.ts attach",

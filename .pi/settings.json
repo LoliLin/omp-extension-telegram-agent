@@ -1,5 +1,4 @@
 {
-  "packages": [
-    "extensions/tg-extension.ts"
-  ]
+  "tuiMode": "fullscreen",
+  "fullscreenScrollbar": "auto"
 }

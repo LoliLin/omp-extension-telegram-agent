@@ -5,28 +5,24 @@
 ## Process model
 
 ```
-                Telegram
-               /        \
-      Poller A(小雪)   Poller B(小雨)
-               \        /
-                \      /
-            daemon (单进程, 长驻)
-                 │
-   ┌─────────────┼──────────────┐
-   │             │              │
- ingestion    Agent A/B      SQLite
- (normalize/  (AgentSession  (bun:sqlite
-  dedupe/      ×2, SDK)       或 node:sqlite)
-  persist)        │              │
-   └───── router ─┘              │
-                 │               │
-              IPC (Unix socket JSONL)
-                 │
-               TUI (独立进程, 可随时 attach/detach)
+                         Telegram
+                    /       |       \
+               Poller 1  Poller 2  Poller N
+                    \       |       /
+                     daemon（单进程、长驻）
+                     /      |       \
+            ingestion   AgentSession×N   SQLite
+             + router                       │
+                     \      |              /
+                      IPC（Unix socket JSONL）
+                                  │
+                    Pi interactive process（短生命周期）
+                    ├─ Telegram transcript custom entry
+                    └─ Telegram stats widget
 ```
 
-- **daemon**：唯一长驻进程。持有 Telegram poller、两个 AgentSession、SQLite、IPC server
-- **TUI**：独立短生命周期进程，通过 IPC 拉历史 + 订阅实时事件；退出不影响 daemon
+- **daemon**：唯一长驻进程。按 `bots.config.json` 为每个 bot 创建 poller 与 AgentSession，并持有 SQLite、router 和 IPC server。
+- **Pi 插件**：项目 package 被 Pi 自动发现；通过 IPC 拉历史、订阅实时事件。关闭 Pi 或 `/tg detach` 不影响 daemon。
 
 ## 运行时与依赖
 
@@ -37,7 +33,7 @@
 ## Telegram ingestion
 
 - 每个 bot token 一个 getUpdates long-polling 循环（offset 持久化在 SQLite）
-- 每条 update：原样存 raw_updates（bot identity + update_id 唯一）→ normalize 成 canonical message（chat_id + message_id 唯一，双 bot 收到的同一条群消息只存一条）→ edit 存 revision
+- 每条 update：原样存 raw_updates（bot identity + update_id 唯一）→ normalize 成 canonical message（chat_id + message_id 唯一，多个 bot 收到的同一条群消息只存一条）→ edit 存 revision
 - Bot 自己 send 成功后，Telegram 返回的 Message 立即落库（发送→DB→TUI 事务链）
 
 ## Routing（Phase 5，REQ-CONF-0001 泛型化）
@@ -71,24 +67,28 @@
 
 - 见 docs/data-model.md。WAL 模式，直接 SQL
 
-## TUI（Phase 4，REQ-IPC-0001 加固 + REQ-UI-0001/2/3）
+## Pi 原生 Telegram transcript（REQ-UI-0001/2/3/4）
 
-- `@earendil-works/pi-tui`：`TuiAltScreen` + `ScrollView(follow:"end")` + transcript Container
-- 每条群消息一个组件；bot 内部行为以 `Bot X · LOCAL` 标记
+- package 入口是 `.pi/extensions/tg-extension.ts`；`package.json` 的 `pi.extensions` 使项目可被 Pi 自动发现，规范启动命令是 `bun run pi`。
+- `/tg attach [bot-id]` 通过 `registerEntryRenderer` + `appendEntry` 在 Pi 自己的 transcript 中挂载一个 **TUI-only custom entry**。一次 attach 只写一个锚点；Telegram snapshot、实时消息和历史页只存在于该 entry 的内存组件树，不逐条写 Pi session，也不进入 provider context。
+- 消息、LOCAL 事件、日期与媒体由 Pi 的 `Container`、`Box`、`Text`、`Image`、`Spacer` 和 theme 组合。Pi fullscreen host 拥有滚动、resize、选择、editor、宽度处理及 Kitty image placement/cropping；项目不持有 viewport、终端尺寸、键盘处理或 ANSI 主题代码。
+- `src/plugin/timeline.ts` 是无展示逻辑的 IPC client，只负责连接、snapshot/live/history、复合游标、去重、stats 合并与有界媒体读取。
+- public extension API 没有 transcript scroll-top 事件，因此更早历史由 `/tg more` 显式加载；`/tg detach` 只断开 live socket，已显示内容保留。session restore 的旧锚点以 detached 状态呈现，不自动重连。
+- stats 用 `ctx.ui.setWidget` component factory 渲染；active feed 可复用同一份 IPC stats，独立 panel 自己拥有并清理订阅。
 - IPC：Unix socket JSONL，daemon 为 server；协议 = hello（可带 bot filter）/ history 分页拉取 / event 订阅 / usage 增量推送（REQ-UI-0003）
 - **传输层**：FrameDecoder 持单个 streaming TextDecoder（多字节字符跨 chunk 不腐蚀）；接收缓冲 4MB 上限，超限断开；socket.write <0 即踢连接，出站队列 1MB 上限，超限断开（TUI 挂起时 daemon 内存有界）
 - **分页**：merged timeline 统一排序键 (ts, rank, id)（rank 0=agent 事件，1=群消息），history 用复合游标，同秒多条消息不丢不重；旧客户端只发 beforeTs 时保持严格 `ts<` 语义（双向兼容，新客户端同时发送两字段）
 - **本机暴露面**：socket 文件 chmod 600；history limit 服务端夹取 [1,500]
 - **终端注入防护**：渲染前 strip ANSI/OSC/DCS 转义与控制字符（保留 \n/\t），群消息无法清屏/改色/写剪贴板（OSC 52）
 - **竞态去重**：snapshot 与 broadcast 重复条目按 (chatId,messageId)/(evtId) 去重；翻页补日期分隔线
-- **attach 过滤（REQ-UI-0002）**：`attach <bot-id>` 以单 bot 视角观察——daemon 端对 snapshot / history / broadcast / usage 过滤 agent_events（群消息始终全量）；不指定时全局视角；非法 id 由 main.ts 校验并列出配置的 bot 清单
-- **底部可观测性面板（REQ-UI-0003）**：每 bot 一行（当前 epoch / 最近一次 run 的 context/read/miss / 全历史累计 input/output/成本 / hit ratio）；snapshot 附全历史聚合基线（`lastId` 防止与推送竞态双计），llm_run 落库时经 IPC 增量推送，TUI 不直连 DB
-- **媒体内联（REQ-UI-0001）**：pi-tui `Image` 组件渲染本地缓存的 photo/sticker（kitty 协议，自动探测终端；非 kitty 降级占位符）；IPC 只传 `mediaPath`/`mediaDesc`（同 uid 读文件，不扩大暴露面）；tgs/webm/无缓存/超 1MB 降级为占位符 + vision 描述文本；研究结论见 docs/research.md（REQ-UI-0001 R1）
+- **attach 过滤（REQ-UI-0002）**：`/tg attach <bot-id>` 以单 bot 视角观察——daemon 端对 snapshot / history / broadcast / usage 过滤 agent_events（群消息始终全量）；不指定时为全局视角；非法 id 由 extension 根据 daemon hello 信息列出有效清单。
+- **可观测性 widget（REQ-UI-0003）**：每 bot 显示当前 epoch、最近一次 run 的 context/read/miss、全历史累计 input/output/成本与 hit ratio；snapshot 附全历史聚合基线（`lastId` 防止与推送竞态双计），llm_run 落库时经 IPC 增量推送，插件不直连 DB。
+- **媒体内联（REQ-UI-0001）**：Pi `Image` 渲染本地缓存的 PNG/JPEG/WebP/GIF（终端无图像能力时由 Pi 降级）；IPC 只传 `mediaPath`/`mediaDesc`（同 uid 读文件，不扩大暴露面）；不支持格式、无缓存或超过 1 MiB 时显示占位符与已有 vision 描述。
 
 ## Vision（Phase 7）
 
 - lazy：图片落库即显示，只有 bot 被唤醒且图片需进上下文时才识别
-- 识别结果持久化、双 bot 共享（vision cache）
+- 识别结果按 media identity 持久化，所有配置 bot 共享（vision cache）
 - photo 与 sticker 用不同 prompt 语义
 
 ## Provider context flow

@@ -1,241 +1,382 @@
-// Telegram group observer as a pi extension (REQ-UI-0004).
-// Run: `pi` (project dir) → `/tg attach [bot-id]` | `/tg panel [bot-id]` | `/tg status [bot-id]`
-//                               | `/tg start` | `/tg stop` | `/tg status-daemon` | `/tg panel off`
-//
-// All rendering/input/terminal machinery is pi's; this extension only wires the daemon IPC
-// (src/tui/engine.ts) into renderable lines via ctx.ui.custom / ctx.ui.setWidget.
-//
-// NOTE on the bundled pi-tui: inside pi's jiti extension runtime, the bundled
-// @earendil-works/pi-tui exposes Text/Container/Image/Markdown/Spacer but NOT
-// ScrollView/VStack/HStack ("X is not a constructor" — verified with a probe extension).
-// The attach view therefore keeps its own small line buffer + viewport slice (height from
-// process.stdout.rows); pi still owns the render loop, input dispatch, themes and the
-// kitty image protocol. Real inline images inside the scrolling view are degraded to
-// placeholders (kitty placements don't follow a custom viewport); /tg panel and status
-// are unaffected.
-
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { matchesKey, Key, truncateToWidth } from "@earendil-works/pi-tui";
-import { TgTimeline, type RenderUnit, DIM, RESET } from "../../src/tui/engine.ts";
+import { randomUUID } from "node:crypto";
+import { basename, join } from "node:path";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { VERSION, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
+import * as Tui from "@earendil-works/pi-tui";
 import { loadConfig } from "../../src/config.ts";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import type { BotStats, EvtItem, TimelineItem } from "../../src/ipc.ts";
+import { sanitize } from "../../src/sanitize.ts";
+import {
+	readMediaImage,
+	TimelineClient,
+	type TimelineEvent,
+	type TimelineHooks,
+	type TimelinePort,
+} from "../../src/plugin/timeline.ts";
 
-const SOCK_PATH = join(process.cwd(), "data", "daemon.sock");
+const ENTRY_TYPE = "telegram-chat";
+const MIN_PI_VERSION = "0.84.1";
 
-/** Resolve [bot-id] argument against the configured bots; returns error text when invalid. */
-function resolveBotArg(arg: string | undefined): { filter: string | null; error: string | null } {
-	if (!arg) return { filter: null, error: null };
+type TimelineFactory = (filter: string | null, hooks: TimelineHooks) => TimelinePort;
+type ProcessRunner = typeof spawnSync;
+type FeedEntry = { instanceId: string; filter: string | null };
+
+export interface TelegramExtensionOptions {
+	rootDir?: string;
+	hostVersion?: string;
+	timelineFactory?: TimelineFactory;
+	processRunner?: ProcessRunner;
+	idFactory?: () => string;
+}
+
+export function supportsPiVersion(value: string): boolean {
+	return value.localeCompare(MIN_PI_VERSION, "en", { numeric: true }) >= 0;
+}
+
+function fmtClock(ts: number): string {
+	return new Date(ts).toLocaleTimeString("en-GB", { hour12: false });
+}
+
+function fmtDay(ts: number): string {
+	const date = new Date(ts);
+	const pad = (value: number) => String(value).padStart(2, "0");
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function fmtNum(value: number): string {
+	if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+	if (value >= 10_000) return `${(value / 1000).toFixed(1)}K`;
+	if (value >= 1000) return `${(value / 1000).toFixed(2)}K`;
+	return String(Math.round(value));
+}
+
+function statsText(botId: string, stats: BotStats): string {
+	const denominator = stats.cacheRead + stats.cacheMiss;
+	const hit = denominator > 0 ? (stats.cacheRead / denominator) * 100 : 0;
+	const last = stats.last
+		? `last ${fmtNum(stats.last.contextTokens)} (read ${fmtNum(stats.last.cacheRead)} / miss ${fmtNum(stats.last.cacheMiss)})`
+		: "no runs yet";
+	return `${botId} · ep${stats.epoch} · ${last} · total ${fmtNum(stats.contextTokens)} in / ${fmtNum(stats.outputTokens)} out · $${stats.cost.toFixed(stats.cost >= 1 ? 2 : 4)} · hit ${hit.toFixed(1)}%`;
+}
+
+function eventBody(event: EvtItem): string {
 	try {
-		const ids = loadConfig(process.cwd()).bots.map((b) => b.id);
-		if (ids.includes(arg)) return { filter: arg, error: null };
-		return { filter: null, error: `unknown bot id "${arg}"; configured bots: ${ids.join(", ") || "(none)"}` };
-	} catch (err) {
-		return { filter: null, error: `config error: ${(err as Error).message}` };
+		const payload = JSON.parse(event.payload) as Record<string, unknown>;
+		if (event.evtKind === "thinking") return `thinking · ${sanitize(String(payload.text ?? "")).slice(0, 400)}`;
+		if (event.evtKind === "assistant_text") return sanitize(String(payload.text ?? "")).slice(0, 400);
+		if (event.evtKind === "tool_call") return `${sanitize(String(payload.tool ?? "tool"))} · ${sanitize(JSON.stringify(payload.args ?? {})).slice(0, 180)}`;
+		if (event.evtKind === "tool_result") return `${sanitize(String(payload.tool ?? "tool"))} · ${payload.isError ? "error" : "done"}`;
+		return `${sanitize(event.evtKind)} · ${sanitize(event.payload).slice(0, 240)}`;
+	} catch {
+		return sanitize(event.evtKind);
 	}
 }
 
-/** unit -> plain display lines (media stays a placeholder line; images are degraded, see header). */
-function unitLines(unit: RenderUnit): string[] {
-	if (unit.kind === "sep") return [`${DIM}--- ${unit.day} ---${RESET}`];
-	return unit.text.split("\n");
+export function itemComponent(item: TimelineItem, theme: Theme): Tui.Component {
+	const box = new Tui.Box(1, 0, (text) => theme.bg(item.kind === "msg" && !item.isBot ? "userMessageBg" : "customMessageBg", text));
+	if (item.kind === "evt") {
+		box.addChild(new Tui.Text(theme.bold(theme.fg("warning", `${sanitize(item.botName)} · LOCAL`)) + theme.fg("dim", `  ${fmtClock(item.ts)}`), 0, 0));
+		box.addChild(new Tui.Text(theme.fg("customMessageText", eventBody(item)), 0, 0));
+		return box;
+	}
+
+	const sender = item.username ? `${sanitize(item.senderName)} · @${sanitize(item.username)}` : sanitize(item.senderName);
+	const meta = `#${item.messageId} · ${fmtClock(item.ts)}${item.edited ? " · edited" : ""}`;
+	box.addChild(new Tui.Text(theme.bold(theme.fg(item.isBot ? "accent" : "userMessageText", sender)) + theme.fg("dim", `  ${meta}`), 0, 0));
+	if (item.replyTo != null) box.addChild(new Tui.Text(theme.fg("muted", `↪ reply to #${item.replyTo}`), 0, 0));
+	if (item.text) box.addChild(new Tui.Text(theme.fg(item.isBot ? "customMessageText" : "userMessageText", sanitize(item.text)), 0, 0));
+	if (item.mediaKind) {
+		const label = `[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]${item.mediaDesc ? ` · ${sanitize(item.mediaDesc)}` : ""}`;
+		box.addChild(new Tui.Text(theme.fg("muted", label), 0, 0));
+		const image = readMediaImage(item);
+		if (image) box.addChild(new Tui.Image(image.base64, image.mime, { fallbackColor: (text) => theme.fg("muted", text) }, { maxWidthCells: 56, maxHeightCells: 16, filename: basename(image.filename) }));
+	}
+	return box;
 }
 
-// ---------------------------------------------------------------------------
-// /tg attach [bot-id] — full-screen group history inside pi
-// ---------------------------------------------------------------------------
+export class TelegramStatsPanel extends Tui.Container {
+	private stats: Record<string, BotStats> = {};
+	private status: string;
 
-interface TgTui {
-	requestRender(): void;
-	terminal?: { columns: number; rows: number };
+	constructor(private readonly theme: Theme, filter: string | null) {
+		super();
+		this.status = filter ? `Telegram · bot ${filter}` : "Telegram · all bots";
+		this.rebuild();
+	}
+
+	update(stats?: Record<string, BotStats>, status?: string): void {
+		if (stats) this.stats = stats;
+		if (status) this.status = status;
+		this.rebuild();
+	}
+
+	private rebuild(): void {
+		this.clear();
+		this.addChild(new Tui.Text(this.theme.bold(this.theme.fg("accent", this.status)), 1, 0));
+		const rows = Object.entries(this.stats);
+		if (rows.length === 0) this.addChild(new Tui.Text(this.theme.fg("dim", "no telemetry yet"), 1, 0));
+		for (const [id, stats] of rows) this.addChild(new Tui.Text(this.theme.fg("muted", statsText(id, stats)), 1, 0));
+	}
 }
 
-class TgAttachView {
-	private tui: TgTui;
-	private done: (v?: unknown) => void;
-	private filter: string | null;
-	private lines: string[] = []; // all timeline display lines, oldest first
-	private scrollTop = 0;
-	private statsLine = `${DIM}no telemetry yet${RESET}`;
-	private statusLine = `${DIM}connecting...${RESET}`;
-	private engine: TgTimeline;
-	private poll: ReturnType<typeof setInterval> | null = null;
+export class TelegramFeed extends Tui.Container {
+	readonly client: TimelinePort;
+	private readonly content = new Tui.Container();
+	private readonly statusText: Tui.Text;
+	private readonly items: TimelineItem[] = [];
+	private statsValue: Record<string, BotStats> = {};
+	private statusValue = "connecting...";
 	private closed = false;
-	private hidden = false; // status mode: timeline hidden, stats/status only
 
-	constructor(tui: TgTui, done: (v?: unknown) => void, filter: string | null) {
-		this.tui = tui;
-		this.done = done;
-		this.filter = filter;
-		this.engine = new TgTimeline(SOCK_PATH, filter, { onEvent: (e) => this.onEngineEvent(e) });
-		void this.engine.connect().catch((err) => this.onEngineEvent({ type: "disconnected", reason: `connect failed: ${err}` }));
-
-		// scroll-to-top detection for lazy older loading
-		this.poll = setInterval(() => {
-			if (this.closed || this.hidden) return;
-			if (this.scrollTop === 0 && this.engine.isHasMore && !this.engine.isLoadingOlder) {
-				this.engine.requestOlder();
-			}
-		}, 400);
+	constructor(
+		readonly filter: string | null,
+		private readonly theme: Theme,
+		factory: TimelineFactory,
+		private readonly changed: (event: TimelineEvent, feed: TelegramFeed) => void,
+	) {
+		super();
+		const header = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
+		header.addChild(new Tui.Text(theme.bold(theme.fg("accent", filter ? `Telegram · bot ${filter}` : "Telegram · all bots")), 0, 0));
+		header.addChild(new Tui.Text(theme.fg("dim", "Pi transcript owns scrolling, resize, selection and images · /tg more · /tg detach"), 0, 0));
+		this.statusText = new Tui.Text(theme.fg("dim", this.statusValue), 1, 0);
+		this.addChild(header);
+		this.addChild(new Tui.Spacer(1));
+		this.addChild(this.content);
+		this.addChild(this.statusText);
+		this.client = factory(filter, { onEvent: (event) => this.onEvent(event) });
 	}
 
-	/** status mode: drop the timeline from the view. */
-	hideTimeline(): void {
-		this.hidden = true;
-	}
+	get stats(): Record<string, BotStats> { return this.statsValue; }
+	get status(): string { return this.statusValue; }
+	start(): void { void this.client.connect(); }
+	more(): boolean { return this.client.requestOlder(); }
 
-	private onEngineEvent(e: { type: string; units?: RenderUnit[]; lines?: string[]; text?: string; reason?: string }): void {
-		if (this.closed) return;
-		if (e.type === "append" && e.units) {
-			for (const unit of e.units) this.lines.push(...unitLines(unit));
-			this.followEnd();
-			this.tui.requestRender();
-		} else if (e.type === "prepend" && e.units) {
-			const newLines: string[] = [];
-			for (const unit of e.units) newLines.push(...unitLines(unit));
-			this.lines.unshift(...newLines);
-			this.scrollTop += newLines.length; // keep the viewport anchored
-			this.tui.requestRender();
-		} else if (e.type === "stats" && e.lines) {
-			this.statsLine = e.lines.length > 0 ? e.lines.map((l) => l.slice(0, 100)).join("\n") : `${DIM}no telemetry yet${RESET}`;
-			this.tui.requestRender();
-		} else if (e.type === "status" && e.text != null) {
-			this.statusLine = `${DIM}${e.text}${RESET}`;
-			this.tui.requestRender();
-		} else if (e.type === "disconnected") {
-			this.statusLine = `${DIM}${e.reason ?? "disconnected"} · esc 返回${RESET}`;
-			this.tui.requestRender();
-		}
-	}
-
-	private followEnd(): void {
-		this.scrollTop = Math.max(0, this.lines.length - 1);
-	}
-
-	/** real terminal height comes from pi's TUI instance (process.stdout.rows is 0 in jiti). */
-	private viewportRows(): number {
-		return Math.max(8, (this.tui.terminal?.rows ?? 24) - 2); // reserve stats + status lines
-	}
-
-	render(width: number): string[] {
-		const rows = this.viewportRows();
-		const out: string[] = [];
-		if (!this.hidden) {
-			const maxTop = Math.max(0, this.lines.length - rows);
-			this.scrollTop = Math.max(0, Math.min(this.scrollTop, maxTop));
-			for (let i = this.scrollTop; i < Math.min(this.lines.length, this.scrollTop + rows); i++) {
-				// pi's renderer hard-fails on over-width lines; truncate every line
-				out.push(truncateToWidth(this.lines[i]!, width));
-			}
-		}
-		out.push(truncateToWidth(this.statsLine, width));
-		out.push(truncateToWidth(this.statusLine, width));
-		return out;
-	}
-
-	invalidate(): void {
-		// nothing cached
-	}
-
-	handleInput(data: string): void {
-		if (matchesKey(data, "q") || matchesKey(data, Key.escape)) {
-			this.close();
-			return;
-		}
-		const rows = this.viewportRows();
-		if (matchesKey(data, Key.up)) this.scrollTop = Math.max(0, this.scrollTop - 1);
-		else if (matchesKey(data, Key.down)) this.scrollTop = Math.min(Math.max(0, this.lines.length - rows), this.scrollTop + 1);
-		else if (matchesKey(data, Key.pageUp)) this.scrollTop = Math.max(0, this.scrollTop - 20);
-		else if (matchesKey(data, Key.pageDown)) this.scrollTop = Math.min(Math.max(0, this.lines.length - rows), this.scrollTop + 20);
-		else if (matchesKey(data, Key.home)) this.scrollTop = 0;
-		else if (matchesKey(data, Key.end)) this.scrollTop = Math.max(0, this.lines.length - rows);
-		else return;
-		this.tui.requestRender();
-	}
-
-	private close(): void {
+	detach(reason = "detached"): void {
 		if (this.closed) return;
 		this.closed = true;
-		if (this.poll) clearInterval(this.poll);
-		this.poll = null;
-		this.engine.dispose();
-		this.done();
+		this.client.dispose();
+		this.setStatus(reason);
+	}
+
+	dispose(): void { this.detach(); }
+
+	private onEvent(event: TimelineEvent): void {
+		if (event.type === "append") {
+			this.items.push(...event.items);
+			this.appendItems(event.items);
+		} else if (event.type === "prepend") {
+			this.items.unshift(...event.items);
+			this.rebuildItems();
+		} else if (event.type === "stats") {
+			this.statsValue = event.stats;
+		} else if (event.type === "status") {
+			this.setStatus(event.text);
+		} else {
+			this.setStatus(event.reason);
+		}
+		this.changed(event, this);
+	}
+
+	private appendItems(items: TimelineItem[]): void {
+		let previousDay = this.items.length > items.length ? fmtDay(this.items[this.items.length - items.length - 1]!.ts) : "";
+		for (const item of items) {
+			const day = fmtDay(item.ts);
+			if (day !== previousDay) this.content.addChild(new Tui.Text(this.theme.fg("dim", `──────── ${day} ────────`), 1, 0));
+			this.content.addChild(itemComponent(item, this.theme));
+			this.content.addChild(new Tui.Spacer(1));
+			previousDay = day;
+		}
+	}
+
+	private rebuildItems(): void {
+		this.content.clear();
+		this.appendItems(this.items);
+	}
+
+	private setStatus(value: string): void {
+		this.statusValue = value;
+		this.statusText.setText(this.theme.fg("dim", value));
 	}
 }
 
-// ---------------------------------------------------------------------------
-// extension
-// ---------------------------------------------------------------------------
+function detachedEntry(data: FeedEntry, theme: Theme, supported: boolean): Tui.Component {
+	const box = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
+	const scope = data.filter ? `bot ${data.filter}` : "all bots";
+	box.addChild(new Tui.Text(theme.bold(theme.fg("accent", `Telegram · ${scope}`)), 0, 0));
+	box.addChild(new Tui.Text(theme.fg("dim", supported ? "detached · run /tg attach to reconnect" : `requires Pi >= ${MIN_PI_VERSION} · run bun run pi`), 0, 0));
+	return box;
+}
 
-export default function (pi: ExtensionAPI) {
+export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExtensionOptions = {}): void {
+	const rootDir = options.rootDir ?? process.cwd();
+	const hostVersion = options.hostVersion ?? VERSION;
+	const supported = supportsPiVersion(hostVersion);
+	const factory = options.timelineFactory ?? ((filter, hooks) => new TimelineClient(join(rootDir, "data", "daemon.sock"), filter, hooks));
+	const runProcess = options.processRunner ?? spawnSync;
+	const makeId = options.idFactory ?? randomUUID;
+	const feeds = new Map<string, TelegramFeed>();
+	let pending: { data: FeedEntry; changed: (event: TimelineEvent, feed: TelegramFeed) => void } | null = null;
+	let active: TelegramFeed | null = null;
+	let panel: TelegramStatsPanel | null = null;
+	let panelOwner: "feed" | "standalone" | null = null;
+	let panelClient: TimelinePort | null = null;
+
+	pi.registerEntryRenderer<FeedEntry>(ENTRY_TYPE, (entry, _renderOptions, theme) => {
+		const data = entry.data as FeedEntry | undefined;
+		if (!data) return new Tui.Text(theme.fg("error", "invalid Telegram feed entry"), 1, 0);
+		const existing = feeds.get(data.instanceId);
+		if (existing) return existing;
+		if (!supported || pending?.data.instanceId !== data.instanceId) return detachedEntry(data, theme, supported);
+		const feed = new TelegramFeed(data.filter, theme, factory, pending.changed);
+		pending = null;
+		feeds.set(data.instanceId, feed);
+		active = feed;
+		feed.start();
+		return feed;
+	});
+
+	pi.on("session_shutdown", () => {
+		for (const feed of feeds.values()) feed.dispose();
+		panelClient?.dispose();
+		panelClient = null;
+		active = null;
+	});
+
 	pi.registerCommand("tg", {
-		description: "Telegram observer: /tg attach [bot] | /tg panel [bot] | /tg status [bot] | /tg start | /tg stop | /tg status-daemon",
+		description: "Telegram: attach [bot] | more | detach | panel [bot|off] | status [bot] | start | stop | status-daemon",
 		handler: async (args, ctx) => {
-			if (ctx.mode !== "tui") {
-				ctx.ui.notify("Telegram observer requires interactive mode", "error");
+			const [sub = "", botArg] = args.trim().split(/\s+/);
+			const daemonSub = sub === "start" || sub === "stop" || sub === "status-daemon";
+			if (!supported && !daemonSub) {
+				ctx.ui.notify(`Telegram native UI requires Pi >= ${MIN_PI_VERSION}; host is ${hostVersion}. Run: bun run pi`, "error");
 				return;
 			}
-			const [sub, botArg] = (args ?? "").trim().split(/\s+/);
+			if (ctx.mode !== "tui" && !daemonSub) {
+				ctx.ui.notify("Telegram UI requires interactive mode", "error");
+				return;
+			}
+
+			const resolveFilter = (arg: string | undefined): string | null | undefined => {
+				if (!arg) return null;
+				try {
+					const ids = loadConfig(rootDir).bots.map((bot) => bot.id);
+					if (ids.includes(arg)) return arg;
+					ctx.ui.notify(`unknown bot id "${arg}"; configured bots: ${ids.join(", ") || "(none)"}`, "error");
+				} catch (error) {
+					ctx.ui.notify(`config error: ${(error as Error).message}`, "error");
+				}
+				return undefined;
+			};
+
+			const mountPanel = (filter: string | null, owner: "feed" | "standalone") => {
+				ctx.ui.setWidget("tg-panel", (_tui, theme) => {
+					panel = new TelegramStatsPanel(theme, filter);
+					return panel;
+				});
+				panelOwner = owner;
+			};
 
 			if (sub === "attach") {
-				const { filter, error } = resolveBotArg(botArg);
-				if (error) {
-					ctx.ui.notify(error, "error");
-					return;
-				}
-				await ctx.ui.custom((tui, _theme, _kb, done) => new TgAttachView(tui, done, filter));
-			} else if (sub === "status") {
-				const { filter, error } = resolveBotArg(botArg);
-				if (error) {
-					ctx.ui.notify(error, "error");
-					return;
-				}
-				// one-shot stats overlay; esc to close
-				await ctx.ui.custom(
-					(tui, _theme, _kb, done) => {
-						const view = new TgAttachView(tui, done, filter);
-						view.hideTimeline();
-						return view;
+				const filter = resolveFilter(botArg);
+				if (filter === undefined) return;
+				active?.detach("replaced by a new /tg attach");
+				panelClient?.dispose();
+				panelClient = null;
+				mountPanel(filter, "feed");
+				const data = { instanceId: makeId(), filter };
+				pending = {
+					data,
+					changed: (event, feed) => {
+						if (panelOwner === "feed") panel?.update(event.type === "stats" ? feed.stats : undefined, feed.status);
+						ctx.ui.setStatus("telegram", `Telegram · ${feed.status}`);
 					},
-					{ overlay: true },
-				);
+				};
+				pi.appendEntry<FeedEntry>(ENTRY_TYPE, data);
+				if (pending) {
+					pending = null;
+					ctx.ui.notify("Pi did not mount the Telegram transcript entry", "error");
+				}
+			} else if (sub === "more") {
+				if (!active) ctx.ui.notify("no live Telegram feed; run /tg attach first", "warning");
+				else if (!active.more()) ctx.ui.notify(active.client.hasMore ? "Telegram history request already in progress" : "oldest Telegram record reached", "info");
+			} else if (sub === "detach") {
+				if (!active) ctx.ui.notify("no live Telegram feed", "warning");
+				else {
+					active.detach();
+					active = null;
+					if (panelOwner === "feed") panel?.update(undefined, "Telegram · detached");
+					ctx.ui.setStatus("telegram", "Telegram · detached");
+				}
 			} else if (sub === "panel") {
 				if (botArg === "off") {
+					panelClient?.dispose();
+					panelClient = null;
+					panel = null;
+					panelOwner = null;
 					ctx.ui.setWidget("tg-panel", undefined);
-					ctx.ui.notify("telegram panel hidden", "info");
 					return;
 				}
-				const { filter, error } = resolveBotArg(botArg);
-				if (error) {
-					ctx.ui.notify(error, "error");
+				const filter = resolveFilter(botArg);
+				if (filter === undefined) return;
+				panelClient?.dispose();
+				panelClient = null;
+				if (active && active.filter === filter) {
+					mountPanel(filter, "feed");
+					panel?.update(active.stats, active.status);
+				} else {
+					mountPanel(filter, "standalone");
+					panelClient = factory(filter, {
+						onEvent: (event) => {
+							if (panelOwner !== "standalone") return;
+							if (event.type === "stats") panel?.update(event.stats);
+							else if (event.type === "status") panel?.update(undefined, event.text);
+							else if (event.type === "disconnected") panel?.update(undefined, event.reason);
+							ctx.ui.setStatus("telegram", "Telegram · panel");
+						},
+					});
+					void panelClient.connect();
+				}
+			} else if (sub === "status") {
+				const filter = resolveFilter(botArg);
+				if (filter === undefined) return;
+				if (active && active.filter === filter && Object.keys(active.stats).length > 0) {
+					ctx.ui.notify(Object.entries(active.stats).map(([id, stats]) => statsText(id, stats)).join("\n"), "info");
 					return;
 				}
-				// Simple array form for setWidget: the factory form is unreliable in the bundled
-				// pi-tui (verified: array form renders, factory form did not). Every update
-				// re-sets the widget with fresh lines.
-				// no terminal size available inside widget scope (jiti reports 0); keep lines
-				// short so pi's over-width guard can never trip on narrow terminals
-				const showWidget = (lines: string[]) =>
-					ctx.ui.setWidget("tg-panel", lines.map((l) => truncateToWidth(l, 60)));
-				showWidget(["no telemetry yet"]);
-				const engine = new TgTimeline(SOCK_PATH, filter, {
-					onEvent: (e) => {
-						if (e.type === "stats" && e.lines) {
-							showWidget(e.lines);
-						} else if (e.type === "disconnected") {
-							showWidget([e.reason ?? "disconnected"]);
-						}
-					},
+				await new Promise<void>((resolve) => {
+					let client: TimelinePort;
+					let done = false;
+					const finish = (text: string, type: "info" | "error") => {
+						if (done) return;
+						done = true;
+						clearTimeout(timer);
+						client.dispose();
+						ctx.ui.notify(text, type);
+						resolve();
+					};
+					const timer = setTimeout(() => finish("timed out waiting for Telegram telemetry", "error"), 3000);
+					client = factory(filter, {
+						onEvent: (event) => {
+							if (event.type === "stats") {
+								const text = Object.entries(event.stats).map(([id, stats]) => statsText(id, stats)).join("\n");
+								finish(text || "no telemetry yet", "info");
+							} else if (event.type === "disconnected") finish(event.reason, "error");
+						},
+					});
+					void client.connect();
 				});
-				void engine.connect().catch((err) => showWidget([`connect failed: ${err}`]));
-				ctx.ui.notify(`telegram panel ${filter ? `(bot ${filter})` : "(global)"} — 常驻遥测；/tg panel off 关闭`, "info");
-			} else if (sub === "start" || sub === "stop" || sub === "status-daemon") {
-				// daemon lifecycle without leaving pi (node API: jiti has no Bun global)
-				const res = spawnSync("bun", ["run", "src/main.ts", sub === "status-daemon" ? "status" : sub], { cwd: process.cwd() });
-				ctx.ui.notify((res.stdout.toString() + res.stderr.toString()).trim() || `daemon ${sub}`, "info");
+			} else if (daemonSub) {
+				const command = sub === "status-daemon" ? "status" : sub;
+				const result: SpawnSyncReturns<Buffer> = runProcess("bun", ["run", "src/main.ts", command], { cwd: rootDir });
+				const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim() || `daemon ${command}`;
+				ctx.ui.notify(output, result.status === 0 ? "info" : "error");
 			} else {
-				ctx.ui.notify("usage: /tg attach [bot] | /tg panel [bot] | /tg status [bot] | /tg start | /tg stop | /tg status-daemon | /tg panel off", "info");
+				ctx.ui.notify("usage: /tg attach [bot] | more | detach | panel [bot|off] | status [bot] | start | stop | status-daemon", "info");
 			}
 		},
 	});
+}
+
+export default function telegramExtension(pi: ExtensionAPI): void {
+	registerTelegramExtension(pi);
 }
