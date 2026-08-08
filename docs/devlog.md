@@ -280,3 +280,10 @@
 - `ensureVision` 只在新非空描述成功写库后调用 observer；cache hit、空文本、unsupported 与失败不发布。lazy batch 与 background catalog 都接同一动态 sink，已有 per-media in-flight promise 继续保证 concurrent 只做一次 provider call。
 - observer 异常不反转已完成持久化、不触发重试；IPC 只广播 identity/text，不含本地路径、model metadata 或 token。测试锁定 concurrent+cached describeCalls=1、空/unsupported 无帧、snapshot identity/trim 与全 listener additive push；50 targeted tests + typecheck 通过。
 - Cache impact: **NONE**——没有新增 vision 调用，也不改 vision prompt、agent serialization、system/tool/message grammar 或 context epoch；provider token/cost 增量 0。
+
+## 2026-08-08 (28) — native media card 实时合并视觉理解
+
+- timeline client 接收 `vision_update` 后按 `fileUniqueId` 合并；256-entry、10-minute 缓存覆盖 update-before-message 与 later history，数量/时间均有界。重复同文 update 不再发 UI event。
+- feed 对所有匹配消息替换内存 item 并 rebuild Pi component tree；不 append Pi entry。图片或 sticker fallback 正下方统一显示 Pi theme `视觉理解 · ...`，snapshot/live 使用同一 `mediaDesc`。
+- 测试覆盖 update 先到、older page、300 update 驱逐后 size=256、同 uid 两卡片、重复幂等、ANSI/OSC strip，以及 session entry 数量不变；44 plugin/timeline/IPC tests + typecheck 通过。
+- Cache impact: **NONE**——纯 IPC/TUI state merge，不改 DB schema、provider serialization、prompt/tool grammar或 vision 调用次数；token/cost 增量 0。

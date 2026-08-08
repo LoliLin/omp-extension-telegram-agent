@@ -96,6 +96,8 @@
 - photo 与 sticker 用不同 prompt 语义
 - 新的非空描述成功写入 DB 后，`ensureVision` 只发布一次 `(fileUniqueId,text)`；cache hit、unsupported、空结果与失败不发布。background catalog 与 lazy batch 共用同一 in-flight promise，因此 UI transport 不增加 vision provider call。
 - `MsgItem.fileUniqueId` 与 additive `vision_update` 经 daemon IPC 广播给所有 live transcript；旧 client 可忽略新字段/帧。snapshot/history 仍从同一 `media.vision` 读取，provider serialization 不变。
+- timeline 以 256-entry / 10-minute map 有界缓存乱序 update；message/live/history 到达时按 `fileUniqueId` 合并。已显示消息收到新描述时，feed 更新所有匹配 item 并用 Pi component tree 原位 rebuild，不追加 session entry；重复 update 幂等。
+- media card 在图片或 fallback 正下方用 Pi theme `Text` 显示 `视觉理解 · <text>`，snapshot 与 live 文案一致；显示前继续走 `sanitize()`，ANSI/OSC 不进入终端控制流。
 
 ## Sticker 可发送性（REQ-STICKER-0002）
 

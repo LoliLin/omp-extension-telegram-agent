@@ -48,6 +48,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - attach 永远是只读操作；只有显式 `/tg compose <bot-id>` 后，interactive editor 提交才会发 Telegram。default footer 会持续显示 `TELEGRAM · SEND AS <id/name>`；`compose off` 后输入恢复交给 Pi agent。
 - compose 仅支持纯文本。附件会被阻止；明确失败会把原文放回 editor。若 ACK 超时或 daemon 在发送中断线，结果可能未知：先检查群聊，不要直接重发；插件不会自动重试，并会安全关闭 compose。
 - RPC/extension source 不受 compose 影响。attach 切换、detach、daemon 断线或 Pi 退出都会关闭 compose；bot token 始终只在 daemon 内。
+- photo/sticker 被现有 lazy vision 流程识别后，同一 native media card 会在下方原位出现 `视觉理解 · ...`；无需重新 attach。它不为 UI 主动调用模型，未触发 bot 的媒体仍保持图片/fallback。
 - 当前 stats 仍是 Pi component widget；迁移到 default footer `setStatus` 的原生底栏样式见 `REQ-UI-0007`，尚未实现。
 - 当前 `/tg` 子命令没有参数补全；原生分级 completion 方案见 `REQ-UI-0008`，尚未实现。
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。

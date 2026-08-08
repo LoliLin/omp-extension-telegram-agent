@@ -87,10 +87,11 @@ export function itemComponent(item: TimelineItem, theme: Theme): Tui.Component {
 	if (item.replyTo != null) box.addChild(new Tui.Text(theme.fg("muted", `↪ reply to #${item.replyTo}`), 0, 0));
 	if (item.text) box.addChild(new Tui.Text(theme.fg(item.isBot ? "customMessageText" : "userMessageText", sanitize(item.text)), 0, 0));
 	if (item.mediaKind) {
-		const label = `[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]${item.mediaDesc ? ` · ${sanitize(item.mediaDesc)}` : ""}`;
+		const label = `[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]`;
 		box.addChild(new Tui.Text(theme.fg("muted", label), 0, 0));
 		const image = readMediaImage(item);
 		if (image) box.addChild(new Tui.Image(image.base64, image.mime, { fallbackColor: (text) => theme.fg("muted", text) }, { maxWidthCells: 56, maxHeightCells: 16, filename: basename(image.filename) }));
+		if (item.mediaDesc?.trim()) box.addChild(new Tui.Text(theme.fg("muted", `视觉理解 · ${sanitize(item.mediaDesc.trim())}`), 0, 0));
 	}
 	return box;
 }
@@ -170,6 +171,15 @@ export class TelegramFeed extends Tui.Container {
 			this.rebuildItems();
 		} else if (event.type === "stats") {
 			this.statsValue = event.stats;
+		} else if (event.type === "vision") {
+			let updated = false;
+			for (let index = 0; index < this.items.length; index++) {
+				const item = this.items[index]!;
+				if (item.kind !== "msg" || item.fileUniqueId !== event.fileUniqueId || item.mediaDesc === event.text) continue;
+				this.items[index] = { ...item, mediaDesc: event.text };
+				updated = true;
+			}
+			if (updated) this.rebuildItems();
 		} else if (event.type === "status") {
 			this.setStatus(event.text);
 		} else {

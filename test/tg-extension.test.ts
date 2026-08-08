@@ -321,6 +321,37 @@ describe("native Pi Telegram extension", () => {
 		expect(await shutdown.input({ text: "Pi after shutdown" })).toEqual({ action: "continue" });
 	});
 
+	test("vision updates refresh every matching native media card in place and sanitize text", async () => {
+		const host = makeHost();
+		await host.command("attach A");
+		const mediaMessage = {
+			...message,
+			text: null,
+			mediaKind: "sticker",
+			stickerEmoji: "👋",
+			fileUniqueId: "shared-sticker",
+		};
+		host.clients[0]!.emit({
+			type: "append",
+			items: [mediaMessage, { ...mediaMessage, messageId: 6, ts: mediaMessage.ts + 1 }],
+		});
+		host.clients[0]!.emit({
+			type: "vision",
+			fileUniqueId: "shared-sticker",
+			text: "挥手问候\x1b]52;c;pwnd\x07",
+		});
+		host.clients[0]!.emit({
+			type: "vision",
+			fileUniqueId: "shared-sticker",
+			text: "挥手问候\x1b]52;c;pwnd\x07",
+		});
+
+		const rendered = host.entries[0]!.component.render(80).join("\n");
+		expect(rendered.match(/视觉理解 · 挥手问候/g)).toHaveLength(2);
+		expect(rendered).not.toContain("\x1b]52");
+		expect(host.entries).toHaveLength(1);
+	});
+
 	test("panel uses a Pi component factory and disposes its standalone client", async () => {
 		const host = makeHost();
 		await host.command("panel A");

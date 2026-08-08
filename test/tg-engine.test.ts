@@ -111,6 +111,70 @@ describe("Pi plugin timeline client", () => {
 		expect(result).toMatchObject({ requestId: "request-timeout", botId: "A", ok: false, code: "unknown_outcome" });
 	});
 
+	test("vision update received before a live message is merged by media identity", async () => {
+		const { client, log } = await connect(null);
+		await log.waitFor((event) => event.type === "stats");
+		server.broadcastVision({ fileUniqueId: "photo-live", text: "一只猫在窗边" });
+		server.broadcastVision({ fileUniqueId: "photo-live", text: "一只猫在窗边" });
+		server.broadcast({
+			kind: "msg",
+			ts: Date.now(),
+			chatId: -1001,
+			messageId: 909,
+			senderName: "Alice",
+			username: "alice",
+			isBot: false,
+			botId: null,
+			text: null,
+			mediaKind: "photo",
+			stickerEmoji: null,
+			fileUniqueId: "photo-live",
+			replyTo: null,
+			edited: false,
+		});
+
+		await log.waitFor((event) => event.type === "append" && event.items.some((item) => item.kind === "msg" && item.messageId === 909));
+		await Bun.sleep(10);
+		client.dispose();
+
+		const item = allItems(log).find((candidate) => candidate.kind === "msg" && candidate.messageId === 909);
+		expect(item?.kind === "msg" ? item.mediaDesc : null).toBe("一只猫在窗边");
+		expect(log.events.filter((event) => event.type === "vision" && event.fileUniqueId === "photo-live")).toHaveLength(1);
+	});
+
+	test("vision cache is bounded and applies to later history pages", async () => {
+		const log = new EventLog();
+		const client = new TimelineClient(sockPath, null, { onEvent: (event) => log.events.push(event) });
+		for (let index = 0; index < 300; index++) {
+			(client as any).handleFrame({ type: "vision_update", fileUniqueId: `media-${index}`, text: `desc-${index}` });
+		}
+		(client as any).handleFrame({
+			type: "history",
+			items: [{
+				kind: "msg",
+				ts: 1,
+				chatId: -1001,
+				messageId: 1,
+				senderName: "Alice",
+				username: null,
+				isBot: false,
+				botId: null,
+				text: null,
+				mediaKind: "sticker",
+				stickerEmoji: "👋",
+				fileUniqueId: "media-299",
+				replyTo: null,
+				edited: false,
+			}],
+			hasMore: false,
+		});
+
+		expect((client as any).visionUpdates.size).toBe(256);
+		const older = log.events.find((event) => event.type === "prepend") as Extract<TimelineEvent, { type: "prepend" }>;
+		expect(older.items[0]?.kind === "msg" ? older.items[0].mediaDesc : null).toBe("desc-299");
+		client.dispose();
+	});
+
 	test("snapshot emits raw items and merged DB stats", async () => {
 		insertMsg(100, 1754600000, "hello");
 		insertEvt("A", 1754600001 * 1000);

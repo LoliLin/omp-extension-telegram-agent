@@ -16,6 +16,8 @@ import {
 const MEDIA_MAX_BYTES = 1024 * 1024;
 const SEND_ACK_TIMEOUT_MS = 15_000;
 const MAX_PENDING_SENDS = 32;
+const MAX_VISION_UPDATES = 256;
+const VISION_UPDATE_TTL_MS = 10 * 60 * 1000;
 const IMAGE_MIME: Record<string, string> = {
 	png: "image/png",
 	jpg: "image/jpeg",
@@ -48,6 +50,7 @@ export type TimelineEvent =
 	| { type: "append"; items: TimelineItem[] }
 	| { type: "prepend"; items: TimelineItem[] }
 	| { type: "stats"; stats: Record<string, BotStats> }
+	| { type: "vision"; fileUniqueId: string; text: string }
 	| { type: "status"; text: string }
 	| { type: "disconnected"; reason: string };
 
@@ -72,6 +75,11 @@ interface PendingSend {
 	timer: ReturnType<typeof setTimeout>;
 }
 
+interface CachedVisionUpdate {
+	text: string;
+	expiresAt: number;
+}
+
 function itemKey(item: TimelineItem): string {
 	if (item.kind === "msg") return `m:${item.chatId}:${item.messageId}`;
 	return item.evtId != null ? `e:${item.evtId}` : `e?:${item.botId}:${item.ts}:${item.evtKind}:${item.payload}`;
@@ -94,6 +102,7 @@ export class TimelineClient implements TimelinePort {
 	private baselineLastId = 0;
 	private pendingUsage = new Map<number, UsageRun>();
 	private readonly pendingSends = new Map<string, PendingSend>();
+	private readonly visionUpdates = new Map<string, CachedVisionUpdate>();
 	private oldestTs = Number.MAX_SAFE_INTEGER;
 	private oldestCursor: TimelineCursor | null = null;
 	private socket: Socket | null = null;
@@ -246,6 +255,30 @@ export class TimelineClient implements TimelinePort {
 		} else if (message.type === "usage") {
 			this.pendingUsage.set(message.run.id, message.run);
 			this.emitStats();
+		} else if (message.type === "vision_update") {
+			this.receiveVisionUpdate(message.fileUniqueId, message.text);
+		}
+	}
+
+	private receiveVisionUpdate(fileUniqueId: string, value: string): void {
+		const text = value.trim();
+		if (!fileUniqueId || !text) return;
+		this.pruneVisionUpdates();
+		const existing = this.visionUpdates.get(fileUniqueId);
+		if (existing?.text === text) return;
+		if (!existing && this.visionUpdates.size >= MAX_VISION_UPDATES) {
+			const oldest = this.visionUpdates.keys().next().value as string | undefined;
+			if (oldest) this.visionUpdates.delete(oldest);
+		}
+		this.visionUpdates.delete(fileUniqueId);
+		this.visionUpdates.set(fileUniqueId, { text, expiresAt: Date.now() + VISION_UPDATE_TTL_MS });
+		this.hooks.onEvent({ type: "vision", fileUniqueId, text });
+	}
+
+	private pruneVisionUpdates(): void {
+		const now = Date.now();
+		for (const [fileUniqueId, update] of this.visionUpdates) {
+			if (update.expiresAt <= now) this.visionUpdates.delete(fileUniqueId);
 		}
 	}
 
@@ -278,6 +311,7 @@ export class TimelineClient implements TimelinePort {
 	}
 
 	private emitFresh(type: "append" | "prepend", items: TimelineItem[]): void {
+		this.pruneVisionUpdates();
 		const fresh = items.filter((item) => {
 			const key = itemKey(item);
 			if (this.seen.has(key)) return false;
@@ -288,6 +322,10 @@ export class TimelineClient implements TimelinePort {
 				this.oldestCursor = cursor;
 			}
 			return true;
+		}).map((item) => {
+			if (item.kind !== "msg" || !item.fileUniqueId) return item;
+			const update = this.visionUpdates.get(item.fileUniqueId);
+			return update ? { ...item, mediaDesc: update.text } : item;
 		});
 		if (fresh.length > 0) this.hooks.onEvent({ type, items: fresh });
 	}
