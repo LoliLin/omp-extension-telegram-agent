@@ -1,7 +1,7 @@
 # PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
 
 - **Status:** Active
-- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-CMD-0001, REQ-TG-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-PLAT-0001, REQ-DOC-0001
+- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-PLAT-0001, REQ-DOC-0001
 - **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
 
 ## 结果
@@ -36,9 +36,12 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10e** — 将公开回复用法收口到唯一 send schema，清理 persona/protocol 重复，使用 terminating 最小 ACK 并修正 tools hash/cache epoch；validates: SEND-0001 AC1–AC7；commit: agent send contract
 - [x] **T10f** — 调查用户追加的 Pi feed 刷新延迟与缺少流式输出，正式化 message_update/IPC/requestRender 边界；validates: UI-0010 documented scope/AC；commit: docs/research only
 - [x] **T10g** — 核对 Telegram `sendChatAction` 官方时限/动作并正式化 response opportunity typing lease；validates: TG-0002 documented scope/AC；commit: docs/research only
-- [ ] **T10h** — 增加有界 ephemeral assistant stream IPC、原位 Pi native card 与每次 feed change 的 host render request；validates: UI-0010 AC1–AC7；commit: native streaming behavior
-- [ ] **T10i** — 增加每 bot `typing` activity lease、4 秒续约与 send/settle/shutdown 清理；validates: TG-0002 AC1–AC7；commit: Telegram response feedback
-- [ ] **T10j** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane
+- [x] **T10h** — 吸收用户纠正并复核 Bot API 10.1/10.2：private draft Thinking、group fallback 与 Rich Messages 收发/投影边界；validates: TG-0002/TG-0003 capability docs；commit: docs correction/research
+- [ ] **T10i** — 增加有界 ephemeral assistant stream IPC、原位 Pi native card 与每次 feed change 的 host render request；validates: UI-0010 AC1–AC7；commit: native streaming behavior
+- [ ] **T10j** — 增加每 bot `typing` activity lease、4 秒续约与 send/settle/shutdown 清理，并锁 group 不调用 private draft；validates: TG-0002 AC1–AC7；commit: Telegram response feedback
+- [ ] **T10k** — 增加 rich JSON migration、统一 inbound/edit/sent normalize 与有界纯文本 projector；validates: TG-0003 AC4–AC6；commit: rich message data plane
+- [ ] **T10l** — 将 agent `send.message` 接到 `sendRichMessage` Rich Markdown、确定性 plain fallback并 bump cache epoch；validates: TG-0003 AC1–AC3/AC7/AC8；commit: rich outbound contract
+- [ ] **T10m** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
 - [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification
 - [ ] **T13** — 将 README/package/project/runbook/example 重写为用户视角平台指南 + example deployment，明确单 deployment 单群边界；validates: PLAT-0001 AC6 + DOC-0001 AC1–AC6；commit: docs/metadata only
@@ -70,9 +73,11 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - T4: **NONE** provider grammar；预期减少 run count/miss tokens，用 deterministic counters/tests证明。
 - T5–T10b: **NONE**；TUI/IPC/operator I/O 与 response telemetry 不进入 provider context，vision UI 不新增 inference。
 - T10e: **INTENTIONAL**；persona/protocol 去重、send tool description 与 tools hash 修正需要一次 schema bump/new epoch，稳定 prefix 预期净缩短。
-- T10f/T10h: **NONE**；只消费已有 provider response stream 并更新 IPC/TUI 内存；不持久 partial、不新增模型调用或 provider-visible bytes。
-- T10g/T10i: **NONE**；Telegram chat action 是每 active bot 每 4 秒至多一次的 side channel，LLM token/provider payload 不变。
-- T10j: **NONE**；Telegram control command 与回复均由 deterministic control plane 消费，不进入 provider context；只有显式 compact 使用既有 summary 调用。
+- T10f/T10i: **NONE**；只消费已有 provider response stream 并更新 IPC/TUI 内存；不持久 partial、不新增模型调用或 provider-visible bytes。
+- T10g/T10h/T10j: **NONE**；Telegram group chat action 是每 active bot 每 4 秒至多一次的 side channel，LLM token/provider payload 不变；private draft 不误用。
+- T10k: **NONE** stable prefix；rich structure只经有界 deterministic projection进入原有动态消息 suffix，不新增 LLM call。
+- T10l: **INTENTIONAL**；send tool description声明 Rich Markdown，参数/顺序不变但稳定 prefix需 bump schema/new epoch；不新增 tool/LLM call。
+- T10m: **NONE**；Telegram control command 与回复均由 deterministic control plane 消费，不进入 provider context；只有显式 compact 使用既有 summary 调用。
 - T11–T13: 现有 deployment **NONE**；provider choice 是配置边界，现有 golden 必须不变；README 不进入 provider context。
 
 ## 风险

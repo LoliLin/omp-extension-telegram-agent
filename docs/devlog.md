@@ -364,3 +364,11 @@
 - lifecycle 绑定 accepted runtime response opportunity，而不是所有 ingested message：立即 acquire、4 秒续约、send 成功或 flush settle/shutdown release；probability skip/nobody 不显示，explicit coalesce 不复制 timer。
 - 失败定义为 best-effort side channel：单 bot 单 timer/单 in-flight、failure streak 日志去重，API 失败不改变 routing/provider/send/DB/exposure。沉默结束后因无 cancel API，允许剩余状态在官方 5 秒内自然过期。
 - Cache impact: **NONE（docs/research only）**；未来实现每 active bot 每 4 秒至多一次 Telegram request，LLM 调用与 token/provider-visible bytes 增量 0。
+
+## 2026-08-08 (39) — 纠正 draft Thinking 并调查 Rich Messages（文档）
+
+- 用户纠正成立：Telegram 已支持原生 Thinking。`sendMessageDraft` 空文本 placeholder 与 rich draft thinking block 都存在；此前只查看 `sendChatAction` 动作表而写成“bot 不支持 thinking”不准确，已在 TG-0002/research/handoff 全部修正。
+- 官方方法签名同时限定两个 draft method 只能面向目标私聊；当前 deployment 是 `-100…` supergroup。因此实现仍采用群内 `typing` 4 秒续约，且明确禁止把状态偷发到 trigger sender 私聊。这个结论是 chat capability fallback，不是否认 Telegram 全局能力。
+- 用户新增 Rich Messages 已正式化为 `REQ-TG-0003`：群内 final message 使用 `sendRichMessage`，保留唯一 `send.message` Rich Markdown入口；incoming/edit/sent/echo 共用有界 source storage与 deterministic plain projector，Pi/provider不接收 raw rich JSON。
+- fallback 仅允许确认未发送的确定性 4xx；unknown outcome不降级，避免双发。private rich draft不冒充 group streaming。后续拆成 data plane与 outbound contract两个原子任务。
+- Cache impact: **NONE（本条纯文档）**。未来 rich data plane 为 NONE；`send.message` description 改为 Rich Markdown 时为 **INTENTIONAL**，需 bump schema/new epoch，但不新增 tool或 LLM call。

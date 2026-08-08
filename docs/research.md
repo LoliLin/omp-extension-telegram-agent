@@ -290,8 +290,22 @@ custom entry 不进入 LLM context；IPC 与 provider serialization 不变。Cac
 
 **结论：accepted response opportunity 持有一个 per-bot `typing` lease；4 秒续约，send/settle 时 release。**
 
-- Telegram Bot API `sendChatAction` 官方说明状态只保持 5 秒或更短，bot 消息到达会清除；只建议用于明显有等待的响应。动作表有 `typing` 与 `choose_sticker`，没有独立 `thinking`，因此模型尚未决定输出类型时统一使用 `typing`。
+- 用户纠正成立：Telegram 已有原生 Thinking。`sendMessageDraft` 传空 `text` 会显示 “Thinking…” placeholder；Bot API 10.1/10.2 的 `sendRichMessageDraft` 还支持 `<tg-thinking>` / `InputRichBlockThinking`。
+- 两个 draft method 的 `chat_id` 都明确限定为目标**私聊**，thinking block 又只能用于 rich draft。当前 deployment 的目标是 `-100…` supergroup，所以不能把 private draft 发到群，也不能偷发到 trigger sender 私聊。
+- 群聊 capability fallback 是 `sendChatAction {action:"typing"}`：官方说明状态只保持 5 秒或更短，bot 消息到达会清除；动作表没有 `thinking` action，因此模型尚未决定输出类型时统一使用 `typing`。
 - 启动点不能是每条 ingested message：应在 `dispatchRoutingDecision` 接受 runtime trigger 后，由 runtime 自己覆盖 flush/pending 生命周期。这样 nobody、probability busy/cooldown skip 不会制造虚假反馈，explicit coalesce 也不会创建重复 timer。
 - `send` 成功后 Telegram 消息会清状态，runtime 同时停止续约；无 send、abort/error/沉默则在 flush settle 停止，已有状态按官方剩余 5 秒自然过期。API 没有 cancel action，不能承诺即时清除。
 - side channel 必须 best-effort：每 bot 一个 timer、4 秒至多一次、禁止 overlapping call；错误不影响 route/provider/send，日志按 failure streak 去重。Cache/token impact **NONE**。
-- 官方参考：<https://core.telegram.org/bots/api#sendchataction>；完整验收见 `requirements/REQ-TG-0002.md`。
+- 官方参考：<https://core.telegram.org/bots/api#sendmessagedraft>、<https://core.telegram.org/bots/api#sendrichmessagedraft>、<https://core.telegram.org/bots/api#sendchataction>；完整验收见 `requirements/REQ-TG-0002.md`。
+
+## REQ-TG-0003 调查：Rich Messages 是 final message 能力，不是群 draft streaming（2026-08-08）
+
+**结论：保留唯一 `send` 工具，把 `message` 解释为 Rich Markdown；收发两端统一持久化有界 rich source，并只向 Pi/provider 暴露纯文本投影。**
+
+- Bot API 10.1 增加 `RichMessage`、`InputRichMessage`、`sendRichMessage` 与 `sendRichMessageDraft`，10.2 又增加 rich media 与 thinking block。`sendRichMessage` 可面向目标 chat/supergroup；`InputRichMessage` 必须在 `html`、`markdown`、`blocks` 中恰选一个。
+- 项目已有唯一 `send(message?, sticker?, reply_to?)`。最小稳定模型 contract 是让 agent 的 `message` 使用 `rich_message:{markdown}`；普通文本仍是合法子集，不暴露巨大 block union、HTML 或另一个 `send_rich` 工具。operator compose 继续 literal plain text。
+- 当前 normalize 只看 `text/caption`。incoming/edit/sent/echo 必须共用一个有深度、节点、输出和 raw JSON 上限的 rich-to-plain projector；SQLite 保存有界 source，IPC、Pi feed和 provider serialization只拿投影，不泄露 file id、URL metadata或整段 JSON。
+- outbound fallback 只允许 Telegram 明确返回“未创建消息”的确定性 4xx 后降级一次 plain `sendMessage`；timeout、5xx、非 JSON和 outcome unknown 都不得 fallback，防止双发。canonical insert、broadcast、exposure和固定 ACK仍恰好一次。
+- `send.message` description 是稳定 provider prefix；实现 Rich Markdown authority 必须 bump `CACHE_SCHEMA_VERSION`、开新 epoch并更新 tools hash golden。参数/顺序、LLM call 数与动态 tool result不增加。
+- private `sendRichMessageDraft` 不用于当前 supergroup；原生 draft Thinking 的 capability 边界由 REQ-TG-0002 单独锁定。
+- 官方参考：<https://core.telegram.org/bots/api#sendrichmessage>、<https://core.telegram.org/bots/api#inputrichmessage>、<https://core.telegram.org/bots/api#sendrichmessagedraft>；完整验收见 `requirements/REQ-TG-0003.md`。

@@ -75,5 +75,5 @@ Telegram feed 每次收到离散 IPC 变化都立即请求 Pi 原生宿主刷新
 
 ## 追溯
 
-- Plans: `PLAN-20260808-complete-new-reqs#T10f`、`#T10h`
+- Plans: `PLAN-20260808-complete-new-reqs#T10f`、`#T10i`
 - Commits: 从 `Requirement:` git trailer 查
