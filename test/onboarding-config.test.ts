@@ -83,6 +83,7 @@ describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
 		try {
 			const result = writeFirstRunDeployment(root, draft(), {
 				nonce: "fresh",
+				modelSelection: { provider: "deepseek", model: "deepseek-v4-flash" },
 				onEvent: (event) => events.push(JSON.stringify(event)),
 			});
 			expect(result.backupPaths).toEqual([]);
@@ -93,12 +94,19 @@ describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
 			});
 			const configSource = readFileSync(join(root, "telegram.config.ts"), "utf8");
 			expect(configSource).toContain('token_env: "telegram_bot_token"');
-			expect(configSource).not.toMatch(/\b(provider|model|reasoning_effort|api_key_env)\s*:/);
+			expect(configSource).toContain('provider: "deepseek"');
+			expect(configSource).toContain('model: "deepseek-v4-flash"');
+			expect(configSource).toContain('reasoning_effort: "off"');
+			expect(configSource).toContain('cache_retention: "short"');
+			expect(configSource).not.toMatch(/\bapi_key_env\s*:/);
 			expect(configSource).not.toContain(TELEGRAM_SECRET);
 			expect(statSync(join(root, ".env")).mode & 0o777).toBe(0o600);
 			expect(readFileSync(join(root, ".env"), "utf8")).toBe(`telegram_bot_token: ${TELEGRAM_SECRET}\n`);
 			const loaded = loadConfig(root);
 			expect(loaded.bots[0]!.tools.search).toBe(false);
+			expect(loaded.bots[0]!.tools.runJs).toBe(false);
+			expect(loaded.bots[0]!.reasoningEffort).toBe("off");
+			expect(loaded.vision?.enabled).toBe(false);
 			expect(loaded.tinyfishApiKey).toBe("");
 			expect(events.join("\n")).not.toContain(TELEGRAM_SECRET);
 		} finally {

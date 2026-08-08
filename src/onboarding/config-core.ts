@@ -91,6 +91,8 @@ export interface OnboardingWriteEvent {
 export interface OnboardingWriteOptions {
 	mode?: OnboardingWriteMode;
 	nonce?: string;
+	/** Preflighted Pi selection to pin in newly generated configuration. */
+	modelSelection?: { provider: string; model: string };
 	fileOps?: ConfigFileOps;
 	onEvent?: (event: OnboardingWriteEvent) => void;
 }
@@ -155,17 +157,38 @@ export function mergeEnvSource(source: string, updates: Readonly<Record<string, 
 	return `${output.join("\n")}\n`;
 }
 
-function renderFirstRunConfig(draft: NormalizedDraft): string {
+function renderFirstRunConfig(
+	draft: NormalizedDraft,
+	modelSelection?: { provider: string; model: string },
+): string {
 	const value = (input: string | number | boolean) => JSON.stringify(input);
+	const pinnedModel = modelSelection
+		? `\tprovider: ${value(modelSelection.provider)},\n\tmodel: ${value(modelSelection.model)},\n`
+		: "";
 	return `import { defineConfig } from "./src/config-schema.ts";
 
 export default defineConfig({
 	group_peer_id: ${value(draft.groupPeerIdNumber)},
+${pinnedModel}	reasoning_effort: "off",
+	cache_retention: "short",
+	compaction_model: "openai-codex/gpt-5.6-luna:low",
 	compaction_threshold: 128_000,
 	compaction_keep_recent: 20_000,
+	max_suffix_tokens: 12_000,
+	max_message_tokens: 4_096,
 	sampling_cooldown_ms: 2_000,
 	db_path: "data/agent.db",
 	tinyfish_key_env: "tinyfish_api_key",
+	vision: {
+		enabled: false,
+		foreground_media_limit: 2,
+		concurrency: 2,
+		per_chat_hourly_limit: 24,
+		daily_limit: 200,
+	},
+	telemetry_retention_days: 90,
+	raw_update_retention_days: 30,
+	message_event_retention_days: 365,
 	telegram_admins: [],
 	bots: [{
 		id: ${value(draft.bot.id)},
@@ -174,7 +197,7 @@ export default defineConfig({
 		persona_path: ${value(draft.personaRelativePath)},
 		routing_p: 0.1,
 		sticker_sets: [],
-		tools: { send: true, search: false, run_js: true },
+		tools: { send: true, search: false, run_js: false },
 	}],
 });
 `;
@@ -206,7 +229,7 @@ export function writeFirstRunDeployment(rootDir: string, draft: FirstRunDraft, o
 	});
 	const files: InstallFile[] = [
 		{ path: envPath, contents: envSource, mode: PRIVATE_MODE },
-		{ path: configPath, contents: renderFirstRunConfig(normalized), mode: PRIVATE_MODE },
+		{ path: configPath, contents: renderFirstRunConfig(normalized, options.modelSelection), mode: PRIVATE_MODE },
 		{ path: personaPath, contents: ensureTrailingNewline(normalized.bot.personaText), mode: PRIVATE_MODE },
 	];
 	const transaction = installAtomically(files, [legacyPath], mode, nonce, ops);

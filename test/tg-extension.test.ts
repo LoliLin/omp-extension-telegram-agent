@@ -476,7 +476,13 @@ describe("native Pi Telegram extension", () => {
 			expect(transcript).toContain("Opening the all-bots feed");
 			expect(transcript).not.toContain(ONBOARD_TELEGRAM_SECRET);
 			const configSource = readFileSync(join(root, "telegram.config.ts"), "utf8");
-			expect(configSource).not.toMatch(/\b(provider|model|reasoning_effort|api_key_env)\s*:/);
+			expect(configSource).toContain('provider: "deepseek"');
+			expect(configSource).toContain('model: "deepseek-v4-flash"');
+			expect(configSource).toContain('reasoning_effort: "off"');
+			expect(configSource).toContain('tools: { send: true, search: false, run_js: false }');
+			expect(configSource).not.toMatch(/\bapi_key_env\s*:/);
+			expect(loadConfig(root).bots[0]!.reasoningEffort).toBe("off");
+			expect(loadConfig(root).bots[0]!.tools.runJs).toBe(false);
 			expect(readFileSync(join(root, ".env"), "utf8")).toBe(`telegram_bot_token: ${ONBOARD_TELEGRAM_SECRET}\n`);
 			expect(host.statusUpdates.at(-1)).toEqual({ key: "telegram-config", text: undefined });
 		} finally {

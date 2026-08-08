@@ -212,7 +212,10 @@ export async function runNativeConfigWizard(
 	if (!approved) return cancelled(ui);
 
 	try {
-		const result = writeFirstRunDeployment(rootDir, collected, { mode });
+		const result = writeFirstRunDeployment(rootDir, collected, {
+			mode,
+			modelSelection: { provider: piModel.provider, model: piModel.model },
+		});
 		if (result.backupPaths.length > 0) {
 			ui.notify(`Configuration files verified; ${result.backupPaths.length} local backup(s) were retained.`, "info");
 		} else {
