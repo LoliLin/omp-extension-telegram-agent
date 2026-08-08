@@ -46,10 +46,10 @@
 ## 二、开发循环（每个任务）
 
 1. **读状态**：`docs/handoff.md` + 相关需求 + 受影响边界的文档章节（只读必要的）。
-2. **摸底**：搜现有模式，确认归属层（根 `AGENTS.md` 第 4 节）。
+2. **摸底**：搜现有模式，确认归属层（根 `AGENTS.md` 第 4 节）；任何新功能/行为改动先读[Debug指南](debugging-guide.md)并写Debug impact。
 3. **计划**：非平凡工作（多文件 / 跨边界 / 改持久格式 / 行为变化）先写 `docs/plans/active/PLAN-*.md`；用户授权提交时，task 粒度必须同时是 commit 边界（一个可独立 review/revert 的结果）。琐碎改动跳过。
 4. **实现**：一次做一个内聚 task，按验证漏斗逐层验证（`docs/testing.md`）。
-5. **自审**：diff 对照验收标准逐条过，检查 cache impact（见下）。
+5. **自审**：diff 对照验收标准逐条过，检查 cache impact（见下）与debug成功/no-op/失败路径。
 6. **留痕**：`docs/devlog.md` 追加一条；`docs/handoff.md` 更新；接口 / invariant 变化同步 architecture / cache / data-model。
 7. **提交**：用户授权后，每个 task 通过目标验证就立即显式暂存、检查 staged diff 并做原子签名 commit；不得积压多个 task 后合并提交。subject 与 trailer 规范见 `traceability.md`。
 8. **报告**：明确说出未验证区域、假设、遗留风险。
@@ -94,6 +94,7 @@
 | 有长期后果的架构取舍 | `docs/adr/ADR-*.md` |
 | 接口 / invariant / schema / 工作流变了 | 同步 `architecture.md` / `cache.md` / `data-model.md` / `testing.md` |
 | 每个任务结束 | `devlog.md` 追加 + `handoff.md` 更新 |
+| 新功能 / 行为变化 | 按`debugging-guide.md`复用或扩展结构化事件、诊断与回归 |
 | 可重复的运维操作 | `docs/runbooks/` 加一篇 |
 
 写作规范见 `documentation-guide.md`。一个事实只在一个地方是权威，其余链接。

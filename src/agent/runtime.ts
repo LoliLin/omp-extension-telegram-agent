@@ -102,6 +102,7 @@ import {
 import { buildContextFingerprint, canResumeContextSession, sha256 } from "./context-fingerprint.ts";
 import { parsePiModelReference, type PiRequestThinkingLevel } from "./model-ref.ts";
 import type { VisionScheduler } from "../media/vision-scheduler.ts";
+import { log } from "../observability/log.ts";
 
 const MAX_EVENT_SCAN = 256;
 const MAX_OBLIGATION_SCAN = 64;
@@ -252,7 +253,7 @@ export class BotRuntime {
 						: typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "TimeoutError"
 							? "timeout"
 							: "request_failed";
-					console.warn(`[chat-action] bot=${this.bot.id} typing failed (${category}); will retry`);
+					log.warn("telegram_activity", "typing_failed", { bot_id: this.bot.id, category, retry: true });
 				},
 			},
 		);
@@ -418,7 +419,10 @@ export class BotRuntime {
 				this.pendingPayloadObservations.push(observation);
 				if (this.pendingPayloadObservations.length > 8) this.pendingPayloadObservations.shift();
 			}),
-			makeAssistantPersistencePolicyExtension((text) => this.recordEvent("assistant_text", { text })),
+		makeAssistantPersistencePolicyExtension((text) => {
+			this.recordEvent("assistant_text", { text });
+			log.info("agent_runtime", "model_silence", { bot_id: this.bot.id, trigger_message_id: this.currentTriggerMessageId });
+		}),
 		];
 		const loader = new DefaultResourceLoader({
 			cwd: this.config.dataDir,
@@ -461,9 +465,11 @@ export class BotRuntime {
 		});
 		this.reconcileContextStateFromSession();
 		this.subscribeEvents();
-		console.log(
-			`[bot ${this.bot.id}] session ready (${canResume ? "resumed" : "new"}), epoch=${this.epoch}, fingerprint=${this.contextFingerprint.slice(0, 12)}, system=${this.systemHash}, tools=${this.toolsHash}, cache_schema=v${CACHE_SCHEMA_VERSION}`,
-		);
+		log.info("agent_runtime", "session_ready", {
+			bot_id: this.bot.id, state: canResume ? "resumed" : "new", epoch: this.epoch,
+			fingerprint: this.contextFingerprint.slice(0, 12), system_hash: this.systemHash,
+			tools_hash: this.toolsHash, tools: activeTools.map((tool) => tool.name).join(","), cache_schema: CACHE_SCHEMA_VERSION,
+		});
 	}
 
 	/** Recover the SQLite half of prior custom-message commits without parsing rendered text. */
@@ -583,17 +589,19 @@ export class BotRuntime {
 					break;
 				case "tool_execution_start":
 					this.recordEvent("tool_call", { tool: event.toolName, args: event.args });
+					log.info("agent_tool", "execution_started", { bot_id: this.bot.id, tool: event.toolName, trigger_message_id: this.currentTriggerMessageId });
 					break;
 				case "tool_execution_end":
 					if (event.toolName === "send") {
 						try {
 							this.recordEvent("tool_result", { tool: event.toolName, isError: event.isError });
 						} catch {
-							console.warn(`[send] bot=${this.bot.id} tool_result telemetry failed category=local_failure`);
+							log.warn("agent_tool", "result_persist_failed", { bot_id: this.bot.id, tool: "send", category: "local_failure" });
 						}
 					} else {
 						this.recordEvent("tool_result", { tool: event.toolName, isError: event.isError });
 					}
+					log.info("agent_tool", "execution_finished", { bot_id: this.bot.id, tool: event.toolName, is_error: event.isError, trigger_message_id: this.currentTriggerMessageId });
 					break;
 				case "agent_settled":
 					this.running = false;
@@ -680,7 +688,7 @@ export class BotRuntime {
 		if (event.aborted || !event.result) {
 			const category = classifyPiProviderFailure(event.errorMessage ?? "compaction failed");
 			this.recordEvent("error", { stage: "compaction", reason: event.reason, aborted: event.aborted, category });
-			console.log(`[bot ${this.bot.id}] compaction ${event.aborted ? "aborted" : "failed"} (${event.reason}) category=${category}`);
+			log.error("agent_runtime", "compaction_failed", { bot_id: this.bot.id, reason: event.reason, aborted: event.aborted, category });
 			return;
 		}
 		this.epoch += 1;
@@ -693,7 +701,7 @@ export class BotRuntime {
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		replaceVisibleMessageIds(this.db, this.bot.id, chatId, this.epoch, kept);
 		this.recordEvent("compaction", { epoch: this.epoch, kept: kept.length });
-		console.log(`[bot ${this.bot.id}] compaction -> epoch ${this.epoch}, kept tail ${kept.length} msgs`);
+		log.info("agent_runtime", "compaction_committed", { bot_id: this.bot.id, epoch: this.epoch, kept: kept.length });
 	}
 
 	/** session_before_compact handler: empty summary is refused via cancel, never persisted. */
@@ -758,11 +766,20 @@ export class BotRuntime {
 
 	private async executeSend(params: SendParams) {
 		if (!params.message && !params.sticker) {
+			log.warn("agent_send", "preflight_failed", { bot_id: this.bot.id, category: "empty_payload", trigger_message_id: this.currentTriggerMessageId });
 			throw new Error("send requires at least one of message or sticker");
 		}
 		if (params.reply_to != null && !this.visibleMessageIds.has(params.reply_to)) {
+			log.warn("agent_send", "preflight_failed", {
+				bot_id: this.bot.id, category: "reply_not_visible", reply_to: params.reply_to,
+				visible_count: this.visibleMessageIds.size, trigger_message_id: this.currentTriggerMessageId,
+			});
 			throw new Error("messaging.reply_not_visible");
 		}
+		log.info("agent_send", "started", {
+			bot_id: this.bot.id, has_message: Boolean(params.message), has_sticker: Boolean(params.sticker),
+			has_reply: params.reply_to != null, trigger_message_id: this.currentTriggerMessageId,
+		});
 		// Validate everything (incl. sticker resolution) before any network send (R7):
 		// a late sticker failure would make the model retry and double-send the text.
 		let stickerFileId: string | null = null;
@@ -862,9 +879,10 @@ export class BotRuntime {
 			} catch {
 				// The bounded, redacted process log remains available when SQLite/event sinks are unavailable.
 			}
-			console.warn(
-				`[send] bot=${this.bot.id} degraded outcome=${outcome} component=${primary.failed_component} stage=${primary.stage} category=${primary.category} sent=${sentIds.join(",") || "none"}`,
-			);
+			log.warn("agent_send", "degraded", {
+				bot_id: this.bot.id, outcome, component: primary.failed_component, stage: primary.stage,
+				category: primary.category, sent_count: sentIds.length, trigger_message_id: this.currentTriggerMessageId,
+			});
 			return degradedSendResult({ sent: [...sentIds], outcome, ...primary });
 		};
 		const handleCreateFailure = async (
@@ -947,6 +965,7 @@ export class BotRuntime {
 			false,
 		);
 		if (failures.length > 0) return await finishDegraded("committed");
+		log.info("agent_send", "committed", { bot_id: this.bot.id, sent_count: sentIds.length, trigger_message_id: this.currentTriggerMessageId });
 		return successfulSendResult(sentIds);
 	}
 
@@ -1006,16 +1025,21 @@ export class BotRuntime {
 		}
 		if (source === "probability") this.cooldownAfterFlush = true;
 		this.flushing = true; // set synchronously, before any await — never gated on SDK events
+		log.info("agent_runtime", "flush_started", {
+			bot_id: this.bot.id, source, trigger_message_id: this.currentTriggerMessageId, direct_reply: isDirectReply,
+		});
 		this.typingLease.start();
 		this.flushPromise = this.flushLoop()
 			.catch((err) => {
+				const category = classifyPiProviderFailure(err);
 				// R3: a failed flush only produces an error event; nothing escapes as an
 				// unhandled rejection. Uncommitted events are retried by later triggers.
 				try {
-					this.recordEvent("error", { stage: "flush", category: classifyPiProviderFailure(err) });
+					this.recordEvent("error", { stage: "flush", category });
 				} catch {
 					// shutdown may have closed the db under a wedged flush; nothing more to do
 				}
+				log.error("agent_runtime", "flush_failed", { bot_id: this.bot.id, category, trigger_message_id: this.currentTriggerMessageId });
 			})
 			.finally(() => {
 				this.flushing = false;
@@ -1107,6 +1131,12 @@ export class BotRuntime {
 			{ visibleIds: new Set(this.visibleMessageIds) },
 			this.bot.maxMessageTokens,
 		);
+		log.info("agent_runtime", "context_packed", {
+			bot_id: this.bot.id, trigger_message_id: this.currentTriggerMessageId, consumed_seq: consumedSeq,
+			high_water: highWater, rows_scanned: rowsScanned, input_events: packed.events.length,
+			visible_count: packed.visibleMessageIds.length, obligation_count: obligations.length,
+			estimated_tokens: packed.estimatedTokens, suffix_budget: suffixBudget,
+		});
 		if (!packed.text.trim()) {
 			if (highWater > consumedSeq) setConsumedSeq(this.db, this.bot.id, chatId, highWater);
 			return replyObligationCount(this.db, this.bot.id, chatId) > 0;
@@ -1160,6 +1190,10 @@ export class BotRuntime {
 			else this.visibleMessageIds = visibleBeforeTurn;
 			throw error;
 		}
+		log.info("agent_runtime", "provider_turn_settled", {
+			bot_id: this.bot.id, trigger_message_id: this.currentTriggerMessageId,
+			input_events: packed.events.length, provider_calls: this.providerCallsInRun,
+		});
 		const deliveredObligationIds = delivered.map((obligation) => obligation.messageId);
 		const appendCommit = (this.session.sessionManager as { appendCustomEntry?: (type: string, data: unknown) => string })
 			.appendCustomEntry;

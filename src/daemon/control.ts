@@ -13,6 +13,7 @@ import {
 import { createConnection } from "node:net";
 import { dirname, join } from "node:path";
 import { isOurDaemon, listOurDaemons, pidAlive, readPid } from "./pid.ts";
+import { rotateLogFile } from "../observability/log.ts";
 
 const DEFAULT_STOP_TIMEOUT_MS = 40_000;
 const DEFAULT_START_TIMEOUT_MS = 60_000;
@@ -331,7 +332,8 @@ export function createNodeDaemonControlPort(rootDir: string): DaemonControlPort 
 		signal: (pid) => process.kill(pid, "SIGTERM"),
 		spawnDaemon: () => {
 			mkdirSync(dataDir, { recursive: true });
-			const logFd = openSync(logPath, "a");
+			rotateLogFile(logPath);
+			const logFd = openSync(logPath, "a", 0o600);
 			try {
 				const child = spawn("bun", ["run", join(rootDir, "src/daemon/index.ts")], {
 					cwd: rootDir,

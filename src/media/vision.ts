@@ -3,6 +3,7 @@
 // starts another CLI or reads provider credential material.
 
 import type { Database } from "bun:sqlite";
+import { log } from "../observability/log.ts";
 import {
 	convertToPng,
 	type ModelRuntime,
@@ -330,7 +331,7 @@ function emitTelemetry(options: EnsureVisionOptions, telemetry: VisionTelemetry)
 	try {
 		options.onTelemetry?.(telemetry);
 	} catch {
-		console.error("[vision] telemetry sink failed (observer_failed)");
+		log.error("vision", "telemetry_sink_failed", { category: "observer_failed" });
 	}
 }
 
@@ -407,7 +408,7 @@ async function ensureVisionInner(
 			options.onPersist(fileUniqueId, text);
 		} catch {
 			// Persistence is authoritative; observer failures cannot retry provider work.
-			console.error("[vision] update sink failed (observer_failed)");
+			log.error("vision", "update_sink_failed", { category: "observer_failed" });
 		}
 	}
 	return text;

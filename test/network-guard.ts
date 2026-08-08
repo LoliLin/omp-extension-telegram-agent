@@ -1,6 +1,12 @@
 // Unit/replay tests are hermetic even when a developer's real .env is present.
 // Local loopback servers remain available for protocol-level integration tests.
 
+import { setLogSink } from "../src/observability/log.ts";
+
+// Production writes JSONL to stdout. Tests capture individual events explicitly and keep the
+// default suite output quiet, including high-volume boundedness fixtures.
+setLogSink(() => {});
+
 const nativeFetch = globalThis.fetch.bind(globalThis);
 
 function isLoopback(hostname: string): boolean {

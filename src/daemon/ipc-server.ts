@@ -1,6 +1,7 @@
 // IPC server inside the daemon: serves snapshots/history from SQLite and broadcasts live items.
 
 import type { Database } from "bun:sqlite";
+import { errorCategory, log } from "../observability/log.ts";
 import { rmSync, existsSync, chmodSync } from "node:fs";
 import type {
 	TimelineItem,
@@ -66,7 +67,7 @@ export class IpcServer {
 	/** Remove a listener: drop its queue and close the socket. Idempotent. */
 	private kick(socket: SocketLike, reason: string): void {
 		if (!this.listeners.has(socket)) return;
-		console.warn(`[ipc] disconnecting listener: ${reason}`);
+		log.warn("ipc", "listener_disconnected", { reason });
 		this.listeners.delete(socket);
 		this.decoders.delete(socket);
 		this.outQueues.delete(socket);
@@ -131,7 +132,7 @@ export class IpcServer {
 			unix: this.sockPath,
 			socket: {
 				open: (socket) => {
-					console.log("[ipc] client connected");
+					log.info("ipc", "client_connected");
 					this.listeners.add(socket);
 					this.decoders.set(socket, new FrameDecoder());
 					this.outQueues.set(socket, { chunks: [], total: 0 });
@@ -148,7 +149,7 @@ export class IpcServer {
 							this.kick(socket, "receive buffer overflow");
 							return;
 						}
-						console.error(`[ipc] request handling error: ${err}`);
+						log.error("ipc", "request_failed", { category: errorCategory(err) });
 					}
 				},
 				drain: (socket) => {
@@ -160,13 +161,13 @@ export class IpcServer {
 					this.decoders.delete(socket);
 				},
 				error: (_socket, err) => {
-					console.error(`[ipc] socket error: ${err}`);
+					log.error("ipc", "socket_failed", { category: errorCategory(err) });
 				},
 			},
 		});
 		// Local socket is unauthenticated: restrict to the daemon's owner (REQ-IPC-0001 R4).
 		chmodSync(this.sockPath, 0o600);
-		console.log(`[ipc] listening on ${this.sockPath}`);
+		log.info("ipc", "listening", { socket_ready: true });
 	}
 
 	stop(): void {
@@ -236,7 +237,7 @@ export class IpcServer {
 		if (req.type === "hello") {
 			const filter =
 				typeof req.filter === "string" && this.botNames.has(req.filter) ? req.filter : null;
-			if (req.filter && !filter) console.warn(`[ipc] unknown hello filter "${req.filter}" ignored`);
+			if (req.filter && !filter) log.warn("ipc", "unknown_filter", { filter: req.filter });
 			this.filters.set(socket, filter);
 			const frame = encodeFrame({
 				type: "snapshot",
@@ -276,7 +277,7 @@ export class IpcServer {
 			try {
 				result = await this.manualSend(request);
 			} catch (error) {
-				console.error(`[ipc] manual send handler failed: ${String(error)}`);
+				log.error("ipc", "manual_send_failed", { category: errorCategory(error) });
 				result = {
 					requestId: typeof request.requestId === "string" ? request.requestId : "",
 					botId: typeof request.botId === "string" ? request.botId : "",

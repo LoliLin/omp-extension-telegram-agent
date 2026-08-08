@@ -444,6 +444,66 @@ export interface LoadConfigOptions {
 	piModelDefaults?: PiModelDefaults;
 }
 
+export interface DebugDeploymentIdentity {
+	dataDir: string;
+	dbPath: string;
+	groupPeerId: number;
+	botIds: string[];
+	bots: Array<{
+		id: string;
+		name: string;
+		personaPath: string;
+		provider: string | null;
+		model: string | null;
+		reasoningEffort: string | null;
+		cacheRetention: string;
+		tools: BotToolsConfig;
+	}>;
+}
+
+/** Read only non-secret deployment identity for offline diagnostics; never resolves Pi auth/model defaults or token env values. */
+export function loadDebugDeploymentIdentity(rootDir: string): DebugDeploymentIdentity {
+	const env: Record<string, string> = { ...parseEnvFile(join(rootDir, ".env")) };
+	for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
+	const raw = loadBotConfig(rootDir, env);
+	const groupPeerId = normalizePeerId(String(raw.group_peer_id ?? ""));
+	const rawBots = Array.isArray(raw.bots) ? raw.bots as RawBotConfig[] : [];
+	const bots = rawBots.map((bot) => {
+		const id = typeof bot.id === "string" ? bot.id.trim() : "";
+		const tools = (bot.tools ?? {}) as Record<string, unknown>;
+		return {
+			id,
+			name: typeof bot.name === "string" && bot.name ? bot.name : id,
+			personaPath: typeof bot.persona_path === "string" ? resolvePath(rootDir, bot.persona_path) : "",
+			provider: typeof bot.provider === "string" ? bot.provider : typeof raw.provider === "string" ? raw.provider : null,
+			model: typeof bot.model === "string" ? bot.model : typeof raw.model === "string" ? raw.model : null,
+			reasoningEffort: typeof bot.reasoning_effort === "string"
+				? bot.reasoning_effort
+				: typeof raw.reasoning_effort === "string" ? raw.reasoning_effort : null,
+			cacheRetention: typeof bot.cache_retention === "string"
+				? bot.cache_retention
+				: typeof raw.cache_retention === "string" ? raw.cache_retention : "short",
+			tools: {
+				send: tools.send !== false,
+				search: tools.search !== false,
+				runJs: tools.run_js === true,
+			},
+		};
+	});
+	const botIds = bots.map((bot) => bot.id);
+	if (!Number.isFinite(groupPeerId) || botIds.length === 0 || botIds.some((id) => !/^[A-Za-z0-9_-]+$/.test(id))) {
+		throw new ConfigError(["[debug] deployment identity is invalid"]);
+	}
+	const dataDir = join(rootDir, "data");
+	return {
+		dataDir,
+		dbPath: typeof raw.db_path === "string" ? resolvePath(rootDir, raw.db_path) : join(dataDir, "agent.db"),
+		groupPeerId,
+		botIds: [...new Set(botIds)],
+		bots,
+	};
+}
+
 export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): AppConfig {
 	const env: Record<string, string> = { ...parseEnvFile(join(rootDir, ".env")) };
 	for (const [k, v] of Object.entries(process.env)) {
@@ -552,7 +612,10 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 			maxMessageTokens: typeof b.max_message_tokens === "number" ? b.max_message_tokens : defaultMaxMessageTokens,
 			tools: {
 				send: toolsRaw.send !== false,
-				search: toolsRaw.search === true,
+				// Compatibility: deployments created before typed onboarding omitted this
+				// field because search was enabled by default. New generated configs write
+				// search:false explicitly, so omission must retain the legacy capability.
+				search: toolsRaw.search !== false,
 				runJs: toolsRaw.run_js === true,
 			},
 			stickerSets: Array.isArray(b.sticker_sets) ? (b.sticker_sets as string[]) : [],

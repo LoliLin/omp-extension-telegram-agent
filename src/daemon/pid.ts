@@ -7,6 +7,7 @@
 import { openSync, closeSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { basename, isAbsolute, join, resolve } from "node:path";
+import { errorCategory, log } from "../observability/log.ts";
 
 export const PID_PATH = join(process.cwd(), "data", "daemon.pid");
 
@@ -103,7 +104,8 @@ export function acquirePidLock(dataDir: string): number {
 		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
 		const existing = readPid(pidPath);
 		if (existing != null && pidAlive(existing) && isOurDaemon(existing)) {
-			console.error(`daemon already running (pid ${existing})`);
+			log.error("daemon", "pid_lock_held", { pid: existing });
+			process.stderr.write(`daemon already running (pid ${existing})\n`);
 			process.exit(1);
 		}
 		// stale (dead or foreign process): take it over
@@ -111,7 +113,8 @@ export function acquirePidLock(dataDir: string): number {
 		try {
 			return tryCreate();
 		} catch (err2) {
-			console.error(`failed to acquire daemon pid lock at ${pidPath}: ${err2}`);
+			log.error("daemon", "pid_lock_failed", { category: errorCategory(err2) });
+			process.stderr.write("failed to acquire daemon pid lock\n");
 			process.exit(1);
 		}
 	}

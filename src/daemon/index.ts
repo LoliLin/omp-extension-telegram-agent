@@ -26,6 +26,7 @@ import { composeDeployment, composePollers } from "./composition.ts";
 import type { IngestResult } from "../telegram/ingest.ts";
 import { claimRoutingDecision, finishRoutingClaim } from "../db/routing-claims.ts";
 import { applyRetention } from "../db/retention.ts";
+import { log } from "../observability/log.ts";
 
 const rootDir = process.cwd();
 const config = loadConfig(rootDir);
@@ -66,7 +67,10 @@ const retentionConfig = config.retention ?? {
 function runRetentionMaintenance(): void {
 	const retention = applyRetention(db, retentionConfig);
 	if (Object.values(retention).some((count) => count > 0)) {
-		console.log(`[daemon] retention pruned agent=${retention.agentEvents} llm=${retention.llmRuns} raw=${retention.rawUpdates} message_events=${retention.messageEvents}`);
+		log.info("daemon", "retention_pruned", {
+			agent_events: retention.agentEvents, llm_runs: retention.llmRuns,
+			raw_updates: retention.rawUpdates, message_events: retention.messageEvents,
+		});
 	}
 	db.exec("PRAGMA optimize; PRAGMA wal_checkpoint(PASSIVE);");
 }
@@ -82,17 +86,18 @@ if (!config.routerSecret) {
 	if (!secret) {
 		secret = randomBytes(32).toString("hex");
 		setDaemonState(db, "router_secret", secret);
-		console.log("[daemon] generated and persisted router secret");
+		log.info("daemon", "router_secret_created");
 	}
 	config.routerSecret = secret;
 }
 
 // resolve bot identities (getMe) so we can recognize own messages and mentions
-console.log(
-	`[daemon] bot list: ${config.bots.map((bot) =>
-		`${bot.id} (${bot.name}) model=${bot.provider}/${bot.model}:${bot.reasoningEffort} auth=${piAuthSource(sharedModelRuntime, bot.provider)}`
-	).join(", ")}`,
-); // fixed non-sensitive Pi metadata only
+for (const bot of config.bots) {
+	log.info("daemon", "bot_configured", {
+		bot_id: bot.id, provider: bot.provider, model: bot.model,
+		reasoning: bot.reasoningEffort, auth: piAuthSource(sharedModelRuntime, bot.provider),
+	});
+}
 const composition = await composeDeployment(db, config, {
 	createApi: (bot) => new BotApi(bot.token),
 	createRuntime: async (bot) => {
@@ -104,7 +109,7 @@ const composition = await composeDeployment(db, config, {
 		return runtime;
 	},
 	onIdentity: (bot, identity) => {
-		console.log(`[daemon] bot ${bot.id} (${bot.name}) = @${identity.username} (${identity.userId})`);
+		log.info("daemon", "bot_identity_ready", { bot_id: bot.id, telegram_user_id: identity.userId, username: identity.username });
 	},
 });
 const { botApis, runtimes, identities, botNames, botUserIds, replyBotTargets } = composition;
@@ -112,7 +117,7 @@ const { botApis, runtimes, identities, botNames, botUserIds, replyBotTargets } =
 // The per-bot content fingerprint rotated incompatible sessions before they were opened.
 const storedSchema = getDaemonState(db, "cache_schema_version");
 if (storedSchema !== String(CACHE_SCHEMA_VERSION)) {
-	console.log(`[daemon] cache schema v${storedSchema ?? "none"} -> v${CACHE_SCHEMA_VERSION}: fingerprints reconciled`);
+	log.info("daemon", "cache_schema_reconciled", { previous: storedSchema ?? "none", current: CACHE_SCHEMA_VERSION });
 	setDaemonState(db, "cache_schema_version", String(CACHE_SCHEMA_VERSION));
 }
 const routeCounters = new Map<string, number>();
@@ -120,7 +125,7 @@ const routeCounters = new Map<string, number>();
 function recordRouteMetric(metric: string, botId: string, messageId: number): void {
 	const count = (routeCounters.get(metric) ?? 0) + 1;
 	routeCounters.set(metric, count);
-	console.log(`[route] ${metric} bot=${botId} msg=#${messageId} count=${count}`);
+	log.info("routing", "decision", { bot_id: botId, message_id: messageId, outcome: metric, count });
 }
 
 // IPC server for TUI attach/detach
@@ -160,13 +165,11 @@ const photoCache = new PhotoCacheQueue(db, botApis, {
 	cacheDir: join(config.dataDir, "media"),
 	onReady: (fileUniqueId, mediaPath) => ipc.broadcastMediaReady({ fileUniqueId, mediaPath }),
 	onTelemetry: (event) => {
-		console.log(
-			`[media-cache] event=${event.event} kind=${event.kind} outcome=${event.outcome} bytes=${event.bytesBucket} queue=${event.queueDepth}`,
-		);
+		log.info("media_cache", event.event, { kind: event.kind, outcome: event.outcome, bytes_bucket: event.bytesBucket, queue_depth: event.queueDepth });
 	},
 });
 const photoBackfillCount = photoCache.scheduleBackfill();
-console.log(`[media-cache] startup scheduled=${photoBackfillCount} limit=100 concurrency=2`);
+log.info("media_cache", "startup_scheduled", { scheduled: photoBackfillCount, limit: 100, concurrency: 2 });
 
 const telegramControl = new TelegramControlCommandService(
 	db,
@@ -187,7 +190,7 @@ const telegramControlCoordinator = new TelegramControlCoordinator(
 const controlTasks = new Set<Promise<unknown>>();
 function runTelegramControl(command: NonNullable<ReturnType<typeof parseTelegramControlCommand>>): void {
 	const task = telegramControlCoordinator.handle(command).catch(() => {
-		console.error(`[telegram-control] coordinator failed bot=${command.replyBotId} msg=#${command.messageId}`);
+		log.error("telegram_control", "coordinator_failed", { bot_id: command.replyBotId, message_id: command.messageId, category: "local_failure" });
 	});
 	controlTasks.add(task);
 	void task.finally(() => controlTasks.delete(task));
@@ -198,7 +201,7 @@ void publishTelegramControlMenus(botApis);
 // session and observer sink is ready, before fresh polling can add more work.
 for (const [botId, rt] of runtimes) {
 	const outcome = rt.recoverReplyObligations();
-	if (outcome) console.log(`[route] recovered direct replies bot=${botId} outcome=${outcome}`);
+	if (outcome) log.info("routing", "reply_recovered", { bot_id: botId, outcome });
 }
 
 // route an ingested group message to a bot per routing rules
@@ -219,7 +222,7 @@ function route(result: IngestResult): void {
 	const claimedDecision = decision as typeof decision & { target: string };
 	const routeVersion = result.routeVersion ?? 1;
 	if (!claimRoutingDecision(db, claimedDecision, routeVersion)) {
-		console.log(`[route] duplicate claim suppressed bot=${decision.target} msg=#${row.message_id} version=${routeVersion}`);
+		log.info("routing", "duplicate_claim_suppressed", { bot_id: decision.target, message_id: row.message_id, route_version: routeVersion });
 		return;
 	}
 	const dispatched = dispatchRoutingDecision(decision, runtimes);
@@ -235,9 +238,7 @@ function route(result: IngestResult): void {
 						: `route_probability_${dispatched.outcome}`;
 		recordRouteMetric(metric, decision.target, row.message_id);
 	} else {
-		console.log(
-			`[route] msg #${row.message_id} -> bot ${decision.target} reason=${decision.reason} outcome=${dispatched.outcome}`,
-		);
+		log.info("routing", "decision", { bot_id: decision.target, message_id: row.message_id, reason: decision.reason, outcome: dispatched.outcome, route_version: routeVersion });
 	}
 }
 
@@ -245,7 +246,7 @@ const pollers = composePollers(
 	db,
 	config,
 	(result, update, botId) => {
-		console.log(`[msg] bot=${botId} ${result.kind} chat=${result.chatId} msg=${result.messageId}`);
+		log.info("telegram_ingest", "update_committed", { bot_id: botId, kind: result.kind, chat_id: result.chatId, message_id: result.messageId });
 		const command = parseTelegramControlCommand(update, botId, identities);
 		if (command) runTelegramControl(command);
 		else route(result);
@@ -267,11 +268,11 @@ let stopping = false;
 async function shutdown(signal: string) {
 	if (stopping) return;
 	stopping = true;
-	console.log(`[daemon] ${signal} received, shutting down`);
+	log.info("daemon", "shutdown_started", { signal });
 	// hard bound: a wedged provider request / SDK dispose must never leave the daemon
 	// unkillable — SIGTERM always wins within STOP_HARD_TIMEOUT
 	const hardTimer = setTimeout(() => {
-		console.error("[daemon] shutdown timed out, forcing exit");
+		log.error("daemon", "shutdown_timeout", { timeout_ms: 35_000 });
 		process.exit(1);
 	}, 35_000);
 	hardTimer.unref?.();
@@ -297,5 +298,5 @@ async function shutdown(signal: string) {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 
-console.log(`[daemon] started pid=${process.pid} group=${config.groupPeerId} db=${config.dbPath}`);
+log.info("daemon", "ready", { pid: process.pid, group_peer_id: config.groupPeerId, bot_count: config.bots.length });
 await Promise.all(pollers.map((p) => p.run()));

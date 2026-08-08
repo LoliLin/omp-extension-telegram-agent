@@ -24,6 +24,7 @@ import type { AppConfig, BotConfig } from "../src/config.ts";
 import type { MessageRow } from "../src/agent/serialize.ts";
 import type { AgentStreamFrame } from "../src/ipc.ts";
 import type { ActivityScheduler } from "../src/telegram/activity.ts";
+import { setLogSink } from "../src/observability/log.ts";
 import type {
 	VisionExecutor,
 	VisionKind,
@@ -833,20 +834,26 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		};
 		insertMsg({ message_id: 1, text: "provider still runs" });
 		const warnings: string[] = [];
-		const originalWarn = console.warn;
-		console.warn = (...parts: unknown[]) => warnings.push(parts.join(" "));
+		const restore = setLogSink((line) => warnings.push(line));
 		try {
 			expect(rt.trigger("explicit")).toBe("started");
 			await scheduler.advance(8000);
 			expect(actionCalls).toBe(3);
-			expect(warnings).toHaveLength(1);
-			expect(warnings[0]).toContain("bot=A typing failed (request_failed)");
-			expect(warnings[0]).not.toContain("test-token");
-			expect(warnings[0]).not.toContain("https://");
+			const activityWarnings = warnings
+				.map((line) => JSON.parse(line) as { component: string; event: string })
+				.filter((record) => record.component === "telegram_activity" && record.event === "typing_failed");
+			expect(activityWarnings).toHaveLength(1);
+			expect(activityWarnings[0]).toMatchObject({
+				component: "telegram_activity",
+				event: "typing_failed",
+				fields: { bot_id: "A", category: "request_failed", retry: true },
+			});
+			expect(warnings.join("\n")).not.toContain("test-token");
+			expect(warnings.join("\n")).not.toContain("https://");
 			release();
 			await (rt as any).flushPromise;
 		} finally {
-			console.warn = originalWarn;
+			restore();
 		}
 		expect(fake.sent).toHaveLength(1);
 		expect(visibleIds()).toEqual([1]);

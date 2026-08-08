@@ -9,6 +9,7 @@ import { openDb } from "../src/db/db.ts";
 import { IpcServer } from "../src/daemon/ipc-server.ts";
 import { serializeMessages, type MessageRow } from "../src/agent/serialize.ts";
 import { ingestUpdate, insertSentMessage } from "../src/telegram/ingest.ts";
+import { setLogSink } from "../src/observability/log.ts";
 import {
 	normalizeRichMessage,
 	projectRichMessage,
@@ -204,15 +205,18 @@ describe("rich message canonical data plane (REQ-TG-0003)", () => {
 	test("truncation emits one bounded diagnostic and a duplicate echo emits none", () => {
 		const oversized = { blocks: [{ type: "paragraph", text: "x".repeat(RICH_MESSAGE_MAX_CHARS + 100) }] };
 		const warnings: string[] = [];
-		const originalWarn = console.warn;
-		console.warn = (...parts: unknown[]) => warnings.push(parts.join(" "));
+		const restore = setLogSink((line) => warnings.push(line));
 		try {
 			expect(ingestUpdate(db, "A", update(21, message(103, oversized)), GROUP).kind).toBe("inserted");
 			expect(ingestUpdate(db, "B", update(22, message(103, oversized)), GROUP).kind).toBe("duplicate");
 		} finally {
-			console.warn = originalWarn;
+			restore();
 		}
-		expect(warnings).toEqual(["[rich-message] rich_parse_truncated bot=A msg=#103"]);
+		expect(warnings).toHaveLength(1);
+		expect(JSON.parse(warnings[0]!)).toMatchObject({
+			level: "warn", component: "telegram_ingest", event: "rich_parse_truncated",
+			fields: { bot_id: "A", message_id: 103 },
+		});
 		expect(warnings[0]).not.toContain("xxxxx");
 	});
 

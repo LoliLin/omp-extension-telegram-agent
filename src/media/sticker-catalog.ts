@@ -6,6 +6,7 @@
 // catalog bytes no longer inflate or invalidate the stable system prefix (cache schema v8).
 
 import type { Database } from "bun:sqlite";
+import { errorCategory, log } from "../observability/log.ts";
 import { createHash } from "node:crypto";
 import type { BotApi } from "../telegram/api.ts";
 import {
@@ -64,7 +65,7 @@ export async function ensureStickerCatalog(
 		try {
 			stickers = await fetchStickerSet(api, setName);
 		} catch (err) {
-			console.error(`[sticker-catalog] ${botId}: failed to fetch set "${setName}": ${err}`);
+			log.error("sticker_catalog", "set_fetch_failed", { bot_id: botId, set_name: setName, category: errorCategory(err) });
 			continue;
 		}
 		for (const s of stickers) {
@@ -96,7 +97,7 @@ export async function ensureStickerCatalog(
 		}
 	}
 	if (truncated) {
-		console.warn(`[sticker-catalog] ${botId}: catalog truncated at ${STICKER_CATALOG_MAX} stickers (REQ-STICKER-0001 R5)`);
+		log.warn("sticker_catalog", "catalog_truncated", { bot_id: botId, limit: STICKER_CATALOG_MAX });
 	}
 	const counts = db
 		.query(
@@ -112,13 +113,13 @@ export async function ensureStickerCatalog(
 		.get(botId, JSON.stringify(sets)) as { catalog_rows: number; sendable: number | null };
 	const sendable = counts.sendable ?? 0;
 	const missingMapping = counts.catalog_rows - sendable;
-	console.log(
-		`[sticker-catalog] ${botId}: fetched=${total} catalog=${counts.catalog_rows} sendable=${sendable} missing_file_id=${missingMapping}`,
-	);
+	log.info("sticker_catalog", "catalog_ready", {
+		bot_id: botId, fetched: total, catalog: counts.catalog_rows, sendable, missing_file_id: missingMapping,
+	});
 	if (missingMapping > 0) {
-		console.warn(
-			`[sticker-catalog] ${botId}: ${sendable}/${counts.catalog_rows} configured stickers are sendable; ${missingMapping} missing this bot's file_id`,
-		);
+		log.warn("sticker_catalog", "mapping_incomplete", {
+			bot_id: botId, catalog: counts.catalog_rows, sendable, missing_file_id: missingMapping,
+		});
 	}
 	const pendingVision = db
 		.query(
@@ -162,7 +163,7 @@ export function preRecognizeCatalogVision(
 		)
 		.all(JSON.stringify(sets), botId) as { file_unique_id: string }[];
 	if (pending.length === 0) return Promise.resolve();
-	console.log(`[sticker-catalog] ${botId}: pre-recognizing vision for ${pending.length} stickers in background (first start takes minutes)`);
+	log.info("sticker_catalog", "vision_backfill_started", { bot_id: botId, pending: pending.length, concurrency: Math.min(2, pending.length) });
 	const workers = Math.min(2, pending.length);
 	let next = 0;
 	let doneCount = 0;
@@ -178,11 +179,11 @@ export function preRecognizeCatalogVision(
 							...options,
 						});
 					} catch {
-						console.error(`[sticker-catalog] ${botId}: vision failed (request_failed)`);
+						log.error("sticker_catalog", "vision_failed", { bot_id: botId, category: "request_failed" });
 					}
 					doneCount++;
 					if (doneCount % 10 === 0) {
-						console.log(`[sticker-catalog] ${botId}: vision ${doneCount}/${pending.length}`);
+						log.info("sticker_catalog", "vision_progress", { bot_id: botId, completed: doneCount, total: pending.length });
 					}
 				}
 			}),

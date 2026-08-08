@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { log } from "../observability/log.ts";
 import type { ParsedTelegramControlCommand, TelegramControlResult } from "./control-command.ts";
 import { classifyTelegramCreateFailure, localFailureCategory, retrySqliteBusy, sendTextAndPersist, SentMessagePersistenceError, type TextSendApi } from "./send.ts";
 
@@ -24,7 +25,7 @@ export class TelegramControlCoordinator {
 		private readonly commands: TelegramControlCommandPort,
 		private readonly apis: ReadonlyMap<string, TextSendApi>,
 		private readonly onSent?: (message: TelegramControlReplyNotification) => void,
-		private readonly warn: (message: string) => void = (message) => console.warn(message),
+		private readonly warn: (message: string) => void = (message) => log.warn("telegram_control", "operation_failed", { detail: message }),
 	) {}
 
 	async handle(command: ParsedTelegramControlCommand): Promise<TelegramControlDeliveryResult> {
@@ -88,7 +89,7 @@ export const TELEGRAM_CONTROL_MENU = [{
 /** Startup capability only: every bot attempts the same menu, failures never block polling. */
 export async function publishTelegramControlMenus(
 	apis: ReadonlyMap<string, TelegramMenuApi>,
-	warn: (message: string) => void = (message) => console.warn(message),
+	warn: (message: string) => void = (message) => log.warn("telegram_control", "menu_publish_failed", { detail: message }),
 ): Promise<void> {
 	await Promise.all([...apis].map(async ([botId, api]) => {
 		try {

@@ -2,6 +2,7 @@
 // See docs/data-model.md for dedupe rules.
 
 import type { Database } from "bun:sqlite";
+import { log } from "../observability/log.ts";
 import { appendMediaUpdateEvents } from "../db/message-events.ts";
 import { createReplyObligation } from "../db/reply-obligations.ts";
 import { extractUpdateMessage, isTargetChat, normalizeMessage, type CanonicalMessage } from "../telegram/normalize.ts";
@@ -57,7 +58,7 @@ function ingestUpdateTransaction(
 		createIngestReplyObligation(db, canonical, replyBotTargets);
 	}
 	if (canonical.rich_truncated && (result.kind === "inserted" || result.kind === "edited")) {
-		console.warn(`[rich-message] rich_parse_truncated bot=${botId} msg=#${canonical.message_id}`);
+		log.warn("telegram_ingest", "rich_parse_truncated", { bot_id: botId, message_id: canonical.message_id });
 	}
 	return result;
 }
@@ -205,7 +206,7 @@ export function insertSentMessage(db: Database, botId: string, rawMsg: unknown):
 	recordMedia(db, botId, canonical); // don't rely on the poller echo to fill file_id mappings
 	insertMessage(db, botId, canonical);
 	if (canonical.rich_truncated) {
-		console.warn(`[rich-message] rich_parse_truncated bot=${botId} msg=#${canonical.message_id}`);
+		log.warn("telegram_ingest", "rich_parse_truncated", { bot_id: botId, message_id: canonical.message_id });
 	}
 	return canonical;
 }

@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { log } from "../observability/log.ts";
 import type { BotConfig, TelegramAdmin } from "../config.ts";
 import type { ManualCompactResult, RuntimeControlSnapshot } from "../agent/runtime.ts";
 import { extractUpdateMessage } from "./normalize.ts";
@@ -340,7 +341,7 @@ export class TelegramControlCommandService {
 			} catch {
 				// The durable claim/reply marker remains the flush authority even if local
 				// obligation cleanup races shutdown.
-				console.warn(`[telegram-control] context exclusion failed bot=${botId} msg=#${messageId}`);
+				log.error("telegram_control", "context_exclusion_failed", { bot_id: botId, message_id: messageId, category: "local_failure" });
 			}
 		}
 	}

@@ -8,6 +8,7 @@ import { TelegramApiError } from "../src/telegram/api.ts";
 import { getBotState } from "../src/db/db.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { setLogSink } from "../src/observability/log.ts";
 
 const GROUP = 4402809405;
 const SUPERGROUP = Number(`-100${GROUP}`);
@@ -181,19 +182,23 @@ describe("Poller (REQ-TG-0001)", () => {
 			},
 		});
 		const errors: string[] = [];
-		const originalError = console.error;
-		console.error = (...parts: unknown[]) => errors.push(parts.join(" "));
+		const restore = setLogSink((line) => errors.push(line));
 		try {
 			const running = p.run();
 			await waitFor(() => polls >= 2);
 			p.stop();
 			await running;
 		} finally {
-			console.error = originalError;
+			restore();
 		}
 		expect(handlerCalls).toBe(1);
 		expect(getBotState(db, "A", "update_offset")).toBe("6");
-		expect(errors).toEqual(["[poller A] message handler failed for update 5"]);
+		expect(errors).toHaveLength(1);
+		expect(JSON.parse(errors[0]!)).toMatchObject({
+			component: "telegram_poller",
+			event: "message_handler_failed",
+			fields: { bot_id: "A", update_id: 5, category: "local_failure" },
+		});
 		expect(errors[0]).not.toContain("secret detail");
 	});
 

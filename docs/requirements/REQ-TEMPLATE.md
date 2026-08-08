@@ -40,6 +40,7 @@
 - 安全 / 隐私:
 - 数据 / 迁移:
 - 运维:
+- Debug impact（成功 / no-op或沉默 / 失败如何观察；关联identity；字段与查询上限；隐私红线；是否需新增`bun run debug` finding）:
 
 ## 例子与边界 case
 

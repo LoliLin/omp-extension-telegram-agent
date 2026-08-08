@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { FrameDecoder, FrameOverflowError, encodeFrame } from "../src/ipc.ts";
 import { IpcServer, type ManualSendHandler } from "../src/daemon/ipc-server.ts";
 import { sanitizeText } from "../src/sanitize.ts";
+import { setLogSink } from "../src/observability/log.ts";
 
 let db: Database;
 beforeEach(() => {
@@ -195,20 +196,19 @@ describe("outbound queue bounds (R2)", () => {
 		expect((server as any).outQueues.has(socket)).toBe(false);
 	});
 
-	test("kick is logged via console.warn (observability)", () => {
+	test("kick emits one structured observability event", () => {
 		const server = makeServer();
 		const socket = fakeSocket(() => -1);
 		attach(server, socket);
-		const warn = console.warn;
 		const lines: string[] = [];
-		console.warn = (...a: unknown[]) => lines.push(a.join(" "));
+		const restore = setLogSink((line) => lines.push(line));
 		try {
 			server.broadcast({ kind: "msg", ts: 1, chatId: 1, messageId: 2 } as never);
 		} finally {
-			console.warn = warn;
+			restore();
 		}
 		expect(lines.length).toBe(1);
-		expect(lines[0]).toContain("disconnecting");
+		expect(JSON.parse(lines[0]!)).toMatchObject({ component: "ipc", event: "listener_disconnected" });
 	});
 });
 

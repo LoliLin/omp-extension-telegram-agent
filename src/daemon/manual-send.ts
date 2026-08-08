@@ -1,6 +1,7 @@
 // Operator text send service for additive IPC. Tokens and Telegram I/O stay in the daemon.
 
 import type { Database } from "bun:sqlite";
+import { errorCategory, log } from "../observability/log.ts";
 import { createHash } from "node:crypto";
 import type { SendMessageRequest, SendMessageResult } from "../ipc.ts";
 import { TelegramApiError } from "../telegram/api.ts";
@@ -111,13 +112,13 @@ export class ManualSendService {
 			try {
 				this.onSent?.({ botId, chatId: canonical.chat_id, messageId: canonical.message_id });
 			} catch (error) {
-				console.error(`[manual-send] broadcast failed bot=${botId} request=${requestId}: ${String(error)}`);
+				log.error("manual_send", "broadcast_failed", { bot_id: botId, request_id: requestId, category: errorCategory(error) });
 			}
-			console.log(`[manual-send] sent bot=${botId} request=${requestId} msg=#${canonical.message_id}`);
+			log.info("manual_send", "committed", { bot_id: botId, request_id: requestId, message_id: canonical.message_id });
 			return { requestId, botId, ok: true, chatId: canonical.chat_id, messageId: canonical.message_id };
 		} catch (error) {
 			if (error instanceof SentMessagePersistenceError) {
-				console.error(`[manual-send] persistence failed after Telegram success bot=${botId} request=${requestId}`);
+				log.error("manual_send", "persistence_failed", { bot_id: botId, request_id: requestId, outcome: "unknown" });
 				return {
 					requestId,
 					botId,
@@ -127,7 +128,7 @@ export class ManualSendService {
 				};
 			}
 			const telegramCode = error instanceof TelegramApiError ? error.code : null;
-			console.error(`[manual-send] Telegram send failed bot=${botId} request=${requestId} code=${telegramCode ?? "unknown"}`);
+			log.error("manual_send", "telegram_create_failed", { bot_id: botId, request_id: requestId, telegram_code: telegramCode ?? "unknown" });
 			return {
 				requestId,
 				botId,

@@ -15,6 +15,7 @@
 		"start": "bun run src/main.ts start",
 		"restart": "bun run src/main.ts restart",
 		"status": "bun run src/main.ts status",
+		"debug": "bun run scripts/debug-report.ts",
 		"attach": "bun run src/main.ts attach",
 		"stop": "bun run src/main.ts stop",
 		"test": "bun test",

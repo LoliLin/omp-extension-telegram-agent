@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { log } from "../observability/log.ts";
 import {
 	ensureLocalMedia,
 	isDisplayReadyPath,
@@ -198,7 +199,7 @@ export class PhotoCacheQueue {
 		try {
 			this.options.onTelemetry?.({ event, kind: "photo", outcome, bytesBucket: bucket, queueDepth: this.queue.length });
 		} catch {
-			console.error("[media-cache] telemetry sink failed (observer_failed)");
+			log.error("media_cache", "telemetry_sink_failed", { category: "observer_failed" });
 		}
 	}
 

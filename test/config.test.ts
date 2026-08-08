@@ -316,6 +316,25 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 		}
 	});
 
+	test("SEARCH-0002: legacy omission keeps TinyFish provider-visible while explicit false disables it", () => {
+		const legacyDir = makeEnvDir([
+			{ id: "A", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md", routing_p: 0.3 },
+		]);
+		const disabledDir = makeEnvDir([
+			{
+				id: "A", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md",
+				routing_p: 0.3, tools: { search: false },
+			},
+		]);
+		try {
+			expect(loadConfig(legacyDir).bots[0]!.tools.search).toBe(true);
+			expect(loadConfig(disabledDir).bots[0]!.tools.search).toBe(false);
+		} finally {
+			rmSync(legacyDir, { recursive: true, force: true });
+			rmSync(disabledDir, { recursive: true, force: true });
+		}
+	});
+
 	test("PLAT-0002 R3: deployment and per-bot provider/model selection stays independent of project secrets", () => {
 		const globalDir = makeEnvDir(VALID_BOTS, {}, {
 			provider: "anthropic",

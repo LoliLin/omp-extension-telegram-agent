@@ -17,6 +17,7 @@
 - 数据模型：`docs/data-model.md`
 - 测试策略、命令、当前状态：`docs/testing.md`
 - 文档写作规范：`docs/engineering/documentation-guide.md`
+- Debug / 可观察性规范：`docs/engineering/debugging-guide.md`
 - 追溯规则：`docs/engineering/traceability.md`
 - 变更记录：`docs/devlog.md`（append-only）
 
@@ -32,9 +33,10 @@
 
 1. 读 `docs/handoff.md` 和相关需求。
 2. 只读理解受影响边界所必需的架构 / cache / data-model 章节，不要把无关文档塞进上下文。
-3. 先搜现有模式，再考虑引入新模式。
-4. 确定覆盖本次改动的验证命令（`docs/testing.md`）。
-5. 多文件、跨边界、改持久格式或行为变化的工作：先建 `docs/plans/active/PLAN-*.md` 再实现。
+3. **任何新功能或行为改动必须读 `docs/engineering/debugging-guide.md`，在REQ/PLAN写清Debug impact。**
+4. 先搜现有模式，再考虑引入新模式。
+5. 确定覆盖本次改动的验证命令（`docs/testing.md`）。
+6. 多文件、跨边界、改持久格式或行为变化的工作：先建 `docs/plans/active/PLAN-*.md` 再实现。
 
 ## 4. 改动路由
 
@@ -53,6 +55,7 @@
 
 - **Cache invariant**：永不改写已存在的 provider prefix；动态内容只以新 suffix 追加；cache-visible 协议（system prompt shape / persona 序列化 / tool schema / tool 顺序 / 消息序列化 grammar / 摘要 grammar）任一变化必须 bump `CACHE_SCHEMA_VERSION`、开新 context epoch、同步 `docs/cache.md`。
 - Secret 不进日志、telemetry、测试 fixture、commit。`.env` 不入库。
+- daemon生产模块只用`src/observability/log.ts`结构化日志；禁止正文/prompt/response/thinking/tool args、完整URL/path/stack，业务正确性不得依赖日志。
 - 不得为了让验证通过而削弱测试、类型检查或安全控制（如 run_js sandbox 限制）。
 - 不改 SQLite 持久格式、IPC 协议、消息序列化 grammar，除非有明确需求 + 兼容方案 + 文档更新。
 - 不做破坏性 git 操作（`reset --hard` / force push / 改写历史）。
@@ -67,6 +70,7 @@
 - 行为变化与机械重构尽量分开提交。
 - 行为变化加 / 更新测试；能确定性复现的 bug 必须有回归测试。
 - Agent / LLM 行为测可观察的轨迹与结果，不断言 prompt 字符串。
+- 新功能必须按debug指南覆盖成功、合法no-op/沉默与至少一个失败边界；优先复用现有identity/telemetry，事件和诊断查询必须有界。
 - Provider context 必须有界：不把无界历史、日志、工具输出塞进模型可见内容。
 - 注释只写非显然的理由，不复述语法。
 - 接口、invariant、工作流、架构边界变化时同步更新文档。
@@ -89,6 +93,7 @@
 - 验收标准全部满足；相关测试通过；`bun run check` 通过。
 - diff 不含无关改动。
 - 契约或工作流变化已同步文档。
+- Debug impact已按`docs/engineering/debugging-guide.md`验证，`bun run debug`能区分该功能的关键边界或明确说明为何现有证据已足够。
 - `docs/devlog.md` 追加一条（含 cache impact 评估：NONE / INTENTIONAL + 理由）。
 - `docs/handoff.md` 更新为最新状态。
 - 明确报告未验证区域、遗留风险与假设。
