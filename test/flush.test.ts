@@ -154,7 +154,7 @@ function exposedIds(): number[] {
 	return JSON.parse(getBotState(db, "A", "exposed_ids") ?? "[]") as number[];
 }
 
-function errorEvents(): { stage: string; error?: string }[] {
+function errorEvents(): { stage: string; error?: string; category?: string; reason?: string; aborted?: boolean }[] {
 	const rows = db.query("SELECT payload FROM agent_events WHERE bot_id = 'A' AND kind = 'error'").all() as { payload: string }[];
 	return rows.map((r) => JSON.parse(r.payload) as { stage: string });
 }
@@ -300,7 +300,7 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		const errors = errorEvents();
 		expect(errors.length).toBe(1);
 		expect(errors[0].stage).toBe("flush");
-		expect(errors[0].error).toContain("injected send failure");
+		expect(errors[0]).toEqual({ stage: "flush", category: "provider_request_failed" });
 
 		fail = false;
 		rt.trigger();
@@ -327,6 +327,8 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		const errors = errorEvents();
 		expect(errors.length).toBe(2);
 		expect(errors.every((e) => e.stage === "compaction")).toBe(true);
+		expect(errors.every((e) => e.category === "provider_request_failed")).toBe(true);
+		expect(JSON.stringify(errors)).not.toContain("boom");
 	});
 
 	test("AC3: empty compaction summary is refused via cancel (never persisted)", async () => {
@@ -706,6 +708,6 @@ describe("probability sampling lifecycle (REQ-ROUTE-0001)", () => {
 		expect(rt.trigger("probability")).toBe("started");
 		await (rt as any).flushPromise;
 		expect(rt.samplingState()).toBe("cooldown");
-		expect(errorEvents()).toEqual([{ stage: "flush", error: "provider failed" }]);
+		expect(errorEvents()).toEqual([{ stage: "flush", category: "provider_request_failed" }]);
 	});
 });

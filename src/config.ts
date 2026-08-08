@@ -15,6 +15,12 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { join, resolve, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { createJiti } from "jiti";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import {
+	isPiThinkingLevel,
+	loadPiModelDefaults,
+	type PiModelDefaults,
+} from "./agent/model-settings.ts";
 
 export { defineConfig } from "./config-schema.ts";
 export type {
@@ -51,7 +57,7 @@ export interface BotConfig {
 	samplingCooldownMs: number; // probability-only cooldown after a completed run (REQ-ROUTE-0001)
 	provider: string;
 	model: string;
-	reasoningEffort: string;
+	reasoningEffort: ThinkingLevel;
 	compactionThreshold: number;
 	compactionKeepRecent: number;
 	tools: BotToolsConfig;
@@ -207,9 +213,8 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 			errors.push(`[config] ${key}: expected a non-empty string, got ${JSON.stringify(value)}`);
 		}
 	}
-	const deploymentProvider = typeof raw.provider === "string" && raw.provider.trim() ? raw.provider.trim() : "deepseek";
-	if (deploymentProvider !== "deepseek" && raw.model === undefined) {
-		errors.push(`[config] model: required for deployment provider "${deploymentProvider}"`);
+	if (raw.reasoning_effort !== undefined && !isPiThinkingLevel(raw.reasoning_effort)) {
+		errors.push(`[config] reasoning_effort: expected a Pi thinking level, got ${JSON.stringify(raw.reasoning_effort)}`);
 	}
 	const seen = new Map<string, number>();
 	for (let i = 0; i < botList.length; i++) {
@@ -260,9 +265,8 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 				errors.push(`[config] ${at}.${key}: expected a non-empty string, got ${JSON.stringify(value)}`);
 			}
 		}
-		const botProvider = typeof b.provider === "string" && b.provider.trim() ? b.provider.trim() : deploymentProvider;
-		if (botProvider !== deploymentProvider && b.model === undefined) {
-			errors.push(`[config] ${at}.model: required when overriding provider to "${botProvider}"`);
+		if (b.reasoning_effort !== undefined && !isPiThinkingLevel(b.reasoning_effort)) {
+			errors.push(`[config] ${at}.reasoning_effort: expected a Pi thinking level, got ${JSON.stringify(b.reasoning_effort)}`);
 		}
 		for (const key of ["compaction_threshold", "compaction_keep_recent"] as const) {
 			const v = b[key];
@@ -349,6 +353,8 @@ export interface LoadConfigOptions {
 	configPath?: string;
 	/** In-memory values used by onboarding validation; values override file/process env. */
 	env?: Record<string, string>;
+	/** Deterministic injection for tests/embedders; production reads merged Pi settings. */
+	piModelDefaults?: PiModelDefaults;
 }
 
 export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): AppConfig {
@@ -359,6 +365,7 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 	Object.assign(env, options.env);
 	if (options.configPath) env.bots_config = options.configPath;
 	const raw = loadBotConfig(rootDir, env);
+	const piDefaults = options.piModelDefaults ?? loadPiModelDefaults(rootDir);
 	const errors: string[] = [];
 
 	const num = (key: string, fallback: number, min: number, max: number): number => {
@@ -385,9 +392,23 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 	if (!Number.isFinite(groupPeerId)) errors.push(`[config] group_peer_id: required (bare positive peer id, see .env.example)`);
 	const tinyfishKeyEnv = typeof raw.tinyfish_key_env === "string" ? raw.tinyfish_key_env : "tiny_fish_api_key";
 	const routerSecretEnv = typeof raw.router_secret_env === "string" ? raw.router_secret_env : "router_secret";
-	const defaultProvider = typeof raw.provider === "string" ? raw.provider.trim() : "deepseek";
-	const defaultModel = typeof raw.model === "string" ? raw.model : "deepseek-v4-flash";
-	const defaultEffort = typeof raw.reasoning_effort === "string" ? raw.reasoning_effort : "medium";
+	const explicitDefaultProvider = typeof raw.provider === "string" ? raw.provider.trim() : undefined;
+	const defaultProvider = explicitDefaultProvider ?? piDefaults.provider;
+	const defaultModel = typeof raw.model === "string"
+		? raw.model.trim()
+		: explicitDefaultProvider && explicitDefaultProvider !== piDefaults.provider
+			? undefined
+			: piDefaults.model;
+	const defaultEffort = isPiThinkingLevel(raw.reasoning_effort) ? raw.reasoning_effort : piDefaults.thinkingLevel;
+	if (!defaultProvider) {
+		errors.push(`[config] Pi default provider/model is missing; use Pi /login and /model, then restart`);
+	} else if (!defaultModel) {
+		errors.push(
+			explicitDefaultProvider
+				? `[config] deployment selects provider "${explicitDefaultProvider}" without a model; select both in config or Pi /model`
+				: `[config] Pi default provider/model is missing; use Pi /login and /model, then restart`,
+		);
+	}
 	const defaultThreshold = num("compaction_threshold", 128000, 1, Number.MAX_SAFE_INTEGER);
 	const defaultKeepRecent = num("compaction_keep_recent", 20000, 1, Number.MAX_SAFE_INTEGER);
 	const defaultSamplingCooldown = num("sampling_cooldown_ms", 2000, 0, Number.MAX_SAFE_INTEGER);
@@ -399,7 +420,16 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 	const bots: BotConfig[] = botList.map((b) => {
 		const tokenEnv = b.token_env as string;
 		const toolsRaw = (b.tools ?? {}) as Record<string, unknown>;
-		const provider = typeof b.provider === "string" ? b.provider.trim() : defaultProvider;
+		const explicitProvider = typeof b.provider === "string" ? b.provider.trim() : undefined;
+		const provider = explicitProvider ?? (defaultProvider ?? "");
+		const model = typeof b.model === "string"
+			? b.model.trim()
+			: explicitProvider && explicitProvider !== defaultProvider
+				? ""
+				: (defaultModel ?? "");
+		if (!model) {
+			errors.push(`[config] bot "${String(b.id)}" selects provider "${provider}" without a model; select both in config or Pi /model`);
+		}
 		return {
 			id: b.id as string,
 			name: typeof b.name === "string" && b.name ? b.name : (b.id as string),
@@ -408,8 +438,8 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 			routingP: typeof b.routing_p === "number" ? b.routing_p : 0,
 			samplingCooldownMs: typeof b.sampling_cooldown_ms === "number" ? b.sampling_cooldown_ms : defaultSamplingCooldown,
 			provider,
-			model: typeof b.model === "string" ? b.model : defaultModel,
-			reasoningEffort: typeof b.reasoning_effort === "string" ? b.reasoning_effort : defaultEffort,
+			model,
+			reasoningEffort: isPiThinkingLevel(b.reasoning_effort) ? b.reasoning_effort : defaultEffort,
 			compactionThreshold: typeof b.compaction_threshold === "number" ? b.compaction_threshold : defaultThreshold,
 			compactionKeepRecent: typeof b.compaction_keep_recent === "number" ? b.compaction_keep_recent : defaultKeepRecent,
 			tools: {

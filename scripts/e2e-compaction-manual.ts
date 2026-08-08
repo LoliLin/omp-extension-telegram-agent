@@ -7,7 +7,7 @@ import { loadConfig } from "../src/config.ts";
 import { openDb, getBotState, setBotState } from "../src/db/db.ts";
 import { BotApi } from "../src/telegram/api.ts";
 import { BotRuntime } from "../src/agent/runtime.ts";
-import { createBotModelRuntime } from "../src/agent/model-runtime.ts";
+import { createSharedModelRuntime } from "../src/agent/model-runtime.ts";
 import { selectConfiguredBot } from "./bot-selection.ts";
 
 const config = loadConfig(process.cwd());
@@ -16,7 +16,7 @@ const db = openDb(config.dbPath);
 const me = await new BotApi(bot.token).getMe();
 setBotState(db, bot.id, "bot_user_id", String(me.id));
 setBotState(db, bot.id, "bot_username", me.username);
-const modelRuntime = await createBotModelRuntime(bot);
+const modelRuntime = await createSharedModelRuntime([bot]);
 const rt = new BotRuntime(db, bot, config, modelRuntime);
 await rt.init();
 const session = (rt as unknown as { session: { compact: () => Promise<{ summary: string }> } }).session;

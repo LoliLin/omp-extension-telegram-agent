@@ -1,3 +1,5 @@
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+
 export interface TelegramToolsConfigInput {
 	send?: boolean;
 	search?: boolean;
@@ -21,7 +23,7 @@ export interface TelegramBotConfigInput {
 	sampling_cooldown_ms?: number;
 	provider?: string;
 	model?: string;
-	reasoning_effort?: string;
+	reasoning_effort?: ThinkingLevel;
 	compaction_threshold?: number;
 	compaction_keep_recent?: number;
 	tools?: TelegramToolsConfigInput;
@@ -37,7 +39,7 @@ export interface TelegramConfigInput {
 	auxiliary_visual_model?: string;
 	provider?: string;
 	model?: string;
-	reasoning_effort?: string;
+	reasoning_effort?: ThinkingLevel;
 	compaction_threshold?: number;
 	compaction_keep_recent?: number;
 	sampling_cooldown_ms?: number;

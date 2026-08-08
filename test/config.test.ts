@@ -18,6 +18,7 @@ import {
 } from "../src/config.ts";
 import { acquirePidLock, releasePidLock, readPid, pidAlive, isOurDaemon, listOurDaemons } from "../src/daemon/pid.ts";
 import { buildSystemPrompt, sha256Short } from "../src/agent/prompt.ts";
+import { loadPiModelDefaults, PiSettingsConfigurationError } from "../src/agent/model-settings.ts";
 
 const FIXTURE_LOCK = join(import.meta.dir, "fixtures/daemon/index.ts");
 
@@ -56,6 +57,9 @@ function makeEnvDir(bots: unknown = VALID_BOTS, extraEnv: Record<string, string>
 		join(dir, "bots.config.json"),
 		JSON.stringify({
 			group_peer_id: 1234567890,
+			provider: "deepseek",
+			model: "deepseek-v4-flash",
+			reasoning_effort: "medium",
 			...extraConfig,
 			bots,
 		}),
@@ -278,7 +282,7 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 		const dir = makeEnvDir([
 			{
 				id: "A", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md",
-				routing_p: 0.3, sampling_cooldown_ms: 0, model: "custom-model", compaction_threshold: 999, tools: { search: false },
+				routing_p: 0.3, sampling_cooldown_ms: 0, provider: "deepseek", model: "custom-model", compaction_threshold: 999, tools: { search: false },
 			},
 		]);
 		try {
@@ -364,6 +368,76 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 			expect(JSON.stringify(bots)).not.toContain("also_missing");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("PLAT-0002 AC2: Pi global/project settings resolve omitted model defaults and thinking", () => {
+		const globalOnlyDir = makeEnvDir(VALID_BOTS, {}, {
+			provider: undefined,
+			model: undefined,
+			reasoning_effort: undefined,
+		});
+		const projectOverrideDir = makeEnvDir(VALID_BOTS, {}, {
+			provider: undefined,
+			model: undefined,
+			reasoning_effort: undefined,
+		});
+		const agentDir = mkdtempSync(join(tmpdir(), "pi-settings-agent-"));
+		mkdirSync(join(projectOverrideDir, ".pi"));
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({
+			defaultProvider: "deepseek",
+			defaultModel: "deepseek-v4-flash",
+			defaultThinkingLevel: "high",
+		}));
+		writeFileSync(join(projectOverrideDir, ".pi/settings.json"), JSON.stringify({
+			defaultProvider: "openai-codex",
+			defaultModel: "gpt-5.6-luna",
+			defaultThinkingLevel: "low",
+		}));
+		try {
+			const globalDefaults = loadPiModelDefaults(globalOnlyDir, agentDir);
+			const projectDefaults = loadPiModelDefaults(projectOverrideDir, agentDir);
+			expect(loadConfig(globalOnlyDir, { piModelDefaults: globalDefaults }).bots[0]).toMatchObject({
+				provider: "deepseek",
+				model: "deepseek-v4-flash",
+				reasoningEffort: "high",
+			});
+			expect(loadConfig(projectOverrideDir, { piModelDefaults: projectDefaults }).bots[0]).toMatchObject({
+				provider: "openai-codex",
+				model: "gpt-5.6-luna",
+				reasoningEffort: "low",
+			});
+		} finally {
+			rmSync(globalOnlyDir, { recursive: true, force: true });
+			rmSync(projectOverrideDir, { recursive: true, force: true });
+			rmSync(agentDir, { recursive: true, force: true });
+		}
+	});
+
+	test("PLAT-0002 AC2: missing or malformed Pi defaults fail with bounded guidance", () => {
+		const missingDir = makeEnvDir(VALID_BOTS, {}, {
+			provider: undefined,
+			model: undefined,
+			reasoning_effort: undefined,
+		});
+		const invalidAgentDir = mkdtempSync(join(tmpdir(), "pi-settings-invalid-"));
+		writeFileSync(join(invalidAgentDir, "settings.json"), "{private-invalid-settings");
+		try {
+			expect(() => loadConfig(missingDir, {
+				piModelDefaults: { provider: undefined, model: undefined, thinkingLevel: "medium" },
+			})).toThrow(/Pi default provider\/model is missing[\s\S]*\/login[\s\S]*\/model/);
+			try {
+				loadPiModelDefaults(missingDir, invalidAgentDir);
+				throw new Error("expected invalid settings to reject");
+			} catch (error) {
+				expect(error).toBeInstanceOf(PiSettingsConfigurationError);
+				expect(String(error)).toContain("invalid_settings: global");
+				expect(String(error)).not.toContain("private-invalid-settings");
+				expect(String(error)).not.toContain(invalidAgentDir);
+			}
+		} finally {
+			rmSync(missingDir, { recursive: true, force: true });
+			rmSync(invalidAgentDir, { recursive: true, force: true });
 		}
 	});
 

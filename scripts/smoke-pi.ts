@@ -8,12 +8,12 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "../src/config.ts";
-import { createBotModelRuntime } from "../src/agent/model-runtime.ts";
+import { createSharedModelRuntime } from "../src/agent/model-runtime.ts";
 import { selectConfiguredBot } from "./bot-selection.ts";
 
 const config = loadConfig(process.cwd());
 const bot = selectConfiguredBot(config.bots, process.argv.slice(2));
-const modelRuntime = await createBotModelRuntime(bot);
+const modelRuntime = await createSharedModelRuntime([bot]);
 const model = modelRuntime.getModel(bot.provider, bot.model);
 if (!model) throw new Error(`model not found: ${bot.provider}/${bot.model}`);
 
@@ -31,7 +31,7 @@ await loader.reload();
 const { session } = await createAgentSession({
 	cwd: process.cwd(),
 	model,
-	thinkingLevel: bot.reasoningEffort as "medium",
+	thinkingLevel: bot.reasoningEffort,
 	modelRuntime,
 	sessionManager: SessionManager.inMemory(process.cwd()),
 	settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),

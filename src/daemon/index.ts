@@ -17,7 +17,7 @@ import { ManualSendService } from "./manual-send.ts";
 import { TelegramControlState } from "../telegram/control-state.ts";
 import { parseTelegramControlCommand, TelegramControlCommandService } from "../telegram/control-command.ts";
 import { publishTelegramControlMenus, TelegramControlCoordinator } from "../telegram/control-integration.ts";
-import { createBotModelRuntime } from "../agent/model-runtime.ts";
+import { createSharedModelRuntime, piAuthSource } from "../agent/model-runtime.ts";
 import { composeDeployment, composePollers } from "./composition.ts";
 
 const rootDir = process.cwd();
@@ -26,6 +26,10 @@ const config = loadConfig(rootDir);
 // session creation): a second `start` while we're still initializing must not race us
 // (REQ-OPS-0001 R4). Released on shutdown; stale pid files are taken over.
 const pidFd = acquirePidLock(config.dataDir);
+const sharedModelRuntime = await createSharedModelRuntime(config.bots).catch((error: unknown) => {
+	releasePidLock(pidFd, config.dataDir);
+	throw error;
+});
 const db = openDb(config.dbPath);
 // Restore effective overrides before BotRuntime captures the shared BotConfig objects.
 const telegramControlState = new TelegramControlState(db, config.bots);
@@ -42,12 +46,15 @@ if (!config.routerSecret) {
 }
 
 // resolve bot identities (getMe) so we can recognize own messages and mentions
-console.log(`[daemon] bot list: ${config.bots.map((b) => `${b.id} (${b.name}) persona=${b.personaPath} model=${b.provider}/${b.model}`).join(", ")}`); // no tokens or API keys
+console.log(
+	`[daemon] bot list: ${config.bots.map((bot) =>
+		`${bot.id} (${bot.name}) model=${bot.provider}/${bot.model}:${bot.reasoningEffort} auth=${piAuthSource(sharedModelRuntime, bot.provider)}`
+	).join(", ")}`,
+); // fixed non-sensitive Pi metadata only
 const composition = await composeDeployment(db, config, {
 	createApi: (bot) => new BotApi(bot.token),
 	createRuntime: async (bot) => {
-		const modelRuntime = await createBotModelRuntime(bot);
-		const runtime = new BotRuntime(db, bot, config, modelRuntime);
+		const runtime = new BotRuntime(db, bot, config, sharedModelRuntime);
 		await runtime.init();
 		return runtime;
 	},

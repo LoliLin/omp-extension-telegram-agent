@@ -5,7 +5,7 @@ import { loadConfig } from "../src/config.ts";
 import { openDb, getBotState, setBotState } from "../src/db/db.ts";
 import { BotApi } from "../src/telegram/api.ts";
 import { BotRuntime } from "../src/agent/runtime.ts";
-import { createBotModelRuntime } from "../src/agent/model-runtime.ts";
+import { createSharedModelRuntime } from "../src/agent/model-runtime.ts";
 import { selectConfiguredBot } from "./bot-selection.ts";
 
 const config = loadConfig(process.cwd());
@@ -25,7 +25,7 @@ db.query(
 	 VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'test')`,
 ).run(chatId, syntheticId, Math.floor(Date.now() / 1000), 999000001, "Tester", "tester_human", `[test] ${bot.name} 在吗？看到的话吱一声`);
 
-const modelRuntime = await createBotModelRuntime(bot);
+const modelRuntime = await createSharedModelRuntime([bot]);
 const rt = new BotRuntime(db, bot, config, modelRuntime);
 await rt.init();
 

@@ -620,3 +620,11 @@
 - canonical TypeScript schema、typed/legacy examples与`.env.example`删除`api_key_env` / `deepseek_key_env` / provider secret。loader仍接受旧deployment字段但直接丢弃，即使它们引用不存在的env也不会阻断启动；Telegram、TinyFish和router secret边界不变。
 - config/runtime targeted 28 pass / 95 assertions；全量347 / 4709、`bun run check`和cache v5 golden通过。shared Pi runtime/default settings与无密钥向导继续由T13j2/T13j3完成，因此REQ-PLAT-0002尚不勾选。
 - Cache impact: **NONE**——只改变启动时credential/config来源，不改system/tool/message/summary grammar、context epoch或每turn provider调用/token；同一显式模型的provider-visible bytes不变。
+
+## 2026-08-08 (71) — 复用Pi defaults与单一model runtime
+
+- `SettingsManager.create(projectRoot,getAgentDir())`成为省略配置时的模型默认来源：Pi global/project `defaultProvider/defaultModel/defaultThinkingLevel`按原生合并规则解析；显式model-only legacy配置可沿用Pi default provider，跨provider选择仍必须带model。missing/invalid settings只给固定引导，不输出文件内容或路径。
+- daemon在pid lock后、任何Telegram identity/polling前只调用一次默认`ModelRuntime.create()`，随后用同一catalog/auth snapshot预检全部bot并把shared runtime传给各独立session。启动日志只列`provider/model:thinking`与固定auth source；create/preflight失败会先释放pid lock。
+- runtime、OAuth refresh、provider auth/timeout/request与compaction失败统一折叠为固定category；上游body、credential对象和原始错误文本不进入DB或日志。隔离Pi fixture同时覆盖stored API-key和OAuth但断言/输出从不包含值。
+- config/runtime/daemon/flush/Tg targeted 99 pass / 979 assertions；全量352 pass / 4732 assertions、typecheck与cache v5 golden通过。当前deployment无provider调用的只读preflight确认A/B均解析为DeepSeek medium + stored auth。
+- Cache impact: **NONE**——模型选择/认证与runtime生命周期发生在请求边界外；system/tool/message/summary grammar、context epoch和同模型provider-visible bytes不变，每turn新增0 token/call。

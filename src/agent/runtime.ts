@@ -56,6 +56,7 @@ import {
 import type { RoutingTrigger, TriggerResult, TriggerSource } from "./router.ts";
 import type { AgentStreamFrame, AgentStreamToolCall } from "../ipc.ts";
 import { consumedControlMessageIds } from "../telegram/control-command.ts";
+import { classifyPiProviderFailure } from "./model-runtime.ts";
 
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
 const EXPOSED_KEY = "exposed_ids";
@@ -323,7 +324,7 @@ export class BotRuntime {
 		const { session } = await createAgentSession({
 			cwd: this.config.dataDir,
 			model,
-			thinkingLevel: this.bot.reasoningEffort as "medium",
+			thinkingLevel: this.bot.reasoningEffort,
 			modelRuntime: this.modelRuntime,
 			sessionManager,
 			settingsManager: SettingsManager.inMemory({ compaction: { enabled: true, reserveTokens, keepRecentTokens: this.bot.compactionKeepRecent } }),
@@ -477,8 +478,9 @@ export class BotRuntime {
 	 */
 	private onCompactionEnd(event: Extract<AgentSessionEvent, { type: "compaction_end" }>): void {
 		if (event.aborted || !event.result) {
-			this.recordEvent("error", { stage: "compaction", reason: event.reason, aborted: event.aborted, error: event.errorMessage ?? null });
-			console.log(`[bot ${this.bot.id}] compaction ${event.aborted ? "aborted" : "failed"} (${event.reason}): ${event.errorMessage ?? "no error message"}`);
+			const category = classifyPiProviderFailure(event.errorMessage ?? "compaction failed");
+			this.recordEvent("error", { stage: "compaction", reason: event.reason, aborted: event.aborted, category });
+			console.log(`[bot ${this.bot.id}] compaction ${event.aborted ? "aborted" : "failed"} (${event.reason}) category=${category}`);
 			return;
 		}
 		this.epoch += 1;
@@ -819,7 +821,7 @@ export class BotRuntime {
 				// R3: a failed flush only produces an error event; nothing escapes as an
 				// unhandled rejection. Messages stay unexposed and are retried by later triggers.
 				try {
-					this.recordEvent("error", { stage: "flush", error: err instanceof Error ? err.message : String(err) });
+					this.recordEvent("error", { stage: "flush", category: classifyPiProviderFailure(err) });
 				} catch {
 					// shutdown may have closed the db under a wedged flush; nothing more to do
 				}

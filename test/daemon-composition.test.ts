@@ -44,6 +44,7 @@ function makeFixture(count: number): string {
 		group_peer_id: 4402809405,
 		provider: "deepseek",
 		model: "deepseek-v4-flash",
+		reasoning_effort: "medium",
 		api_key_env: "platform_provider_key",
 		tinyfish_key_env: "platform_tinyfish_key",
 		bots,
