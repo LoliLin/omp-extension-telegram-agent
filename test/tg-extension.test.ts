@@ -1,7 +1,7 @@
 process.env.TZ = "Asia/Singapore";
 
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { convertToPng, FooterComponent, initTheme, type Theme } from "@earendil-works/pi-coding-agent";
@@ -24,7 +24,16 @@ import {
 	type TgCommandNode,
 	type TelegramExtensionOptions,
 } from "../.pi/extensions/tg-extension.ts";
+import { loadConfig } from "../src/config.ts";
 import type { BotStats, SendMessageResult, TimelineItem } from "../src/ipc.ts";
+import { writeFirstRunDeployment } from "../src/onboarding/config-core.ts";
+import {
+	WIZARD_ACTION_CANCEL,
+	WIZARD_ACTION_EDIT,
+	WIZARD_ACTION_REPLACE,
+	WIZARD_ACTION_VALIDATE,
+	WIZARD_TEMPLATE_EN,
+} from "../src/onboarding/config-wizard.ts";
 import type { TimelineEvent, TimelineHooks, TimelinePort } from "../src/plugin/timeline.ts";
 
 const theme = {
@@ -142,12 +151,27 @@ interface FakeHost {
 	sessionEntries: unknown[];
 	getFooter(): Tui.Component | undefined;
 	editorTexts: string[];
+	dialogCalls: Array<{
+		kind: "select" | "confirm" | "input" | "editor";
+		title: string;
+		options?: readonly string[];
+		message?: string;
+		placeholder?: string;
+		prefill?: string;
+	}>;
 	input(event: { text: string; source?: "interactive" | "rpc" | "extension"; images?: unknown[] }): Promise<{ action: string } | undefined>;
 	restore(data: unknown): Tui.Component | undefined;
 	shutdown(): void;
 }
 
-function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
+interface FakeDialogAnswers {
+	selects?: Array<string | undefined>;
+	confirms?: boolean[];
+	inputs?: Array<string | undefined>;
+	editors?: Array<string | undefined>;
+}
+
+function makeHost(overrides: Partial<TelegramExtensionOptions> = {}, dialogs: FakeDialogAnswers = {}): FakeHost {
 	const clients: FakeTimeline[] = [];
 	const entries: FakeHost["entries"] = [];
 	const notifies: FakeHost["notifies"] = [];
@@ -161,6 +185,7 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 	const footerStatuses = new Map<string, string>();
 	let currentFooter: Tui.Component | undefined;
 	const editorTexts: string[] = [];
+	const dialogCalls: FakeHost["dialogCalls"] = [];
 	const commands = new Map<string, {
 		handler(args: string, ctx: unknown): Promise<void>;
 		getArgumentCompletions?: (prefix: string) => { value: string; label: string; description?: string }[] | null | Promise<{ value: string; label: string; description?: string }[] | null>;
@@ -194,6 +219,22 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000_000, percent: 0 }),
 		ui: {
 			notify: (text: string, level: string) => notifies.push({ text, level }),
+			select: async (title: string, options: string[]) => {
+				dialogCalls.push({ kind: "select", title, options });
+				return dialogs.selects?.shift();
+			},
+			confirm: async (title: string, message: string) => {
+				dialogCalls.push({ kind: "confirm", title, message });
+				return dialogs.confirms?.shift() ?? false;
+			},
+			input: async (title: string, placeholder?: string) => {
+				dialogCalls.push({ kind: "input", title, ...(placeholder === undefined ? {} : { placeholder }) });
+				return dialogs.inputs?.shift();
+			},
+			editor: async (title: string, prefill?: string) => {
+				dialogCalls.push({ kind: "editor", title, ...(prefill === undefined ? {} : { prefill }) });
+				return dialogs.editors?.shift();
+			},
 			setStatus: (key: string, text: string | undefined) => {
 				statuses.push(text ?? "");
 				statusUpdates.push({ key, text });
@@ -265,6 +306,7 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 		sessionEntries,
 		getFooter: () => currentFooter,
 		editorTexts,
+		dialogCalls,
 		input: async (event) => await inputHandler?.({ type: "input", source: "interactive", ...event }, ctx),
 		restore: (data) => renderers.get("telegram-chat")?.({ data }, {}, theme),
 		shutdown: () => shutdownHandlers.forEach((handler) => handler()),
@@ -286,6 +328,33 @@ const message: TimelineItem = {
 	replyTo: 3,
 	edited: true,
 };
+
+const ONBOARD_PROVIDER_SECRET = "NOT_A_REAL_PROVIDER_KEY_FOR_WIZARD_TESTS";
+const ONBOARD_TELEGRAM_SECRET = "123456:THIS_IS_A_TEST_TOKEN_NOT_VALID";
+
+function makeOnboardingRoot(): string {
+	const root = mkdtempSync(join(tmpdir(), "tg-native-config-"));
+	mkdirSync(join(root, "src"), { recursive: true });
+	mkdirSync(join(root, "personas"), { recursive: true });
+	writeFileSync(join(root, "src/config-schema.ts"), readFileSync(join(import.meta.dir, "../src/config-schema.ts"), "utf8"));
+	writeFileSync(join(root, "personas/template.zh.md"), readFileSync(join(import.meta.dir, "../personas/template.zh.md"), "utf8"));
+	writeFileSync(join(root, "personas/template.en.md"), readFileSync(join(import.meta.dir, "../personas/template.en.md"), "utf8"));
+	return root;
+}
+
+function onboardingInputs(): string[] {
+	return [
+		"-1001234567890",
+		"deepseek",
+		"deepseek-v4-flash",
+		"llm_api_key",
+		ONBOARD_PROVIDER_SECRET,
+		"friend",
+		"Mochi",
+		"telegram_bot_token",
+		ONBOARD_TELEGRAM_SECRET,
+	];
+}
 
 describe("native Pi Telegram extension", () => {
 	test("command tree drives native multi-level completion and help", () => {
@@ -310,7 +379,7 @@ describe("native Pi Telegram extension", () => {
 			label: "A (小雪)",
 			description: "Telegram bot 小雪",
 		});
-		expect(formatTgHelp()).toBe("usage: /tg attach [bot] | compose <bot|off> | more | detach | panel [bot|off] | status [bot] | start | restart | stop | status-daemon");
+		expect(formatTgHelp()).toBe("usage: /tg config | attach [bot] | compose <bot|off> | more | detach | panel [bot|off] | status [bot] | start | restart | stop | status-daemon");
 		for (const root of completeTgArguments("", bots) ?? []) {
 			expect(parseTgArguments(root.value, bots).ok).toBe(true);
 			for (const child of completeTgArguments(`${root.value} `, bots) ?? []) {
@@ -346,10 +415,231 @@ describe("native Pi Telegram extension", () => {
 
 	test("native completer keeps static commands when config loading fails", async () => {
 		const host = makeHost({ rootDir: join(tmpdir(), `missing-tg-config-${process.pid}-${Date.now()}`) });
+		expect((await host.complete("con"))?.map((item) => item.value)).toEqual(["config"]);
 		expect((await host.complete("att"))?.map((item) => item.value)).toEqual(["attach"]);
 		expect(await host.complete("attach ")).toBeNull();
 		await host.command("");
 		expect(host.notifies.at(-1)).toEqual({ text: formatTgHelp(), level: "info" });
+	});
+
+	test("config uses Pi dialogs, controlled readiness, and opens the all-bots feed", async () => {
+		const root = makeOnboardingRoot();
+		const processCalls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
+		try {
+			const host = makeHost({
+				rootDir: root,
+				processRunner: async (command, args, options) => {
+					processCalls.push({ command, args, cwd: options.cwd });
+					return { status: 0, stdout: "daemon ready (pid 321)\n", stderr: "" };
+				},
+			}, {
+				selects: [WIZARD_TEMPLATE_EN],
+				inputs: onboardingInputs(),
+				confirms: [true],
+			});
+
+			await host.command("config");
+
+			expect(loadConfig(root).bots.map((bot) => ({ id: bot.id, name: bot.name }))).toEqual([{ id: "friend", name: "Mochi" }]);
+			expect(processCalls).toEqual([{ command: "bun", args: ["run", "src/main.ts", "restart"], cwd: root }]);
+			expect(JSON.stringify(processCalls)).not.toContain(ONBOARD_PROVIDER_SECRET);
+			expect(JSON.stringify(processCalls)).not.toContain(ONBOARD_TELEGRAM_SECRET);
+			expect(host.entries).toHaveLength(1);
+			expect(host.clients).toHaveLength(1);
+			expect(host.clients[0]!.filter).toBeNull();
+			expect(host.clients[0]!.isConnected).toBe(true);
+			expect(host.getFooter()).toBeInstanceOf(FooterComponent);
+			expect((await host.complete("attach "))?.map((item) => item.value)).toEqual(["attach friend"]);
+			expect(host.dialogCalls.map((call) => call.kind)).toEqual([
+				"select", "input", "input", "input", "input", "input", "input", "input", "input", "input", "confirm",
+			]);
+			const transcript = host.notifies.map((item) => item.text).join("\n");
+			expect(transcript).toContain("daemon ready");
+			expect(transcript).toContain("Opening the all-bots feed");
+			expect(transcript).not.toContain(ONBOARD_PROVIDER_SECRET);
+			expect(transcript).not.toContain(ONBOARD_TELEGRAM_SECRET);
+			expect(host.statusUpdates.at(-1)).toEqual({ key: "telegram-config", text: undefined });
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("config cancellation at every Pi dialog leaves every target absent", async () => {
+		for (let abortAt = 0; abortAt <= 10; abortAt++) {
+			const root = makeOnboardingRoot();
+			let processCalls = 0;
+			try {
+				const inputs = onboardingInputs();
+				const dialogs: FakeDialogAnswers = abortAt === 0
+					? { selects: [undefined] }
+					: abortAt <= 9
+						? { selects: [WIZARD_TEMPLATE_EN], inputs: [...inputs.slice(0, abortAt - 1), undefined] }
+						: { selects: [WIZARD_TEMPLATE_EN], inputs, confirms: [false] };
+				const host = makeHost({
+					rootDir: root,
+					processRunner: async () => {
+						processCalls++;
+						return { status: 0, stdout: "daemon ready", stderr: "" };
+					},
+				}, dialogs);
+
+				await host.command("config");
+
+				expect(processCalls).toBe(0);
+				expect(existsSync(join(root, ".env"))).toBe(false);
+				expect(existsSync(join(root, "telegram.config.ts"))).toBe(false);
+				expect(existsSync(join(root, "personas/friend.local.md"))).toBe(false);
+				expect(host.entries).toHaveLength(0);
+				expect(host.notifies.at(-1)?.text).toContain("no files were changed");
+				expect(host.notifies.map((item) => item.text).join("\n")).not.toContain(ONBOARD_PROVIDER_SECRET);
+				expect(host.notifies.map((item) => item.text).join("\n")).not.toContain(ONBOARD_TELEGRAM_SECRET);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		}
+	});
+
+	test("existing config exposes protected actions and editor cancellation preserves exact bytes", async () => {
+		const root = makeOnboardingRoot();
+		const paths = [join(root, ".env"), join(root, "telegram.config.ts"), join(root, "personas/friend.local.md")];
+		try {
+			writeFirstRunDeployment(root, {
+				groupPeerId: "-1001234567890",
+				provider: "deepseek",
+				model: "deepseek-v4-flash",
+				apiKeyEnv: "llm_api_key",
+				providerApiKey: ONBOARD_PROVIDER_SECRET,
+				bot: {
+					id: "friend",
+					name: "Mochi",
+					tokenEnv: "telegram_bot_token",
+					token: ONBOARD_TELEGRAM_SECRET,
+					personaText: readFileSync(join(root, "personas/template.en.md"), "utf8"),
+				},
+			}, { nonce: "existing-dialog" });
+			const before = paths.map((path) => readFileSync(path));
+			let processCalls = 0;
+			const host = makeHost({
+				rootDir: root,
+				processRunner: async () => {
+					processCalls++;
+					return { status: 0, stdout: "daemon ready", stderr: "" };
+				},
+			}, {
+				selects: [WIZARD_ACTION_EDIT],
+				editors: [undefined],
+			});
+
+			await host.command("config");
+
+			expect(host.dialogCalls[0]?.options).toEqual([
+				WIZARD_ACTION_VALIDATE,
+				WIZARD_ACTION_EDIT,
+				WIZARD_ACTION_REPLACE,
+				WIZARD_ACTION_CANCEL,
+			]);
+			expect(host.dialogCalls.map((call) => call.kind)).toEqual(["select", "editor"]);
+			expect(host.dialogCalls[1]?.prefill).toBe(readFileSync(join(root, "telegram.config.ts"), "utf8"));
+			expect(paths.map((path) => readFileSync(path))).toEqual(before);
+			expect(processCalls).toBe(0);
+			expect(host.notifies.at(-1)?.text).toContain("no files were changed");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("config honors bots_config selection without replacing an unread source", async () => {
+		const customRoot = makeOnboardingRoot();
+		try {
+			writeFirstRunDeployment(customRoot, {
+				groupPeerId: "-1001234567890",
+				provider: "deepseek",
+				model: "deepseek-v4-flash",
+				apiKeyEnv: "llm_api_key",
+				providerApiKey: ONBOARD_PROVIDER_SECRET,
+				bot: {
+					id: "friend",
+					name: "Mochi",
+					tokenEnv: "telegram_bot_token",
+					token: ONBOARD_TELEGRAM_SECRET,
+					personaText: readFileSync(join(customRoot, "personas/template.en.md"), "utf8"),
+				},
+			}, { nonce: "custom-source" });
+			renameSync(join(customRoot, "telegram.config.ts"), join(customRoot, "custom.config.ts"));
+			writeFileSync(join(customRoot, ".env"), `${readFileSync(join(customRoot, ".env"), "utf8")}bots_config: custom.config.ts\n`);
+			const originalSource = readFileSync(join(customRoot, "custom.config.ts"));
+			const host = makeHost({ rootDir: customRoot }, {
+				selects: [WIZARD_ACTION_EDIT],
+				editors: [undefined],
+			});
+
+			await host.command("config");
+
+			expect(host.dialogCalls[0]?.options).toEqual([WIZARD_ACTION_VALIDATE, WIZARD_ACTION_EDIT, WIZARD_ACTION_CANCEL]);
+			expect(readFileSync(join(customRoot, "custom.config.ts"))).toEqual(originalSource);
+			expect(existsSync(join(customRoot, "telegram.config.ts"))).toBe(false);
+			expect(loadConfig(customRoot).bots[0]!.id).toBe("friend");
+		} finally {
+			rmSync(customRoot, { recursive: true, force: true });
+		}
+
+		const missingRoot = makeOnboardingRoot();
+		try {
+			const originalEnv = "bots_config: absent.config.ts\nunrelated: keep-exactly\n";
+			writeFileSync(join(missingRoot, ".env"), originalEnv);
+			let processCalls = 0;
+			const host = makeHost({
+				rootDir: missingRoot,
+				processRunner: async () => {
+					processCalls++;
+					return { status: 0, stdout: "daemon ready", stderr: "" };
+				},
+			});
+
+			await host.command("config");
+
+			expect(host.dialogCalls).toHaveLength(0);
+			expect(processCalls).toBe(0);
+			expect(readFileSync(join(missingRoot, ".env"), "utf8")).toBe(originalEnv);
+			expect(existsSync(join(missingRoot, "telegram.config.ts"))).toBe(false);
+			expect(host.notifies.at(-1)?.text).toContain("bots_config");
+			expect(host.notifies.at(-1)?.text).toContain("remove bots_config");
+		} finally {
+			rmSync(missingRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("config keeps a valid deployment when readiness fails and redacts diagnostics", async () => {
+		const root = makeOnboardingRoot();
+		try {
+			const host = makeHost({
+				rootDir: root,
+				processRunner: async () => ({
+					status: 1,
+					stdout: "",
+					stderr: `authentication failed token=${ONBOARD_TELEGRAM_SECRET} api_key=${ONBOARD_PROVIDER_SECRET}`,
+				}),
+			}, {
+				selects: [WIZARD_TEMPLATE_EN],
+				inputs: onboardingInputs(),
+				confirms: [true],
+			});
+
+			await host.command("config");
+
+			expect(loadConfig(root).bots[0]!.id).toBe("friend");
+			expect(host.entries).toHaveLength(0);
+			expect(host.clients).toHaveLength(0);
+			const transcript = host.notifies.map((item) => item.text).join("\n");
+			expect(transcript).toContain("daemon is not ready");
+			expect(transcript).toContain("/tg status-daemon");
+			expect(transcript).toContain("/tg restart");
+			expect(transcript).not.toContain("Opening the all-bots feed");
+			expect(transcript).not.toContain(ONBOARD_PROVIDER_SECRET);
+			expect(transcript).not.toContain(ONBOARD_TELEGRAM_SECRET);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	test("package manifest exposes the extension through the portable fullscreen launcher", () => {
@@ -363,7 +653,13 @@ describe("native Pi Telegram extension", () => {
 		expect(pkg.keywords).toContain("pi-package");
 		expect(pkg.pi.extensions).toContain("./.pi/extensions/tg-extension.ts");
 		expect(pkg.scripts.pi).toBe("bun run scripts/pi-launcher.ts");
-		expect(Object.values(pkg.dependencies)).toEqual(["0.84.1", "0.84.1", "0.84.1", "0.84.1"]);
+		expect(Object.entries(pkg.dependencies).filter(([name]) => name.startsWith("@earendil-works/pi-"))).toEqual([
+			["@earendil-works/pi-agent-core", "0.84.1"],
+			["@earendil-works/pi-ai", "0.84.1"],
+			["@earendil-works/pi-coding-agent", "0.84.1"],
+			["@earendil-works/pi-tui", "0.84.1"],
+		]);
+		expect(pkg.dependencies.jiti).toBe("2.7.0");
 		expect(Object.values(pkg.dependencies).some((value) => value.startsWith("file:"))).toBe(false);
 		expect(settings.tuiMode).toBe("fullscreen");
 	});

@@ -11,7 +11,7 @@ import {
 	type Stats,
 } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
-import { defaultConfigPath, loadConfig, normalizePeerId, type AppConfig } from "../config.ts";
+import { defaultConfigPath, loadConfig, normalizePeerId, parseEnvFile, type AppConfig } from "../config.ts";
 
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const BOT_ID = /^[A-Za-z0-9_-]+$/;
@@ -243,16 +243,21 @@ export function writeFirstRunDeployment(rootDir: string, draft: FirstRunDraft, o
 
 export function validateExistingDeployment(rootDir: string): DeploymentSummary {
 	const root = resolve(rootDir);
-	const path = defaultConfigPath(root);
+	const path = onboardingConfigPath(root);
 	return summarizeConfig(root, loadConfig(root), path);
 }
 
 export function readExistingConfigSource(rootDir: string, ops: ConfigFileOps = nodeConfigFileOps): ConfigSource {
 	const root = resolve(rootDir);
-	const path = defaultConfigPath(root);
+	const path = onboardingConfigPath(root);
 	if (!ops.exists(path)) throw new OnboardingWriteError("no existing .ts/.json configuration was found");
 	assertRegularFile(path, ops);
 	return { path, source: ops.readFile(path) };
+}
+
+function onboardingConfigPath(rootDir: string): string {
+	const fileOverride = parseEnvFile(join(rootDir, ".env")).bots_config;
+	return defaultConfigPath(rootDir, process.env.bots_config ?? fileOverride);
 }
 
 export function validateEditedConfigSource(

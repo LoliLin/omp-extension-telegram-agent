@@ -563,3 +563,12 @@
 - existing validation与Pi editor未来使用的source API保持原文：临时同扩展名验证不碰目标，未确认replace原字节不变，确认后保留完整backup。env merge保留注释/无关key并把受管重复key收口为一次。
 - 7个core tests覆盖fresh/deny/invalid/rename rollback/full replace/editor/final loader与0600。首配显式`tools.search=false`，loader仅在任一bot启用search时要求TinyFish key，避免最小首配被可选服务阻断。
 - Cache impact: **NONE**——onboarding文件I/O不进入provider；既有deployment search默认true且credential/工具集合不变，新用户选择显式config后才形成自己的稳定prefix。正常turn新增0 token/call。
+
+## 2026-08-08 (64) — 接通 Pi 原生 `/tg config`
+
+- `/tg config`进入共享command tree，配置缺失或loader报错时仍可help、补全和dispatch。向导只使用Pi公开`select/input/confirm/editor/notify`，首配收集group、provider/model/env、单bot/token与中英public persona template；已有source提供validate、原文editor、明确backup-replace或cancel。
+- public template在任何credential输入前读取。11个fresh dialog取消点均不创建`.env`、typed config或private persona；existing editor取消对三份目标逐字节不变。dialog值不进入Pi session/provider context、notification或固定restart参数。
+- onboarding source选择现在与production loader同样读取`.env`/process的`bots_config`。项目根自定义source只开放validate/editor，显式缺失或坏override要求先修复；不会生成一份daemon不会读取的default config。
+- writer经production loader验证后只委托既有`bun run src/main.ts restart`；仅exit 0且明确`daemon ready`才清completion cache并复用attach路径建立all-bots native feed。失败保留有效配置、不建立socket/feed、不声称connected，诊断经credential redaction且给出`/tg status-daemon`与`/tg restart`。
+- extension+core targeted 52 tests / 627 assertions、全量333 / 4576与typecheck通过，覆盖loader failure、完整ready、每步取消、existing/override保护动作、readiness failure及token/key脱敏。真实Telegram credential smoke留T14。
+- Cache impact: **NONE**——向导、process control与TUI feed attach均在本地/operator side channel；不改IPC/DB/provider grammar、context epoch、模型调用或每turn token。

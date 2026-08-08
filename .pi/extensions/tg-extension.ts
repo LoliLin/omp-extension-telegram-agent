@@ -12,7 +12,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import * as Tui from "@earendil-works/pi-tui";
 import { loadConfig, type BotConfig } from "../../src/config.ts";
+import { redactDaemonLog } from "../../src/daemon/control.ts";
 import type { AgentStreamFrame, BotStats, EvtItem, MsgItem, TimelineItem } from "../../src/ipc.ts";
+import { runNativeConfigWizard } from "../../src/onboarding/config-wizard.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
 	mediaFileRevision,
@@ -207,6 +209,7 @@ export class NativeMediaCache {
 }
 
 export type TgCommandDispatch =
+	| "config"
 	| "attach"
 	| "compose"
 	| "more"
@@ -262,6 +265,7 @@ function botChildren(dispatch: TgCommandDispatch, optional: boolean, includeOff 
 }
 
 export const TG_COMMAND_TREE: readonly TgCommandNode[] = [
+	{ token: "config", description: "Configure Telegram with Pi dialogs", dispatch: "config" },
 	{ token: "attach", description: "Observe all bots or one bot", dispatch: "attach", children: botChildren("attach", true) },
 	{ token: "compose", description: "Send editor text as a bot", dispatch: "compose", children: botChildren("compose", false, true) },
 	{ token: "more", description: "Load one older history page", dispatch: "more" },
@@ -906,6 +910,31 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		}
 		return undefined;
 	};
+	const attachFeed = (filter: string | null, ctx: ExtensionContext) => {
+		closeCompose(ctx.ui);
+		active?.detach("replaced by a new /tg attach");
+		clearStatsFooter(ctx.ui);
+		mountStatsFooter(filter, "feed", ctx);
+		const data = { instanceId: makeId(), filter };
+		pending = {
+			data,
+			changed: (event, feed) => {
+				requestHostRender?.();
+				if (footerOwner === "feed" && active === feed && event.type === "stats") footerTelemetry?.update(feed.stats);
+				if (event.type === "disconnected" && active === feed) {
+					closeCompose(ctx.ui);
+					clearStatsFooter(ctx.ui);
+					ctx.ui.notify(`Telegram feed disconnected: ${event.reason}`, "error");
+				}
+			},
+		};
+		pi.appendEntry<FeedEntry>(ENTRY_TYPE, data);
+		if (pending) {
+			pending = null;
+			clearStatsFooter(ctx.ui);
+			ctx.ui.notify("Pi did not mount the Telegram transcript entry", "error");
+		}
+	};
 
 	pi.registerEntryRenderer<FeedEntry>(ENTRY_TYPE, (entry, _renderOptions, theme) => {
 		const data = entry.data as FeedEntry | undefined;
@@ -1004,6 +1033,37 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				ctx.ui.notify("Telegram UI requires interactive mode", "error");
 				return;
 			}
+			if (sub === "config") {
+				ctx.ui.setStatus("telegram-config", "TELEGRAM · CONFIGURING");
+				try {
+					const result = await runNativeConfigWizard(ctx.ui, {
+						rootDir,
+						restartDaemon: async () => {
+							closeCompose(ctx.ui);
+							active?.detach("configuration changed; waiting for daemon readiness");
+							active = null;
+							clearStatsFooter(ctx.ui);
+							ctx.ui.setStatus("telegram-config", "TELEGRAM · RESTARTING");
+							let processResult: ProcessRunResult;
+							try {
+								processResult = await runProcess("bun", ["run", "src/main.ts", "restart"], { cwd: rootDir });
+							} catch {
+								return { ready: false, diagnostic: "failed to run the controlled daemon restart" };
+							}
+							const diagnostic = redactDaemonLog([processResult.stdout, processResult.stderr].filter(Boolean).join("\n"));
+							const ready = processResult.status === 0 && /(^|\n)daemon ready(?:\s|$)/.test(diagnostic);
+							return { ready, ...(ready || !diagnostic ? {} : { diagnostic }) };
+						},
+					});
+					if (result.outcome === "ready") {
+						completionBots = undefined;
+						attachFeed(null, ctx);
+					}
+				} finally {
+					ctx.ui.setStatus("telegram-config", undefined);
+				}
+				return;
+			}
 
 			const resolveFilter = (arg: string | undefined): string | null | undefined => {
 				if (!arg) return null;
@@ -1020,29 +1080,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			if (sub === "attach") {
 				const filter = resolveFilter(botArg);
 				if (filter === undefined) return;
-				closeCompose(ctx.ui);
-				active?.detach("replaced by a new /tg attach");
-				clearStatsFooter(ctx.ui);
-				mountStatsFooter(filter, "feed", ctx);
-				const data = { instanceId: makeId(), filter };
-				pending = {
-					data,
-					changed: (event, feed) => {
-						requestHostRender?.();
-						if (footerOwner === "feed" && active === feed && event.type === "stats") footerTelemetry?.update(feed.stats);
-						if (event.type === "disconnected" && active === feed) {
-							closeCompose(ctx.ui);
-							clearStatsFooter(ctx.ui);
-							ctx.ui.notify(`Telegram feed disconnected: ${event.reason}`, "error");
-						}
-					},
-				};
-				pi.appendEntry<FeedEntry>(ENTRY_TYPE, data);
-				if (pending) {
-					pending = null;
-					clearStatsFooter(ctx.ui);
-					ctx.ui.notify("Pi did not mount the Telegram transcript entry", "error");
-				}
+				attachFeed(filter, ctx);
 			} else if (sub === "compose") {
 				if (botArg === "off") {
 					closeCompose(ctx.ui);
@@ -1131,7 +1169,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				} catch (error) {
 					result = { status: null, stdout: "", stderr: `failed to run daemon command: ${String(error)}` };
 				}
-				let output = `${result.stdout}${result.stderr}`.trim() || `daemon ${command}`;
+				let output = redactDaemonLog([result.stdout, result.stderr].filter(Boolean).join("\n")) || `daemon ${command}`;
 				let level: "info" | "error" = result.status === 0 ? "info" : "error";
 				if (sub === "restart" && result.status === 0 && output.includes("daemon ready")) {
 					if (restartFeed) {

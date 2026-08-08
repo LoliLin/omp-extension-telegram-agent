@@ -4,15 +4,15 @@
 
 ## 当前状态
 
-2026-08-08：ONBOARD-0001 T13a–T13c 已完成；继续 T13d Pi native `/tg config` wizard/readiness/feed。
+2026-08-08：ONBOARD-0001 T13a–T13d 已完成；继续 T13e 双语用户/机器文档，再做T13f Pages。
 
 ## 已完成
 
 - `.pi/extensions/tg-extension.ts` 用 `registerEntryRenderer` + `appendEntry` 挂一个 TUI-only feed；Pi host 负责 scroll/resize/editor/theme/images。
 - `src/plugin/timeline.ts` 只保留 IPC、history cursor、dedupe、stats 与有界媒体读取；旧 `src/tui/engine.ts` 已删除。
-- `/tg attach [bot]`、显式 `/tg compose <bot|off>`、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]` 与 daemon commands 可用。
+- `/tg config`、`/tg attach [bot]`、显式 `/tg compose <bot|off>`、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]` 与 daemon commands 可用。
 - package manifest、项目 Pi launcher、fullscreen settings、native Image 和 Pi `FooterComponent` telemetry 已落地。
-- 全量验证：314 tests pass / 0 fail / 4371 assertions；`bun run check`、cache v5 golden通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Telegram群control及Kitty/Ghostty媒体、Rich/reply/组合发送trace留T14。
+- 全量验证：333 tests pass / 0 fail / 4576 assertions；`bun run check`、cache v5 golden通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Telegram群control及Kitty/Ghostty媒体、Rich/reply/组合发送trace留T14。
 
 ## 当前实施队列
 
@@ -32,7 +32,7 @@
 14. **已实现 `REQ-TG-0003`**：T10k统一≤256 KiB source与有界projector；T10l把agent文字接到final `sendRichMessage`，确认parse/method拒绝才单次literal fallback，unknown outcome绝不重发。manual compose仍plain；tool-only说明触发cache 4→5，targeted 61/730通过，真实群留T14。
 15. **已实现 `REQ-REPLY-0001`**：只存嵌入父sender numeric id；canonical+obligation在offset前原子提交。reason/chat/message id穿过dispatch，reply优先占≤40 batch；45 reply按40+5提交，busy/cooldown/stopping/file reopen与A/B隔离已锁。provider成功才清，绝无内容兜底/额外纠错call；targeted 70/2680通过，真实trace留T14。
 16. **已实现 `REQ-OPS-0002`**：共享controller做同仓库PID身份/孤儿枚举、排他control lock、一次SIGTERM、40秒资源释放与真实socket-connect readiness；现场回收`5090+9316→6329`后跨退避窗口无新409。Pi `/tg restart`异步关闭compose，保留transcript并恢复A/all filter与原生footer；真实stopped/running/Pi三路径均通过。
-17. **正在实现 `REQ-ONBOARD-0001`**：T13a portable launcher、T13b typed config/persona privacy、T13c atomic config core均完成。writer覆盖fresh deny、内存字段校验、0600同目录temp、跨三文件rollback、confirmed backups、env保留合并、existing/editor原文验证与final production loader；默认首配search=false，因此不强迫新用户先有TinyFish key。下一步是Pi原生`/tg config`与daemon readiness/feed，随后双语指南和Pages。
+17. **正在实现 `REQ-ONBOARD-0001`**：T13a–T13d完成portable launcher、typed config/persona privacy、atomic writer与Pi原生`/tg config`。无配置时help/completion/dispatch仍可用；11个dialog取消点零写入，existing editor取消保留原字节，`bots_config`自定义source不被旁路覆盖；明确daemon ready后自动all-bots attach，失败保留有效配置并脱敏提示status/retry。下一步是双语README/user/maintainer指南与Pages。
 18. **已实现 `REQ-UI-0011`**：message/event/stream复用Pi `HStack/TruncatedText` header；身份leading、metadata trailing，bot id优先。40/60/80/120 columns覆盖CJK/emoji/长username与OSC，普通消息仍两行；真实Pi 80/40 columns和当前/浅色主题通过，production extension精确`+15/-15`净零行。
 19. **已实现 `REQ-SEND-0002`（`bd4be62`）**：Telegram create后canonical SQLite按25/100/250ms仅本地重试；committed/partial/unknown统一固定`no_retry`+terminate，exposure/broadcast/event/typing失败隔离并只记脱敏诊断。真实双连接lock复现`#19614`路径只有一次create，poller echo最终一行；33 targeted / 190 assertions、全量268 / 3949通过，真实组合发送留T14。
 20. **已实现 `REQ-UI-0012`（`49e3067`）**：只服从Pi capability；Kitty路径以公开`convertToPng`异步归一化JPEG/GIF/WebP并继续由`Tui.Image`渲染。path/size/mtime revision共享in-flight，32项/32 MiB LRU、8 MiB单项、32 pending及失败记忆有界；完成只替换相关卡片，detach/restart/shutdown迟到callback失效。targeted 50/469、全量279/4041通过，真实Kitty/Ghostty smoke留T14。
