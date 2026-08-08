@@ -242,3 +242,10 @@
 - 本次文档基线提交 7 篇 Proposed REQ、调查证据、依赖顺序和当前 handoff；不实现这些新行为。
 - Cache impact: **NONE**（workflow/docs only）。native transcript commit 的 cache impact 也是 NONE，golden 已通过。
 - 下一步：T3 优先修 REQ-STICKER-0002，并执行唯一一次预期的 cache schema bump。
+
+## 2026-08-08 (23) — sticker 候选按 bot 可发送性隔离
+
+- fixed catalog、catalog vision preload 与 dynamic candidate SQL 全部要求当前 `bot_id` 在 `media_file_ids` 有映射；set name 只负责分区，不再被误当作可发送能力。
+- `ensureStickerCatalog` 返回并记录 catalog/sendable/missing mapping；部分 fetch 失败留下的全局 media 行不会进入当前 bot prefix。send preflight 仍在任何 network call 前执行，异常映射另记 `candidate_invariant`。
+- 回归 fixture 精确覆盖生产历史 A 的 `s241–s244`、B 的 `s144`，并覆盖 shared/A-only dynamic sticker 与缺映射 fixed row。
+- Cache impact: **INTENTIONAL**——`CACHE_SCHEMA_VERSION` 2→3；合法 prefix hash 不变，但部署中不可发送的旧行会被移除，下次 daemon 启动自动开新 epoch。动态候选减少，降低失败 tool turn 与 miss tokens。

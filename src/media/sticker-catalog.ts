@@ -45,7 +45,7 @@ export async function ensureStickerCatalog(
 	api: BotApi,
 	botId: string,
 	sets: string[],
-): Promise<{ total: number; truncated: boolean; pendingVision: number }> {
+): Promise<{ total: number; sendable: number; missingMapping: number; truncated: boolean; pendingVision: number }> {
 	let total = 0;
 	let truncated = false;
 	for (const setName of sets) {
@@ -91,14 +91,40 @@ export async function ensureStickerCatalog(
 	if (truncated) {
 		console.warn(`[sticker-catalog] ${botId}: catalog truncated at ${STICKER_CATALOG_MAX} stickers (REQ-STICKER-0001 R5)`);
 	}
+	const counts = db
+		.query(
+			`SELECT
+			   COUNT(*) AS catalog_rows,
+			   SUM(CASE WHEN EXISTS (
+			     SELECT 1 FROM media_file_ids f
+			      WHERE f.bot_id = ? AND f.file_unique_id = media.file_unique_id
+			   ) THEN 1 ELSE 0 END) AS sendable
+			 FROM media
+			 WHERE kind = 'sticker' AND sticker_set IN (SELECT value FROM json_each(?))`,
+		)
+		.get(botId, JSON.stringify(sets)) as { catalog_rows: number; sendable: number | null };
+	const sendable = counts.sendable ?? 0;
+	const missingMapping = counts.catalog_rows - sendable;
+	console.log(
+		`[sticker-catalog] ${botId}: fetched=${total} catalog=${counts.catalog_rows} sendable=${sendable} missing_file_id=${missingMapping}`,
+	);
+	if (missingMapping > 0) {
+		console.warn(
+			`[sticker-catalog] ${botId}: ${sendable}/${counts.catalog_rows} configured stickers are sendable; ${missingMapping} missing this bot's file_id`,
+		);
+	}
 	const pendingVision = db
 		.query(
 			`SELECT COUNT(*) c FROM media
 			 WHERE kind = 'sticker' AND sticker_set IN (SELECT value FROM json_each(?))
+			   AND EXISTS (
+			     SELECT 1 FROM media_file_ids f
+			      WHERE f.bot_id = ? AND f.file_unique_id = media.file_unique_id
+			   )
 			   AND (vision IS NULL OR json_extract(vision, '$.text') IS NULL OR json_extract(vision, '$.unsupported') = 1)`,
 		)
-		.get(JSON.stringify(sets)) as { c: number };
-	return { total, truncated, pendingVision: pendingVision.c };
+		.get(JSON.stringify(sets), botId) as { c: number };
+	return { total, sendable, missingMapping, truncated, pendingVision: pendingVision.c };
 }
 
 /**
@@ -118,9 +144,13 @@ export function preRecognizeCatalogVision(
 		.query(
 			`SELECT file_unique_id FROM media
 			 WHERE kind = 'sticker' AND sticker_set IN (SELECT value FROM json_each(?))
+			   AND EXISTS (
+			     SELECT 1 FROM media_file_ids f
+			      WHERE f.bot_id = ? AND f.file_unique_id = media.file_unique_id
+			   )
 			   AND (vision IS NULL OR json_extract(vision, '$.text') IS NULL OR json_extract(vision, '$.unsupported') = 1)`,
 		)
-		.all(JSON.stringify(sets)) as { file_unique_id: string }[];
+		.all(JSON.stringify(sets), botId) as { file_unique_id: string }[];
 	if (pending.length === 0) return;
 	console.log(`[sticker-catalog] ${botId}: pre-recognizing vision for ${pending.length} stickers in background (first start takes minutes)`);
 	const workers = Math.min(4, pending.length);
@@ -148,19 +178,24 @@ export function preRecognizeCatalogVision(
 
 /**
  * Deterministic catalog block for the system prompt (stable prefix, REQ-STICKER-0001 R2).
- * Order = configured set order, then rowid. Stickers without vision text are marked [未识别]
- * (tgs/webm or vision failure). Empty string when the bot has no catalog.
+ * Order = configured set order, then rowid. Only entries with a file_id for this bot are
+ * exposed. Stickers without vision text are marked [未识别] (tgs/webm or vision failure).
+ * Empty string when the bot has no sendable catalog entries.
  */
-export function stickerCatalogBlock(db: Database, sets: string[]): string {
+export function stickerCatalogBlock(db: Database, botId: string, sets: string[]): string {
 	const lines: string[] = [];
 	for (const setName of sets) {
 		const rows = db
 			.query(
-				`SELECT short_id, sticker_emoji, vision FROM media
+				`SELECT short_id, sticker_emoji, vision FROM media m
 				 WHERE kind = 'sticker' AND sticker_set = ? AND short_id IS NOT NULL
+				   AND EXISTS (
+				     SELECT 1 FROM media_file_ids f
+				      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
+				   )
 				 ORDER BY rowid`,
 			)
-			.all(setName) as { short_id: string; sticker_emoji: string | null; vision: string | null }[];
+			.all(setName, botId) as { short_id: string; sticker_emoji: string | null; vision: string | null }[];
 		for (const r of rows) {
 			let semantic = "[未识别]";
 			if (r.vision) {

@@ -18,7 +18,7 @@ import { toolsHash } from "../src/agent/tools.ts";
 import { stickerCatalogBlock } from "../src/media/sticker-catalog.ts";
 
 const GOLDEN = {
-	schemaVersion: 2,
+	schemaVersion: 3,
 	systemA: "c2d68946a3a6",
 	systemB: "e2d094446af3",
 	serialize: "68a17d6e5c05",
@@ -68,11 +68,15 @@ test("sticker catalog block is part of the stable prefix grammar (REQ-STICKER-00
 	);
 	ins.run("uq-cat-1", "Mikufufu", "😺", JSON.stringify({ model: "m", kind: "sticker", text: "得意的赞同，smug/amused", at: 1 }), "s1");
 	ins.run("uq-cat-2", "Mikufufu", "🐱", null, "s2"); // no vision yet -> [未识别]
-	const block = stickerCatalogBlock(db, ["Mikufufu"]);
+	ins.run("uq-cat-b-only", "Mikufufu", "🅱️", JSON.stringify({ model: "m", kind: "sticker", text: "另一个 bot 的映射", at: 1 }), "s3");
+	db.query("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', 'fid-1', 'uq-cat-1'), ('A', 'fid-2', 'uq-cat-2')").run();
+	db.query("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('B', 'fid-3', 'uq-cat-b-only')").run();
+	const block = stickerCatalogBlock(db, "A", ["Mikufufu"]);
 	expect(block).toContain("s1 = 😺 得意的赞同，smug/amused");
 	expect(block).toContain("s2 = 🐱 [未识别]");
+	expect(block).not.toContain("s3");
 	const persona = readFileSync("personas/xiaoxue.md", "utf8");
 	expect(sha256Short(buildSystemPrompt(persona, block))).toBe(GOLDEN.systemAWithCatalog);
 	// determinism: same DB state -> byte-identical block
-	expect(stickerCatalogBlock(db, ["Mikufufu"])).toBe(block);
+	expect(stickerCatalogBlock(db, "A", ["Mikufufu"])).toBe(block);
 });

@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 2; // v2: fixed sticker catalog block in system prompt (REQ-STICKER-0001)
+export const CACHE_SCHEMA_VERSION = 3; // v3: sticker catalog exposes only entries sendable by the current bot
 
 // Fixed shared protocol block, appended after the persona. Never reorder.
 const PROTOCOL = `

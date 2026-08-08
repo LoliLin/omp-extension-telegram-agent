@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：Telegram 前端已重做为真正的 Pi native transcript plugin；REQ-UI-0001/2/3/4 重新验收后完成。用户随后新增 7 项，已调查并写成 REQ，**尚未实现**。
+2026-08-08：Telegram 前端已重做为真正的 Pi native transcript plugin；新增需求中 STICKER-0002 已实现并通过目标测试，下一项是 ROUTE-0001。
 
 ## 已完成
 
@@ -14,9 +14,9 @@
 - package manifest、项目 Pi launcher、fullscreen settings、native Image 和 component-factory widget 已落地。
 - 全量验证：149 tests pass / 0 fail / 2821 assertions；`bun run check`、cache golden、diff check 通过；真实 Pi fullscreen TTY 验证 attach/more/detach。
 
-## 下一步需求（仅调查完成）
+## 当前实施队列
 
-1. **P0 `REQ-STICKER-0002`**：动态候选跨 bot 泄漏。A 的 `s241–s244` 与 B 的 `s144` no-file-id 已从 session + DB 定位；候选需按 `media_file_ids.bot_id` 过滤。实现会改变稳定 catalog prefix，必须 bump cache schema。
+1. **已实现 `REQ-STICKER-0002`**：fixed/dynamic catalog 只暴露当前 bot 有 file_id mapping 的 short id；A `s241–s244` / B `s144` 回归已锁，cache schema 2→3。真实群各 bot 发送 smoke 留到总验收。
 2. **P1 `REQ-ROUTE-0001`**：probability 命中 busy bot 目前会设置 pending run；改为 busy/cooldown skip，2 秒后只让新消息重新采样，不阻塞 poller；explicit trigger 保留。
 3. **P1 `REQ-UI-0005`**：显式 compose 模式用 Pi `input` event 拦截原生 editor，daemon 新增 additive send IPC；不替换 editor、不进 LLM。
 4. **P1 `REQ-UI-0006`**：vision 持久化完成后广播 additive update，更新同一 TUI-only media card；复用 lazy vision，不新增模型调用。
@@ -41,5 +41,5 @@ bun run src/main.ts stop
 
 - 本次 native UI 重写：Cache impact **NONE**，IPC/DB/provider grammar 未变。
 - 新的 UI-0005/UI-0006 设计也要求 NONE。
-- STICKER-0002 修复固定 prefix 时是 **INTENTIONAL** cache change，必须走 schema bump + new epoch + golden。
+- STICKER-0002 是 **INTENTIONAL** cache change：schema 已从 2 bump 到 3，golden 通过；daemon 下次受控重启会自动开新 epoch。
 - 原子提交规范已在 `c32d937` 固化；native transcript 重写已签名提交为 `19819c9`。剩余 7 项按 `PLAN-20260808-complete-new-reqs` 逐项实现/提交。

@@ -91,6 +91,13 @@
 - 识别结果按 media identity 持久化，所有配置 bot 共享（vision cache）
 - photo 与 sticker 用不同 prompt 语义
 
+## Sticker 可发送性（REQ-STICKER-0002）
+
+- `media.file_unique_id` / `short_id` 是共享身份；`media_file_ids(bot_id,file_id,file_unique_id)` 才是 bot-specific 可发送能力。
+- fixed catalog、background vision 与 dynamic candidates 都用当前 bot 的 mapping 过滤；set name 只决定 fixed/dynamic 分区，不能证明可发送。
+- `send` tool 在任何 network call 前再次用同一 mapping 做 preflight；若已提交的 short id 缺 mapping，记录 `candidate_invariant`，不会先发文字再失败。
+- catalog 启动日志给出 fetched/catalog/sendable/missing_file_id；缺 mapping 行不进入稳定 prefix。该修复对应 cache schema v3。
+
 ## Provider context flow
 
 - 稳定 prefix：system prompt（persona + 群聊规则 + 消息 grammar 说明 + 格式化规则）+ 固定顺序 tool schema

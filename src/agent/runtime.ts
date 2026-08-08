@@ -102,7 +102,7 @@ export class BotRuntime {
 			// the background so the poller is never held offline for minutes (REQ-STICKER-0001 R1)
 			await ensureStickerCatalog(this.db, this.api, this.bot.id, this.bot.stickerSets);
 			preRecognizeCatalogVision(this.db, this.api, this.bot.id, this.bot.stickerSets, this.config.auxiliaryVisualModel);
-			stickerCatalog = stickerCatalogBlock(this.db, this.bot.stickerSets);
+			stickerCatalog = stickerCatalogBlock(this.db, this.bot.id, this.bot.stickerSets);
 		}
 		const systemPrompt = buildSystemPrompt(persona, stickerCatalog);
 		this.systemHash = sha256Short(systemPrompt);
@@ -374,7 +374,10 @@ export class BotRuntime {
 				| null;
 			if (!row) throw new Error(`unknown sticker id: ${params.sticker} (use one from the Available stickers list)`);
 			stickerFileId = fileIdForBot(this.db, this.bot.id, row.file_unique_id);
-			if (!stickerFileId) throw new Error(`sticker ${params.sticker} is not sendable by this bot (no file_id)`);
+			if (!stickerFileId) {
+				this.recordEvent("error", { stage: "send", code: "candidate_invariant", sticker: params.sticker });
+				throw new Error(`candidate invariant violated: sticker ${params.sticker} is not sendable by this bot (no file_id)`);
+			}
 		}
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		const sentIds: number[] = [];
@@ -489,8 +492,15 @@ export class BotRuntime {
 	private stickerCandidatesBlock(): string {
 		// assign short ids (rowid-based: stable and unique, race-free)
 		const unassigned = this.db
-			.query("SELECT rowid, file_unique_id FROM media WHERE kind = 'sticker' AND json_extract(vision, '$.text') IS NOT NULL AND short_id IS NULL")
-			.all() as { rowid: number; file_unique_id: string }[];
+			.query(
+				`SELECT rowid, file_unique_id FROM media m
+				 WHERE kind = 'sticker' AND json_extract(vision, '$.text') IS NOT NULL AND short_id IS NULL
+				   AND EXISTS (
+				     SELECT 1 FROM media_file_ids f
+				      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
+				   )`,
+			)
+			.all(this.bot.id) as { rowid: number; file_unique_id: string }[];
 		for (const row of unassigned) {
 			this.db.query("UPDATE media SET short_id = ? WHERE file_unique_id = ?").run(`s${row.rowid}`, row.file_unique_id);
 		}
@@ -498,15 +508,27 @@ export class BotRuntime {
 			this.bot.stickerSets.length > 0
 				? (this.db
 						.query(
-							`SELECT short_id, sticker_emoji, vision FROM media
+							`SELECT short_id, sticker_emoji, vision FROM media m
 							 WHERE kind = 'sticker' AND short_id IS NOT NULL AND json_extract(vision, '$.text') IS NOT NULL
 							   AND (sticker_set IS NULL OR sticker_set NOT IN (SELECT value FROM json_each(?)))
+							   AND EXISTS (
+							     SELECT 1 FROM media_file_ids f
+							      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
+							   )
 							 ORDER BY rowid DESC LIMIT 8`,
 						)
-						.all(JSON.stringify(this.bot.stickerSets)) as { short_id: string; sticker_emoji: string | null; vision: string }[])
+						.all(JSON.stringify(this.bot.stickerSets), this.bot.id) as { short_id: string; sticker_emoji: string | null; vision: string }[])
 				: (this.db
-						.query("SELECT short_id, sticker_emoji, vision FROM media WHERE kind = 'sticker' AND short_id IS NOT NULL AND json_extract(vision, '$.text') IS NOT NULL ORDER BY rowid DESC LIMIT 8")
-						.all() as { short_id: string; sticker_emoji: string | null; vision: string }[]);
+						.query(
+							`SELECT short_id, sticker_emoji, vision FROM media m
+							 WHERE kind = 'sticker' AND short_id IS NOT NULL AND json_extract(vision, '$.text') IS NOT NULL
+							   AND EXISTS (
+							     SELECT 1 FROM media_file_ids f
+							      WHERE f.bot_id = ? AND f.file_unique_id = m.file_unique_id
+							   )
+							 ORDER BY rowid DESC LIMIT 8`,
+						)
+						.all(this.bot.id) as { short_id: string; sticker_emoji: string | null; vision: string }[]);
 		if (rows.length === 0) return "";
 		const lines = rows.map((r) => {
 			// catalog short_ids are assigned before vision completes (background pre-recognition);

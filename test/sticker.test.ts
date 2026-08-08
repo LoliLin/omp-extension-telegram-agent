@@ -75,11 +75,17 @@ function sticker(id: string, emoji: string): { file_id: string; file_unique_id: 
 	return { file_id: `fid-${id}`, file_unique_id: `uq-${id}`, emoji };
 }
 
+function mapSticker(botId: string, fileUniqueId: string, fileId = `fid-${botId}-${fileUniqueId}`): void {
+	db.query("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES (?, ?, ?)").run(botId, fileId, fileUniqueId);
+}
+
 describe("ensureStickerCatalog (R1)", () => {
 	test("persists media identity, per-bot file_id and rowid-based short_ids; block is deterministic", async () => {
 		const api = fakeApi({ cats: [sticker("c1", "😺"), sticker("c2", "🐱")] });
 		const res = await ensureStickerCatalog(db, api as never, "A", ["cats"]);
 		expect(res.total).toBe(2);
+		expect(res.sendable).toBe(2);
+		expect(res.missingMapping).toBe(0);
 		expect(res.truncated).toBe(false);
 
 		const rows = db.query("SELECT file_unique_id, sticker_set, sticker_emoji, short_id FROM media WHERE kind='sticker' ORDER BY rowid").all();
@@ -93,10 +99,10 @@ describe("ensureStickerCatalog (R1)", () => {
 			{ bot_id: "A", file_id: "fid-c2" },
 		]);
 
-		const block = stickerCatalogBlock(db, ["cats"]);
+		const block = stickerCatalogBlock(db, "A", ["cats"]);
 		expect(block).toContain("s1 = 😺 [未识别]");
 		expect(block).toContain("s2 = 🐱 [未识别]");
-		expect(stickerCatalogBlock(db, ["cats"])).toBe(block); // deterministic
+		expect(stickerCatalogBlock(db, "A", ["cats"])).toBe(block); // deterministic
 
 		// idempotent reload: same ids, no duplicates
 		await ensureStickerCatalog(db, api as never, "A", ["cats"]);
@@ -109,7 +115,7 @@ describe("ensureStickerCatalog (R1)", () => {
 		);
 		const api = fakeApi({ cats: [sticker("c1", "😺"), sticker("c2", "🐱")] });
 		await ensureStickerCatalog(db, api as never, "A", ["cats"]);
-		const block = stickerCatalogBlock(db, ["cats"]);
+		const block = stickerCatalogBlock(db, "A", ["cats"]);
 		expect(block).toContain("s1 = 😺 得意的赞同");
 		expect(block).toContain("s2 = 🐱 [未识别]");
 	});
@@ -124,14 +130,21 @@ describe("ensureStickerCatalog (R1)", () => {
 	});
 
 	test("a failed set name logs and does not block the catalog", async () => {
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-stale', 'sticker', 'missing-set', '😿', 's99')").run();
 		const api = fakeApi({ good: [sticker("g1", "😺")] });
-		const warn = console.error;
+		const originalError = console.error;
+		const originalWarn = console.warn;
 		console.error = () => {};
+		console.warn = () => {};
 		try {
 			const res = await ensureStickerCatalog(db, api as never, "A", ["missing-set", "good"]);
 			expect(res.total).toBe(1);
+			expect(res.sendable).toBe(1);
+			expect(res.missingMapping).toBe(1);
+			expect(stickerCatalogBlock(db, "A", ["missing-set", "good"])).not.toContain("s99");
 		} finally {
-			console.error = warn;
+			console.error = originalError;
+			console.warn = originalWarn;
 		}
 	});
 });
@@ -140,9 +153,11 @@ describe("catalog serialization (R2)", () => {
 	test("order follows configured set order, then rowid; empty for no sets", () => {
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-a1', 'sticker', 'setA', '😺', 's1')").run();
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, short_id) VALUES ('uq-b1', 'sticker', 'setB', '🐱', 's2')").run();
-		const block = stickerCatalogBlock(db, ["setB", "setA"]);
+		mapSticker("A", "uq-a1");
+		mapSticker("A", "uq-b1");
+		const block = stickerCatalogBlock(db, "A", ["setB", "setA"]);
 		expect(block.indexOf("s2")).toBeLessThan(block.indexOf("s1")); // setB before setA
-		expect(stickerCatalogBlock(db, [])).toBe("");
+		expect(stickerCatalogBlock(db, "A", [])).toBe("");
 	});
 });
 
@@ -171,6 +186,21 @@ describe("send from catalog (R3)", () => {
 		(rt as any).api = { sendSticker: async () => { networkCalls++; } };
 		await expect((rt as any).executeSend({ sticker: "s999" })).rejects.toThrow(/unknown sticker/);
 		expect(networkCalls).toBe(0);
+	});
+
+	test("a known id without this bot's mapping is diagnosed as a candidate invariant violation", async () => {
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, short_id) VALUES ('uq-b-only', 'sticker', '🅱️', 's241')").run();
+		mapSticker("B", "uq-b-only");
+		const rt = new BotRuntime(db, makeBot({ id: "A" }), makeConfig(), null as never);
+		let networkCalls = 0;
+		(rt as any).api = {
+			sendMessage: async () => { networkCalls++; },
+			sendSticker: async () => { networkCalls++; },
+		};
+		await expect((rt as any).executeSend({ message: "hi", sticker: "s241" })).rejects.toThrow(/candidate invariant violated/);
+		expect(networkCalls).toBe(0);
+		const event = db.query("SELECT payload FROM agent_events WHERE kind = 'error'").get() as { payload: string };
+		expect(JSON.parse(event.payload)).toMatchObject({ stage: "send", code: "candidate_invariant", sticker: "s241" });
 	});
 });
 
@@ -205,6 +235,8 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-ext-2', 'sticker', '😺', ?, 's6')").run(
 			JSON.stringify({ model: "m", kind: "sticker", text: "另一个", at: 1 }),
 		);
+		mapSticker("A", "uq-ext-1");
+		mapSticker("A", "uq-ext-2");
 		(rt as any).ensureBatchVision = async () => {};
 		rt.trigger();
 		await (rt as any).flushPromise;
@@ -223,6 +255,7 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-ext0', 'sticker', '😺', ?, 's10')").run(
 			JSON.stringify({ model: "m", kind: "sticker", text: "上下文语义", at: 1 }),
 		);
+		mapSticker("A", "uq-ext0");
 		const rt = new BotRuntime(db, makeBot({ stickerSets: ["cats"] }), makeConfig(), null as never);
 		const block = (rt as any).stickerCandidatesBlock() as string;
 		expect(block).toContain("s10");
@@ -237,6 +270,8 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-ext', 'sticker', '😺', ?, 's2')").run(
 			JSON.stringify({ model: "m", kind: "sticker", text: "上下文语义", at: 1 }),
 		);
+		mapSticker("A", "uq-cat");
+		mapSticker("A", "uq-ext");
 		const rt = new BotRuntime(db, makeBot({ stickerSets: ["cats"] }), makeConfig(), null as never);
 		const block = (rt as any).stickerCandidatesBlock() as string;
 		expect(block).toContain("s2 = 😺 上下文语义");
@@ -246,5 +281,39 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 		const block2 = (rt2 as any).stickerCandidatesBlock() as string;
 		expect(block2).toContain("s1");
 		expect(block2).toContain("s2");
+	});
+
+	test("REQ-STICKER-0002: fixed catalogs and dynamic candidates never leak another bot's mappings", () => {
+		const vision = (text: string) => JSON.stringify({ model: "m", kind: "sticker", text, at: 1 });
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, vision, short_id) VALUES ('uq-a144', 'sticker', 'setA', '😺', ?, 's144')").run(vision("A 目录"));
+		for (const id of [241, 242, 243, 244]) {
+			db.query("INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, vision, short_id) VALUES (?, 'sticker', 'setB', '🐱', ?, ?)").run(
+				`uq-b${id}`,
+				vision(`B 目录 ${id}`),
+				`s${id}`,
+			);
+		}
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-shared', 'sticker', '🤝', ?, 's300')").run(vision("双方可用"));
+		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, vision, short_id) VALUES ('uq-a-only', 'sticker', '🅰️', ?, 's301')").run(vision("仅 A 可用"));
+
+		mapSticker("A", "uq-a144");
+		for (const id of [241, 242, 243, 244]) mapSticker("B", `uq-b${id}`);
+		mapSticker("A", "uq-shared");
+		mapSticker("B", "uq-shared");
+		mapSticker("A", "uq-a-only");
+
+		expect(stickerCatalogBlock(db, "A", ["setA"])).toContain("s144");
+		expect(stickerCatalogBlock(db, "A", ["setB"])).toBe("");
+		expect(stickerCatalogBlock(db, "B", ["setB"])).toContain("s241");
+		expect(stickerCatalogBlock(db, "B", ["setA"])).toBe("");
+
+		const aCandidates = (new BotRuntime(db, makeBot({ id: "A", stickerSets: ["setA"] }), makeConfig(), null as never) as any).stickerCandidatesBlock() as string;
+		const bCandidates = (new BotRuntime(db, makeBot({ id: "B", stickerSets: ["setB"] }), makeConfig(), null as never) as any).stickerCandidatesBlock() as string;
+		expect(aCandidates).toContain("s300");
+		expect(aCandidates).toContain("s301");
+		for (const id of [241, 242, 243, 244]) expect(aCandidates).not.toContain(`s${id}`);
+		expect(bCandidates).toContain("s300");
+		expect(bCandidates).not.toContain("s144");
+		expect(bCandidates).not.toContain("s301");
 	});
 });

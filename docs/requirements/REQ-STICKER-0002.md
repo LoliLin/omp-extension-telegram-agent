@@ -1,6 +1,6 @@
 # REQ-STICKER-0002: 固定目录与动态候选必须按 bot 可发送性隔离
 
-- **Status:** Proposed（2026-08-08 已复现并定位，未修复）
+- **Status:** Implemented（2026-08-08；unit/cache/check 已验证，真实群 smoke 汇总到 T14）
 - **Priority:** P0
 - **Source:** 用户新增 Bug：「历史记录显示，agent 在发送固定贴纸时有问题」
 - **依赖:** REQ-STICKER-0001、REQ-CONF-0001

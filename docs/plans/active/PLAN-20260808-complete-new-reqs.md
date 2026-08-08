@@ -20,7 +20,7 @@ REQ-LIST 当前新增的 7 项全部实现、验证并以 commit 标注勾选；
 - [x] **T0** — 强化 AGENTS/traceability 的原子签名提交与 message 规范，并建立本计划；validates: 用户提交规范要求；commit: docs/policy only
 - [x] **T1** — 提交已验证的 Pi native transcript 重写（package、timeline、entry、tests、current architecture docs）；validates: REQ-UI-0001/2/3/4；commit: native observer behavior
 - [x] **T2** — 提交 7 篇新增 REQ、调查记录、REQ-LIST 与 handoff/devlog 基线；validates: requirements traceability；commit: docs only
-- [ ] **T3** — 按 bot file_id 过滤 fixed/dynamic sticker candidates，补真实回归 fixture并 bump cache schema；validates: STICKER-0002 AC1–AC6；commit: sticker invariant
+- [x] **T3** — 按 bot file_id 过滤 fixed/dynamic sticker candidates，补真实回归 fixture并 bump cache schema；validates: STICKER-0002 AC1–AC6；commit: sticker invariant
 - [ ] **T4** — 为 probability routing 增加 runtime availability + 2s deadline cooldown（explicit trigger 保留），用 fake clock/burst replay验证；validates: ROUTE-0001 AC1–AC7；commit: routing scheduler
 - [ ] **T5** — 抽取 daemon manual-send service并新增 additive request-id IPC send_message/ack/error；validates: UI-0005 R3–R5；commit: daemon write contract
 - [ ] **T6** — Pi `input` event + explicit compose identity 接入原生 editor，处理附件/失败/unknown outcome/cleanup；validates: UI-0005 AC1–AC6；commit: editor behavior
