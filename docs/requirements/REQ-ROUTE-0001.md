@@ -1,6 +1,6 @@
 # REQ-ROUTE-0001: 忙碌 bot 跳过概率采样并在回复后冷却
 
-- **Status:** Implemented（2026-08-08；fake-clock burst/property/check/cache 已验证）
+- **Status:** In Progress（2026-08-08；probability scheduler 已实现，新增配置名称强制回复验收待实现）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：允许 A/B 并发回复；两者忙碌时新消息全部跳过采样；回复结束后约 2 秒再恢复采样，以更像真人
 - **依赖:** REQ-AGENT-0001、REQ-CONF-0001
@@ -26,7 +26,7 @@ daemon 对每条 canonical inserted/edited message 都调用 `routeMessage()`。
 - 不丢消息、不停止 ingestion、不从 SQLite 删除忙碌期消息。
 - 不让两个 bot 响应同一条概率消息；既有“最多一个 target”语义保留。
 - 不把 2 秒实现成阻塞 sleep。
-- 本需求不改变 explicit @mention/reply/name trigger 的优先级；它们不是随机“采样”，是否需要独立 cooldown 策略另开需求。
+- 本需求不降低 explicit @mention/reply/name trigger 的优先级；它们不是随机“采样”，配置名称命中必须绕过 probability busy/cooldown gate。公开发送义务由 REQ-SEND-0001 统一约束。
 
 ## 需求
 
@@ -36,7 +36,7 @@ daemon 对每条 canonical inserted/edited message 都调用 `routeMessage()`。
 - **R4 — 并发语义：** A busy 不妨碍本来就命中 B 概率桶的后续消息触发 B；当 A/B 都 busy 时所有 probability message fast-skip，不调用任一 `trigger()`、不设置 `pendingTrigger`。
 - **R5 — 冷却：** 每次概率触发的 run 无论发送、保持沉默或受控失败，settle 后进入默认 2000 ms cooldown；用 monotonic/可注入 clock 记录 deadline。shutdown 不等待 cooldown。
 - **R6 — 不补抽：** busy/cooldown 期间被跳过的 message 不在状态恢复时自动 route；只有 cooldown 后新到的 inserted message 才产生新概率决策。下一次实际 flush 仍按 exposure 规则带上有界未曝光历史。
-- **R7 — 显式触发：** mention/reply/name 在 busy 时沿用 REQ-AGENT-0001 的 pending coalesce，避免直接呼叫丢失；它们不被概率 cooldown 静默吞掉。实现若要改变此点必须先回到本 REQ 明确决策。
+- **R7 — 显式触发：** mention/reply/name 在 busy 时沿用 REQ-AGENT-0001 的 pending coalesce，避免直接呼叫丢失；它们不被概率 cooldown 静默吞掉。配置 `name` 是文本/caption 的字面关键词，因此“小雨”配置下“我叫小雨”必须得到 `{target:B, reason:name}`，即使 `routing_p=0` 或 B 正在 cooldown。实现若要改变此点必须先回到本 REQ 明确决策。
 - **R8 — 配置：** cooldown 可提供 deployment 默认值与 per-bot override，必须校验有限且 `>=0`；默认 2000 ms，0 表示关闭。
 
 ## 验收标准
@@ -46,7 +46,7 @@ daemon 对每条 canonical inserted/edited message 都调用 `routeMessage()`。
 - **AC3:** A settle 后 1999 ms 的新消息仍 skipped；2000 ms 后的新消息可采样。测试不得真实 sleep。
 - **AC4:** busy target 的概率桶不重分配给 idle bot；固定 secret/message id 的 target 与旧 router 一致。
 - **AC5:** cooldown 到期本身不会触发 run；下一次合法 trigger 的 batch 含有界未曝光消息且无重复序列化。
-- **AC6:** explicit mention 在 busy/cooldown 边界的行为有单测，与 R7 一致。
+- **AC6:** mention/reply/name 在 busy/cooldown 边界的行为有单测；精确回归覆盖 `routing_p=[0,0]` 的“我叫小雨”路由到 B、busy coalesce 与 cooldown bypass。模型的公开发送契约由 REQ-SEND-0001 AC4–AC6 覆盖。
 - **AC7:** `bun test`、`bun run check`、routing distribution/property tests、cache golden 与 burst replay 通过。
 
 ## 约束

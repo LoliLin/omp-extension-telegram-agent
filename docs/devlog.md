@@ -325,3 +325,12 @@
 - synthetic lifetime entry 现在把 cacheWrite 交给真实 `FooterComponent`，非零时 Pi 自动显示 `W` 并用 miss+read+write 算 CH。`/tg status` 增加 lifetime runs/since、latest 明细、reasoning 与平均 latency；不新增 footer 行/render。
 - DB/runtime/IPC/plugin/cache targeted 70 pass，typecheck 通过；真实 deployment migration/restart/footer/status 留 T14。
 - Cache impact: **NONE**——只记录 provider response telemetry并用于 IPC/TUI；provider request、session、prompt/tool/message/summary grammar 逐字节不变，token 增量 0。
+
+## 2026-08-08 (34) — 调查强制点名、统一 send、群命令与用户 README（文档）
+
+- 用户追加的四组 raw notes 已转成可验收边界：ROUTE-0001 增补“我叫小雨”在 p=0/busy/cooldown 的 name explicit 精确回归；新建 SEND-0001、CMD-0001 与 DOC-0001，REQ-LIST 不再用无链接自然语言承载需求。
+- 代码调查确认当前已经只有 `send(message, sticker, reply_to)`，且成功 `terminate:true` 会跳过 follow-up provider request；真正缺口是 persona/system/tool 三处重复、显式点名可被 persona 沉默规则覆盖、成功结果携带动态 id，以及 tools hash 漏掉 description。
+- Pi 0.84.1 要求 tool call 配对持久 toolResult，空 content 会被 OpenAI adapter 展开为 `(no tool output)`；后续实现采用固定最小 ACK，不伪称能删除结构结果。发送 id 留本地 details/DB/event。
+- README 调查确认顶部已有平台简介，但主内容仍以内部文档目录为主；T13 等 provider schema 稳定后按 prerequisites→配置→运行/Pi→扩 bot→排障重写，并明确单 deployment 单群。
+- Telegram command 调查确认当前没有 control plane；canonical identity/entity、Poller 接收 bot id、Pi `session.compact()` 与内存 routing config 足够实现。首版命令固定为 public help/bots/status 与 admin compact/set/reset；allowlist deny-by-default，实现时让 ignored deployment 只配 `@aac6fef`，命令不进 provider context。
+- Cache impact: **NONE（本条纯文档）**。SEND-0001 实现是 **INTENTIONAL**：稳定 prefix 去重与 tool description/hash 修正需 bump schema/new epoch，预期 persona prefix 净缩短；ROUTE 精确测试、Telegram control plane 与 README 为 NONE。

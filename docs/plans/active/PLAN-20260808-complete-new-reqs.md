@@ -1,7 +1,7 @@
 # PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
 
 - **Status:** Active
-- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-PLAT-0001
+- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-CMD-0001, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-PLAT-0001, REQ-DOC-0001
 - **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
 
 ## 结果
@@ -31,9 +31,13 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10** — 建共享 `/tg` command tree + `getArgumentCompletions`，覆盖动态 bot 与多级 prefix；validates: UI-0008 AC1–AC6；commit: command UX
 - [x] **T10a** — 调查用户新增的 lifetime/more stats note，写 UI-0009 并明确 Pi 原生字段边界；validates: documented scope/AC；commit: docs/research only
 - [x] **T10b** — 增加 cache-write migration/telemetry、跨重启 lifetime 回归与完整 `/tg status`；validates: UI-0009 AC1–AC6；commit: telemetry completeness
+- [x] **T10c** — 调查并正式化用户追加的配置名称强制回复、统一 terminating send、Telegram admin commands 与用户视角 README；validates: 新 notes 可追溯且边界可验收；commit: docs/research only
+- [ ] **T10d** — 锁定“我叫小雨”在 p=0/busy/cooldown 下的 name explicit route；validates: ROUTE-0001 AC6；commit: routing regression
+- [ ] **T10e** — 将公开回复用法收口到唯一 send schema，清理 persona/protocol 重复，使用 terminating 最小 ACK 并修正 tools hash/cache epoch；validates: SEND-0001 AC1–AC7；commit: agent send contract
+- [ ] **T10f** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
 - [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification
-- [ ] **T13** — 将 package/project/runbook/example 文案收口为平台 + example deployment，明确单 deployment 单群边界；validates: PLAT-0001 AC6；commit: docs/metadata only
+- [ ] **T13** — 将 README/package/project/runbook/example 重写为用户视角平台指南 + example deployment，明确单 deployment 单群边界；validates: PLAT-0001 AC6 + DOC-0001 AC1–AC6；commit: docs/metadata only
 - [ ] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
 
 ## 每个 commit 的固定流程
@@ -61,7 +65,9 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - T3: **INTENTIONAL** prefix correction；bump `CACHE_SCHEMA_VERSION`、new epoch、golden/docs/cache。
 - T4: **NONE** provider grammar；预期减少 run count/miss tokens，用 deterministic counters/tests证明。
 - T5–T10b: **NONE**；TUI/IPC/operator I/O 与 response telemetry 不进入 provider context，vision UI 不新增 inference。
-- T11–T13: 现有 deployment **NONE**；provider choice 是配置边界，现有 golden 必须不变。
+- T10e: **INTENTIONAL**；persona/protocol 去重、send tool description 与 tools hash 修正需要一次 schema bump/new epoch，稳定 prefix 预期净缩短。
+- T10f: **NONE**；Telegram control command 与回复均由 deterministic control plane 消费，不进入 provider context；只有显式 compact 使用既有 summary 调用。
+- T11–T13: 现有 deployment **NONE**；provider choice 是配置边界，现有 golden 必须不变；README 不进入 provider context。
 
 ## 风险
 

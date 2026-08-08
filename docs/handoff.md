@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：UI-0009 lifetime/cache-write/status detail 已实现并通过 targeted tests；提交后先调查 REQ-LIST 最新的 explicit keyword、统一 reply send tool/cost 与 README notes，再继续 T11。
+2026-08-08：UI-0009 已提交；REQ-LIST 最新 notes 已调查为 ROUTE-0001 精确验收、SEND-0001、CMD-0001 与 DOC-0001。下一步按 T10d/T10e/T10f 逐项实现，再继续平台 provider/config。
 
 ## 已完成
 
@@ -24,10 +24,13 @@
 6. **已实现 `REQ-UI-0008`**：递归 command tree 同时驱动 help/parser/dispatch/completion；A/B/C、config error 与 future third-level targeted tests 通过，真实 Pi 菜单留 T14。
 7. **P1 `REQ-PLAT-0001`**：N-bot daemon 已通用；剩余 DeepSeek provider hardcode、e2e `bots[0]`、双 bot 产品文案与第三 bot 全链验证。
 8. **已实现 `REQ-UI-0009`**：DB lifetime 跨 file reopen/daemon rebuild，cache-write 幂等 migration + additive telemetry 完成；Pi 原生 `W/CH` 与详细 status/零 run 共 70 targeted tests 通过，真实 smoke 留 T14。
+9. **已调查 `REQ-SEND-0001`**：当前已经是单一 send + terminate；剩余是 tool-local authority、persona/protocol 去重、explicit reply 冲突、最小结构 ACK 与 description-aware tools hash。实现会触发 cache schema bump。
+10. **已调查 `REQ-DOC-0001`**：README 需从内部索引改为 prerequisites→配置→启动/Pi→扩 bot→排障的用户旅程；等 provider schema 完成后在 T13 写最终示例。
+11. **已调查 `REQ-CMD-0001`**：Telegram `/tg` 由 deterministic control service 消费；help/bots/status 公开，compact/set/reset deny-by-default。allowlist 支持 id/`@username`，当前 ignored deployment 最终只配 `@aac6fef`。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 
-建议顺序：先吸收最新 REQ-LIST notes → PLAT-0001 provider/config → 参数化 e2e/composition → 平台/README 文档 → T14 总验收。
+建议顺序：ROUTE 精确回归 → SEND tool contract/cache epoch → Telegram admin commands → PLAT provider/config → 参数化 e2e/composition → 平台/README 文档 → T14 总验收。
 
 ## 使用方式
 
