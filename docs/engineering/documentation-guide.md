@@ -29,6 +29,7 @@
 
 - **Architecture**：稳定结构与 invariant（`docs/architecture.md`）
 - **Guide**：流程与操作规范（`docs/engineering/`）
+- **Review record**：一轮全面 review 的结论与能力审计（`docs/engineering/code-review-2608.md`）
 - **Runbook**：可重复的运维操作（`docs/runbooks/`）
 - **Reference**：确切的接口语义（`docs/cache.md` / `docs/data-model.md` / `docs/testing.md`）
 - **User guide**：面向用户的双语文档（`docs/user-guide/`）
