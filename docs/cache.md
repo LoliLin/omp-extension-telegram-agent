@@ -10,7 +10,7 @@
 
 ## CACHE_SCHEMA_VERSION
 
-当前：**4**（v4：send 用法收口到完整 tool schema，persona/protocol 去重，tools hash 覆盖 description，REQ-SEND-0001）
+当前：**5**（v5：`send.message` 明确为 Telegram Rich Markdown，tool schema仍是唯一权威，REQ-TG-0003）
 
 cache-visible protocol：system prompt shape、persona serialization、tool name/description/parameter schema/order、消息序列化 grammar、compaction summary grammar、**固定 sticker 目录块**。
 
@@ -34,6 +34,7 @@ DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`
 - `send` 是唯一公开 Telegram 通道，`message`/`sticker`/`reply_to` 在一次最终 tool call 内组合。成功 result 是固定 `ok` + `terminate:true`：Pi 仍持久化协议要求的 toolResult，但不再做 follow-up provider request；动态 sent ids 只在 provider 不读取的 details/DB/event。
 - `toolsHash()` 覆盖 provider 实际收到的 name + description + parameters + order；label/execute 是本地字段。per-bot tool filter 使用同一 hash grammar。
 - v4 两个人设文件合计减少 8,859 bytes（小雪 4,472；小雨 4,387），同时删除 shared protocol 的参数示例；tool description 虽增强，稳定 system prefix 仍显著净缩短。每个成功 send 的结果从动态 `ok sent #<id...>` 缩为固定一 token ACK。
+- v5 只扩充 send tool/`message` description，参数名、schema形状、工具顺序、system/serialization/summary hash均不变。每次provider请求的稳定prefix增加有界Rich Markdown说明；不新增tool、LLM call或动态tool result token。
 
 ## Sticker 目录分区（REQ-STICKER-0001）
 
@@ -90,5 +91,6 @@ bot、model、provider、timestamp、context epoch、context tokens、cache read
 - 2026-08-08 REQ-UI-0010：**NONE**；只消费 Pi 已产生的 assistant partial并推送到 TUI-only ephemeral IPC/card，不写 session/DB、不改 provider request、tool/system/message/summary grammar。cache schema仍为 4，golden逐字节不变，LLM call/token增量 0。
 - 2026-08-08 REQ-TG-0002：**NONE**；群内 `sendChatAction typing` 是 runtime side channel，每active bot每4秒至多一次，不进入DB/session/IPC/provider payload，不改system/tool/message/summary grammar或LLM调用数。cache schema仍为4。
 - 2026-08-08 REQ-TG-0003 T10k：**NONE**；新增canonical rich source只留SQLite，既有动态消息位置消费≤32768 code points确定性plain projection；不改system/tool/serialization grammar、消息entry数或LLM调用数，raw JSON不进Pi/provider。cache schema仍为4，golden逐字节不变。T10l的tool description变更再单独bump。
-- cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=4、systemA/B hash、serialize hash、**tools hash（含 description/schema/order）、compaction summary prompt hash** 与 per-bot catalog filter 全部锁定；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
+- 2026-08-08 REQ-TG-0003 T10l：**INTENTIONAL**；agent文字改为Rich Markdown并只在send tool schema说明能力，CACHE_SCHEMA_VERSION 4→5、tools hash `631bf05405d1`。systemA/B、serialize、compaction与catalog hash不变；daemon下次启动只开一个新epoch。参数/工具/LLM调用数不变，具体rich source仍不进入provider。
+- cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=5、systemA/B hash、serialize hash、**tools hash（含 description/schema/order）、compaction summary prompt hash** 与 per-bot catalog filter 全部锁定；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
 - 分析脚本（REQ-TEST-0001 R5）：llm_runs 的 epoch/compaction 列与 >30% context 回落都被视为真实 compaction 并同步模拟 context；60 runs 回放识别 3 次真实 compaction（e2e 遗留 epoch 1→4），幻影触发 0

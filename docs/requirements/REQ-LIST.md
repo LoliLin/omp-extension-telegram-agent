@@ -30,7 +30,7 @@
 - [ ] [REQ-UI-0008](REQ-UI-0008.md) 为 `/tg` 提供原生分级命令补全（P2，已调查/未实现）
 - [ ] [REQ-CMD-0001](REQ-CMD-0001.md) Telegram 群内 help/status、手动 compact、参数调整与可配置管理员白名单（P1，已调查/未实现）
 - [ ] [REQ-TG-0002](REQ-TG-0002.md) Bot 获得响应机会后显示 Telegram 原生处理状态（P1，群内 typing 已实现/待真实群总验收）
-- [ ] [REQ-TG-0003](REQ-TG-0003.md) 支持 Telegram Rich Messages 的收发与持久化（P1，data plane已实现/outbound待实现）
+- [ ] [REQ-TG-0003](REQ-TG-0003.md) 支持 Telegram Rich Messages 的收发与持久化（P1，收发/data plane/cache v5已实现，待真实群总验收勾选）
 - [ ] [REQ-REPLY-0001](REQ-REPLY-0001.md) 直接回复 bot 的消息保证进入对应模型上下文（P1，已按澄清调查/未实现）
 - [ ] [REQ-OPS-0002](REQ-OPS-0002.md) 从 Pi 一键受控重启全部 bot 服务（P1，已调查/未实现）
 

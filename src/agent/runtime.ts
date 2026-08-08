@@ -23,7 +23,7 @@ import { getBotState, setBotState } from "../db/db.ts";
 import { BotApi, TelegramApiError } from "../telegram/api.ts";
 import { TelegramTypingLease, type ActivityScheduler } from "../telegram/activity.ts";
 import { insertSentMessage } from "../telegram/ingest.ts";
-import { sendTextAndPersist } from "../telegram/send.ts";
+import { sendRichTextAndPersist } from "../telegram/send.ts";
 import { serializeMessages, type MessageRow } from "./serialize.ts";
 import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT } from "./prompt.ts";
 import { successfulSendResult, TOOL_DEFS, toolProtocolHash, toolsHash, type SendParams } from "./tools.ts";
@@ -531,7 +531,7 @@ export class BotRuntime {
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		const sentIds: number[] = [];
 		if (params.message) {
-			const { raw, canonical } = await sendTextAndPersist(
+			const { raw, canonical, transport } = await sendRichTextAndPersist(
 				this.db,
 				this.api,
 				this.bot.id,
@@ -542,6 +542,9 @@ export class BotRuntime {
 			sentIds.push(canonical.message_id);
 			this.markExposed([canonical.message_id]);
 			this.sentMessageSink?.(raw);
+			this.recordEvent(transport === "rich" ? "rich_sent" : "plain_fallback", {
+				message_id: canonical.message_id,
+			});
 		}
 		if (stickerFileId) {
 			const m = await this.api.sendSticker(chatId, stickerFileId, params.reply_to);

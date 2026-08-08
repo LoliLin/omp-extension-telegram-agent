@@ -1,6 +1,6 @@
 # REQ-TG-0003: 支持 Telegram Rich Messages 的收发与持久化
 
-- **Status:** In Progress（2026-08-08 T10k canonical data plane已实现；T10l outbound/cache contract待实现）
+- **Status:** Implemented（2026-08-08 T10k/T10l；真实 Bot API smoke 留 T14 总验收）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「为 bot 增加 Telegram rich messages 的支持」
 - **依赖:** REQ-SEND-0001、REQ-TG-0001、REQ-UI-0001

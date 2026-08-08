@@ -407,3 +407,11 @@
 - DB保存projection到既有`text`；IPC `MsgItem`、Pi native Text与provider serialization继续只读该列，raw rich JSON不离开数据层，plain旧行/grammar/entry数保持。
 - rich/ingest/agent/IPC/timeline/cache targeted 79 tests、361 assertions；全量224 tests、3659 assertions、typecheck与cache v4 golden通过。outbound `sendRichMessage`与cache schema bump留T10l。
 - Cache impact: **NONE**——schema/source只在SQLite，动态suffix仍用原grammar的有界plain text；stable prefix、tool protocol、golden与LLM调用数不变，cache schema保持v4。
+
+## 2026-08-08 (44) — 将 Agent 文字接到 Telegram Rich Markdown
+
+- `BotApi.sendRichMessage`只发送`chat_id + rich_message.markdown + reply_parameters?`；BotRuntime现有唯一`send(message?, sticker?, reply_to?)`保持参数/顺序/最小ACK/terminate不变，文字先canonical落库再broadcast/expose，组合sticker仍先完整校验。
+- fallback只接受Telegram JSON中明确的rich method/parse确定性400/404拒绝，并且只调用一次literal `sendMessage`。timeout、generic network、non-JSON、429/5xx与Telegram已成功但DB失败全部不重试，避免unknown outcome双发；`rich_sent`/`plain_fallback` event只记录message id、不记录正文。
+- Rich Markdown能力与HTML/raw block/remote media禁令只写在send tool schema，persona/system没有API教程；operator Pi compose仍是literal plain text。CACHE_SCHEMA_VERSION 4→5，只有tools hash变为`631bf05405d1`，其余cache golden不变。
+- rich outbound + data/manual/sticker/flush/tool/cache targeted 61 tests / 730 assertions；全量231 / 3704、typecheck与cache v5 golden通过。真实Bot API rich/reply smoke留T14。
+- Cache impact: **INTENTIONAL**——一次稳定tool description变更开启新epoch；不新增tool、参数、LLM调用或动态result token，raw rich JSON仍不进入provider。

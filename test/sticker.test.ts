@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { BotRuntime } from "../src/agent/runtime.ts";
 import { SEND_SUCCESS_ACK } from "../src/agent/tools.ts";
 import { ensureStickerCatalog, stickerCatalogBlock, STICKER_CATALOG_MAX } from "../src/media/sticker-catalog.ts";
+import { TelegramApiError } from "../src/telegram/api.ts";
 import type { AppConfig, BotConfig } from "../src/config.ts";
 import type { MessageRow } from "../src/agent/serialize.ts";
 
@@ -190,13 +191,14 @@ describe("send from catalog (R3)", () => {
 		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never, { chatActionSender: async () => true });
 		const calls: Array<{ kind: string; chatId: number; payload: string; replyTo?: number }> = [];
 		(rt as any).api = {
-			sendMessage: async (chatId: number, text: string, replyTo?: number) => {
-				calls.push({ kind: "message", chatId, payload: text, replyTo });
+			sendRichMessage: async (chatId: number, text: string, replyTo?: number) => {
+				calls.push({ kind: "rich", chatId, payload: text, replyTo });
 				return {
 					chat: { id: CHAT }, message_id: 901, from: { id: 1, is_bot: true, first_name: "小雪" },
-					date: 1754600000, text,
+					date: 1754600000, rich_message: { blocks: [{ type: "paragraph", text }] },
 				};
 			},
+			sendMessage: async () => { throw new Error("plain fallback must not run"); },
 			sendSticker: async (chatId: number, fileId: string, replyTo?: number) => {
 				calls.push({ kind: "sticker", chatId, payload: fileId, replyTo });
 				return {
@@ -211,7 +213,7 @@ describe("send from catalog (R3)", () => {
 		const result = await (rt as any).executeSend({ message: "收到", sticker: "s8", reply_to: 42 });
 
 		expect(calls).toEqual([
-			{ kind: "message", chatId: CHAT, payload: "收到", replyTo: 42 },
+			{ kind: "rich", chatId: CHAT, payload: "收到", replyTo: 42 },
 			{ kind: "sticker", chatId: CHAT, payload: "fid-combined", replyTo: 42 },
 		]);
 		expect(result).toEqual({
@@ -234,12 +236,42 @@ describe("send from catalog (R3)", () => {
 		expect(networkCalls).toBe(0);
 	});
 
+	test("a confirmed rich rejection emits one observable plain fallback", async () => {
+		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never, { chatActionSender: async () => true });
+		const calls: string[] = [];
+		const broadcasts: unknown[] = [];
+		(rt as any).api = {
+			sendRichMessage: async () => {
+				calls.push("rich");
+				throw new TelegramApiError(400, "Bad Request: can't parse markdown");
+			},
+			sendMessage: async (_chatId: number, text: string) => {
+				calls.push("plain");
+				return {
+					chat: { id: CHAT }, message_id: 903, from: { id: 1, is_bot: true, first_name: "小雪" },
+					date: 1754600002, text,
+				};
+			},
+		};
+		rt.sentMessageSink = (message) => broadcasts.push(message);
+
+		await (rt as any).executeSend({ message: "# 未闭合" });
+
+		expect(calls).toEqual(["rich", "plain"]);
+		expect(broadcasts).toHaveLength(1);
+		expect(db.query("SELECT kind, payload FROM agent_events ORDER BY id").all()).toEqual([
+			{ kind: "plain_fallback", payload: JSON.stringify({ message_id: 903 }) },
+			{ kind: "send", payload: JSON.stringify({ reply_to: null, sticker: null, sent: [903] }) },
+		]);
+	});
+
 	test("a known id without this bot's mapping is diagnosed as a candidate invariant violation", async () => {
 		db.query("INSERT INTO media (file_unique_id, kind, sticker_emoji, short_id) VALUES ('uq-b-only', 'sticker', '🅱️', 's241')").run();
 		mapSticker("B", "uq-b-only");
 		const rt = new BotRuntime(db, makeBot({ id: "A" }), makeConfig(), null as never);
 		let networkCalls = 0;
 		(rt as any).api = {
+			sendRichMessage: async () => { networkCalls++; },
 			sendMessage: async () => { networkCalls++; },
 			sendSticker: async () => { networkCalls++; },
 		};

@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 4; // v4: send usage lives only in its complete tool schema; persona/protocol duplicates removed
+export const CACHE_SCHEMA_VERSION = 5; // v5: send.message is Telegram Rich Markdown; tool schema is the sole authority
 
 // Fixed shared protocol block, appended after the persona. Never reorder.
 const PROTOCOL = `

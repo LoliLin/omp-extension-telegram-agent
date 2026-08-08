@@ -41,7 +41,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10j** — 增加每 bot `typing` activity lease、4 秒续约与 send/settle/shutdown 清理，并锁 group 不调用 private draft；validates: TG-0002 AC1–AC7；commit: Telegram response feedback
 - [x] **T10n** — 调查并正式化 direct reply provider-delivery 与 Pi 一键受控重启；validates: REPLY-0001/OPS-0002 documented scope/AC；commit: docs/research only
 - [x] **T10k** — 增加 rich JSON migration、统一 inbound/edit/sent normalize 与有界纯文本 projector；validates: TG-0003 AC4–AC6；commit: rich message data plane
-- [ ] **T10l** — 将 agent `send.message` 接到 `sendRichMessage` Rich Markdown、确定性 plain fallback并 bump cache epoch；validates: TG-0003 AC1–AC3/AC7/AC8；commit: rich outbound contract
+- [x] **T10l** — 将 agent `send.message` 接到 `sendRichMessage` Rich Markdown、确定性 plain fallback并 bump cache epoch；validates: TG-0003 AC1–AC3/AC7/AC8；commit: rich outbound contract
 - [ ] **T10o** — 持久化 reply parent identity/obligation并保证 busy、overflow、restart 后进入目标 bot suffix；validates: REPLY-0001 AC1–AC8；commit: reply provider delivery
 - [ ] **T10p** — 增加串行 graceful CLI/Pi restart 与原 filter feed重连；validates: OPS-0002 AC1–AC7；commit: daemon restart workflow
 - [ ] **T10m** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane

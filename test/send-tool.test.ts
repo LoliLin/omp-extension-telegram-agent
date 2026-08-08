@@ -87,6 +87,9 @@ describe("send tool contract (REQ-SEND-0001)", () => {
 		expect(Object.keys(TOOL_DEFS[0].parameters.properties)).toEqual(["message", "sticker", "reply_to"]);
 		expect(TOOL_DEFS[0].description).toContain("唯一的公开输出通道");
 		expect(TOOL_DEFS[0].description).toContain("唯一一次最终 send 调用");
+		expect(TOOL_DEFS[0].description).toContain("Rich Markdown");
+		expect((TOOL_DEFS[0].parameters.properties.message as { description?: string }).description).toContain("标题、列表、代码块、表格和引用");
+		expect((TOOL_DEFS[0].parameters.properties.message as { description?: string }).description).toContain("不得使用 HTML");
 		expect((TOOL_DEFS[0].parameters.properties.reply_to as { description?: string }).description).toContain("当前可见消息行");
 		expect((TOOL_DEFS[0].parameters.properties.sticker as { description?: string }).description).toContain("Available stickers");
 	});
@@ -98,10 +101,14 @@ describe("send tool contract (REQ-SEND-0001)", () => {
 			expect(persona).not.toContain("reply_to");
 			expect(persona).not.toContain("messaging.reply_not_visible");
 			expect(persona).not.toContain("Telegram 的 `send`");
+			expect(persona).not.toContain("sendRichMessage");
+			expect(persona).not.toContain("Rich Markdown");
 		}
 		const protocol = buildSystemPrompt("test persona");
 		expect(protocol).not.toMatch(/send\s*\(/);
 		expect(protocol).not.toContain("reply_to");
+		expect(protocol).not.toContain("sendRichMessage");
+		expect(protocol).not.toContain("Rich Markdown");
 	});
 
 	test("tool protocol hash includes description-only changes", () => {

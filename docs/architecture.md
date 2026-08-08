@@ -34,7 +34,7 @@
 
 - 每个 bot token 一个 getUpdates long-polling 循环（offset 持久化在 SQLite）
 - 每条 update：原样存 raw_updates（bot identity + update_id 唯一）→ normalize 成 canonical message（chat_id + message_id 唯一，多个 bot 收到的同一条群消息只存一条）→ edit 存 revision。`rich_message` 也走同一 normalize：canonical列只保存≤256 KiB source（超限为有界JSON诊断），`text`保存确定性plain projection；projector上限为16层、500 blocks、4096 nodes、32768 code points，未知metadata不泄露URL/file id。revision保留旧source/projection，IPC/Pi/provider只读取projection。
-- Bot 自己 send 成功后，Telegram 返回的 Message 立即落库（发送→DB→TUI 事务链）。agent send tool 与 operator manual send 都复用 `src/telegram/send.ts` 的 send→canonical persistence primitive。
+- Bot 自己 send 成功后，Telegram 返回的 Message 立即落库（发送→DB→TUI 事务链）。agent `send.message` 走 `sendRichMessage {rich_message:{markdown}}`；只有 Telegram 明确拒绝 rich method/parse 且确认未创建消息的确定性 4xx 才 literal `sendMessage` 一次。timeout、非JSON、429/5xx/unknown outcome不降级，防止双发；`rich_sent`/`plain_fallback` event只记录message id。operator manual compose仍保持literal plain text，两条路径复用 `src/telegram/send.ts` 的 send→canonical persistence primitive。
 
 ## Routing（Phase 5，REQ-CONF-0001 泛型化）
 
@@ -52,7 +52,7 @@
 - 触发/flush 是 BotRuntime 本地持有的串行状态机（REQ-AGENT-0001）：`idle →(trigger) flushing →(drain) idle`；`flushing` 在进入 flush 时同步置位（不等 SDK 事件），在途期间的 trigger 只合并为 `pendingTrigger`，flush 循环结束后统一再跑一轮（burst 合并）；flush 全链路 try/catch，失败只落 agent_events `error`（stage=flush），消息保持未曝光由后续 trigger 重试；消息只在 `sendUserMessage` 成功后 markExposed；daemon shutdown 时 `stop()` 有界（30s）等待在途 flush 再 dispose
 - 唤醒：`session.sendUserMessage(serialized)`，一次 flush 一批（burst 由 pendingTrigger 合并，不走 SDK 队列）
 - 群消息序列化为固定紧凑 grammar（见 docs/cache.md），append-only
-- tools 固定为 `send`、`search`、`run_js`（Phase 6 起），禁用 coding agent 默认文件工具。`src/agent/tools.ts` 是 provider-facing 用法唯一权威；persona/protocol 不复制参数。`send(message?,sticker?,reply_to?)` 是唯一公开通道，成功返回固定最小 ACK + `terminate:true`，sent ids 只留本地 details/event。
+- tools 固定为 `send`、`search`、`run_js`（Phase 6 起），禁用 coding agent 默认文件工具。`src/agent/tools.ts` 是 provider-facing 用法唯一权威；persona/protocol 不复制参数。`send(message?,sticker?,reply_to?)` 是唯一公开通道，`message` 为 Telegram Rich Markdown（普通文本是其子集，首版禁止HTML/raw block/remote media）；成功返回固定最小 ACK + `terminate:true`，sent ids 只留本地 details/event。
 - local assistant text（未调 send）→ agent_events + TUI，不进群
 
 ## run_js sandbox 威胁模型（REQ-SEC-0001）

@@ -383,6 +383,7 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		attachFakeSession(rt);
 		let networkCalls = 0;
 		(rt as any).api = {
+			sendRichMessage: async () => { networkCalls++; throw new Error("must not reach network"); },
 			sendMessage: async () => { networkCalls++; throw new Error("must not reach network"); },
 				sendSticker: async () => { networkCalls++; throw new Error("must not reach network"); },
 		};
@@ -442,10 +443,11 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		const rt = makeRuntime({ activityScheduler: scheduler, useBotApiForActivity: true });
 		(rt as any).api = {
 			sendChatAction: async (chatId: number) => { expect(chatId).toBe(CHAT); actions.push(scheduler.now); return true; },
-			sendMessage: async (chatId: number, text: string) => ({
+			sendRichMessage: async (chatId: number, text: string) => ({
 				chat: { id: chatId }, message_id: sentMessageId++, from: { id: 777, is_bot: true, first_name: "小雪" },
-				date: 1754600100, text,
+				date: 1754600100, rich_message: { blocks: [{ type: "paragraph", text }] },
 			}),
+			sendMessage: async () => { throw new Error("plain fallback must not run"); },
 			sendMessageDraft: async () => { draftCalls++; },
 			sendRichMessageDraft: async () => { draftCalls++; },
 		};
@@ -471,7 +473,7 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		expect((rt as any).typingLease.metrics).toMatchObject({ starts: 2, stops: 2 });
 		expect((rt as any).typingLease.isActive).toBe(false);
 		expect(draftCalls).toBe(0);
-		expect(db.query("SELECT kind FROM agent_events ORDER BY id").all()).toEqual([{ kind: "send" }]);
+		expect(db.query("SELECT kind FROM agent_events ORDER BY id").all()).toEqual([{ kind: "rich_sent" }, { kind: "send" }]);
 	});
 
 	test("REQ-TG-0002 action failures are deduplicated, redacted, and isolated from flush", async () => {

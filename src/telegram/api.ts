@@ -86,6 +86,18 @@ export class BotApi {
 		});
 	}
 
+	sendRichMessage(
+		chatId: number,
+		markdown: string,
+		replyToMessageId?: number,
+	): Promise<Record<string, unknown>> {
+		return this.call("sendRichMessage", {
+			chat_id: chatId,
+			rich_message: { markdown },
+			...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {}),
+		});
+	}
+
 	sendSticker(
 		chatId: number,
 		fileId: string,
