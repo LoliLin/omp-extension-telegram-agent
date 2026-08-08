@@ -1,6 +1,6 @@
 # REQ-ROUTE-0001: 忙碌 bot 跳过概率采样并在回复后冷却
 
-- **Status:** Proposed（2026-08-08 已调查，未实现）
+- **Status:** Implemented（2026-08-08；fake-clock burst/property/check/cache 已验证）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：允许 A/B 并发回复；两者忙碌时新消息全部跳过采样；回复结束后约 2 秒再恢复采样，以更像真人
 - **依赖:** REQ-AGENT-0001、REQ-CONF-0001

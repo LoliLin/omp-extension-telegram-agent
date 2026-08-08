@@ -10,6 +10,7 @@
 	"reasoning_effort": "medium",
 	"compaction_threshold": 128000,
 	"compaction_keep_recent": 20000,
+	"sampling_cooldown_ms": 2000,
 	"bots": [
 		{
 			"id": "A",

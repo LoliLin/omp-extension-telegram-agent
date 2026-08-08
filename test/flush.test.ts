@@ -26,7 +26,7 @@ beforeEach(() => {
 	db.exec(readFileSync(join(import.meta.dir, "../src/db/schema.sql"), "utf8"));
 });
 
-function makeRuntime(): BotRuntime {
+function makeRuntime(options: { samplingCooldownMs?: number; monotonicNow?: () => number } = {}): BotRuntime {
 	const config: AppConfig = {
 		dataDir: "/tmp/req-agent-0001-test",
 		dbPath: ":memory:",
@@ -43,6 +43,7 @@ function makeRuntime(): BotRuntime {
 		token: "test-token",
 		personaPath: "",
 		routingP: 0,
+		samplingCooldownMs: options.samplingCooldownMs ?? 2000,
 		model: "test-model",
 		reasoningEffort: "medium",
 		compactionThreshold: 128000,
@@ -50,7 +51,7 @@ function makeRuntime(): BotRuntime {
 		tools: { send: true, search: true, runJs: true },
 		stickerSets: [],
 	};
-	return new BotRuntime(db, bot, config, null as never);
+	return new BotRuntime(db, bot, config, null as never, { monotonicNow: options.monotonicNow });
 }
 
 interface FakeSession {
@@ -246,5 +247,103 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		};
 		await expect((rt as any).executeSend({ message: "hi", sticker: "s999" })).rejects.toThrow(/unknown sticker/);
 		expect(networkCalls).toBe(0);
+	});
+});
+
+describe("probability sampling lifecycle (REQ-ROUTE-0001)", () => {
+	test("busy bursts do not create pending runs; cooldown uses an exact non-blocking deadline", async () => {
+		let now = 1000;
+		const rt = makeRuntime({ monotonicNow: () => now });
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const fake = attachFakeSession(rt, {
+			send: async (text) => {
+				await gate;
+				fake.sent.push(text);
+			},
+		});
+
+		insertMsg({ message_id: 1, text: "starts A" });
+		expect(rt.trigger("probability")).toBe("started");
+		expect(rt.samplingState()).toBe("busy");
+		for (let id = 2; id <= 101; id++) {
+			insertMsg({ message_id: id, date: 1754600000 + id, text: `busy-${id}` });
+			expect(rt.trigger("probability")).toBe("skipped_busy");
+		}
+		expect((rt as any).pendingTrigger).toBe(false);
+		expect(db.query("SELECT COUNT(*) c FROM messages").get()).toEqual({ c: 101 });
+
+		release();
+		await (rt as any).flushPromise;
+		expect(fake.sent).toHaveLength(1);
+		expect(fake.sent[0]).toContain("#1 ");
+		expect(rt.samplingState()).toBe("cooldown");
+
+		now = 2999;
+		insertMsg({ message_id: 102, date: 1754600202, text: "one ms early" });
+		expect(rt.trigger("probability")).toBe("skipped_cooldown");
+		expect(fake.sent).toHaveLength(1); // deadline itself never schedules a run
+
+		now = 3000;
+		expect(rt.samplingState()).toBe("idle");
+		expect(fake.sent).toHaveLength(1);
+		insertMsg({ message_id: 103, date: 1754600203, text: "at deadline" });
+		expect(rt.trigger("probability")).toBe("started");
+		await (rt as any).flushPromise;
+		expect(fake.sent).toHaveLength(2);
+		expect(fake.sent[1]).toContain("#102 ");
+		expect(fake.sent[1]).toContain("#103 ");
+		expect(fake.sent[1]).not.toContain("#1 ");
+	});
+
+	test("explicit triggers coalesce while busy and bypass probability cooldown", async () => {
+		let now = 5000;
+		const rt = makeRuntime({ monotonicNow: () => now });
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const fake = attachFakeSession(rt, {
+			send: async (text) => {
+				await gate;
+				fake.sent.push(text);
+			},
+		});
+
+		insertMsg({ message_id: 1, text: "probability" });
+		expect(rt.trigger("probability")).toBe("started");
+		insertMsg({ message_id: 2, date: 1754600002, text: "@mention" });
+		expect(rt.trigger("explicit")).toBe("coalesced");
+		expect((rt as any).pendingTrigger).toBe(true);
+		release();
+		await (rt as any).flushPromise;
+		expect(fake.sent).toHaveLength(2);
+		expect(fake.sent[1]).toContain("#2 ");
+		expect(rt.samplingState()).toBe("cooldown");
+
+		insertMsg({ message_id: 3, date: 1754600003, text: "explicit during cooldown" });
+		expect(rt.trigger("explicit")).toBe("started");
+		await (rt as any).flushPromise;
+		expect(fake.sent[2]).toContain("#3 ");
+		expect(rt.trigger("probability")).toBe("skipped_cooldown");
+	});
+
+	test("zero cooldown restores probability availability immediately", async () => {
+		let now = 10;
+		const rt = makeRuntime({ samplingCooldownMs: 0, monotonicNow: () => now });
+		attachFakeSession(rt);
+		insertMsg({ message_id: 1 });
+		expect(rt.trigger("probability")).toBe("started");
+		await (rt as any).flushPromise;
+		expect(rt.isAvailableForSampling(now)).toBe(true);
+	});
+
+	test("a controlled probability flush failure still enters cooldown", async () => {
+		let now = 20;
+		const rt = makeRuntime({ monotonicNow: () => now });
+		attachFakeSession(rt, { send: async () => { throw new Error("provider failed"); } });
+		insertMsg({ message_id: 1 });
+		expect(rt.trigger("probability")).toBe("started");
+		await (rt as any).flushPromise;
+		expect(rt.samplingState()).toBe("cooldown");
+		expect(errorEvents()).toEqual([{ stage: "flush", error: "provider failed" }]);
 	});
 });

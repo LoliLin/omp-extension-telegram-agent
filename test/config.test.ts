@@ -179,19 +179,42 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 		const dir = makeEnvDir([
 			{
 				id: "A", token_env: "teleram_hastuyuki_bot", persona_path: "personas/xiaoxue.md",
-				routing_p: 0.3, model: "custom-model", compaction_threshold: 999, tools: { search: false },
+				routing_p: 0.3, sampling_cooldown_ms: 0, model: "custom-model", compaction_threshold: 999, tools: { search: false },
 			},
 		]);
 		try {
 			const config = loadConfig(dir);
 			const a = config.bots[0]!;
 			expect(a.routingP).toBe(0.3);
+			expect(a.samplingCooldownMs).toBe(0);
 			expect(a.model).toBe("custom-model");
 			expect(a.compactionThreshold).toBe(999);
 			expect(a.compactionKeepRecent).toBe(20000); // default
 			expect(a.tools).toEqual({ send: true, search: false, runJs: true });
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("sampling cooldown defaults to 2000 ms, supports a global default, and rejects invalid values", () => {
+		const defaultDir = makeEnvDir();
+		const globalDir = makeEnvDir(VALID_BOTS, {}, { sampling_cooldown_ms: 2750 });
+		const invalidDir = makeEnvDir(
+			[
+				{ ...VALID_BOTS[0], sampling_cooldown_ms: -1 },
+				{ ...VALID_BOTS[1], sampling_cooldown_ms: "fast" },
+			],
+			{},
+			{ sampling_cooldown_ms: -5 },
+		);
+		try {
+			expect(loadConfig(defaultDir).bots.map((bot) => bot.samplingCooldownMs)).toEqual([2000, 2000]);
+			expect(loadConfig(globalDir).bots.map((bot) => bot.samplingCooldownMs)).toEqual([2750, 2750]);
+			expect(() => loadConfig(invalidDir)).toThrow(/sampling_cooldown_ms[\s\S]*sampling_cooldown_ms[\s\S]*sampling_cooldown_ms/);
+		} finally {
+			rmSync(defaultDir, { recursive: true, force: true });
+			rmSync(globalDir, { recursive: true, force: true });
+			rmSync(invalidDir, { recursive: true, force: true });
 		}
 	});
 

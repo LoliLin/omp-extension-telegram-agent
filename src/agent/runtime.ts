@@ -29,6 +29,7 @@ import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
 import { ensureVision, fileIdForBot } from "../media/vision.ts";
 import { ensureStickerCatalog, stickerCatalogBlock, preRecognizeCatalogVision } from "../media/sticker-catalog.ts";
+import type { TriggerResult, TriggerSource } from "./router.ts";
 
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
 const EXPOSED_KEY = "exposed_ids";
@@ -50,6 +51,9 @@ export class BotRuntime {
 	private pendingTrigger = false;
 	private stopping = false;
 	private flushPromise: Promise<void> | null = null;
+	private cooldownUntil = 0;
+	private cooldownAfterFlush = false;
+	private readonly monotonicNow: () => number;
 	private exposed = new Set<number>();
 	private epoch = 1;
 	private runStartTs = 0;
@@ -73,11 +77,18 @@ export class BotRuntime {
 		cost: number;
 	}) => void) | null = null;
 
-	constructor(db: Database, bot: BotConfig, config: AppConfig, modelRuntime: ModelRuntime) {
+	constructor(
+		db: Database,
+		bot: BotConfig,
+		config: AppConfig,
+		modelRuntime: ModelRuntime,
+		options: { monotonicNow?: () => number } = {},
+	) {
 		this.db = db;
 		this.bot = bot;
 		this.config = config;
 		this.modelRuntime = modelRuntime;
+		this.monotonicNow = options.monotonicNow ?? (() => performance.now());
 		this.api = new BotApi(bot.token);
 		this.exposed = new Set(JSON.parse(getBotState(db, bot.id, EXPOSED_KEY) ?? "[]") as number[]);
 		this.epoch = Number(getBotState(db, bot.id, EPOCH_KEY) ?? "1");
@@ -403,15 +414,32 @@ export class BotRuntime {
 		};
 	}
 
-	/** Called by the router when this bot gets a response opportunity. */
-	trigger(): void {
-		if (this.stopping) return;
+	/** Lifecycle state used only by deterministic probability scheduling. */
+	samplingState(now = this.monotonicNow()): "idle" | "busy" | "cooldown" | "stopping" {
+		if (this.stopping) return "stopping";
+		if (this.flushing) return "busy";
+		if (now < this.cooldownUntil) return "cooldown";
+		return "idle";
+	}
+
+	isAvailableForSampling(now = this.monotonicNow()): boolean {
+		return this.samplingState(now) === "idle";
+	}
+
+	/** Called by the scheduler when this bot gets a response opportunity. */
+	trigger(source: TriggerSource = "explicit"): TriggerResult {
+		const state = this.samplingState();
+		if (state === "stopping") return "skipped_stopping";
+		if (source === "probability" && state !== "idle") {
+			return state === "busy" ? "skipped_busy" : "skipped_cooldown";
+		}
 		if (this.flushing) {
 			// re-entrant trigger while a flush is in flight (e.g. slow vision await):
 			// coalesce into pendingTrigger; the loop picks it up (burst merge, R1)
 			this.pendingTrigger = true;
-			return;
+			return "coalesced";
 		}
+		if (source === "probability") this.cooldownAfterFlush = true;
 		this.flushing = true; // set synchronously, before any await — never gated on SDK events
 		this.flushPromise = this.flushLoop()
 			.catch((err) => {
@@ -426,7 +454,12 @@ export class BotRuntime {
 			.finally(() => {
 				this.flushing = false;
 				this.flushPromise = null;
+				if (this.cooldownAfterFlush) {
+					this.cooldownUntil = this.monotonicNow() + this.bot.samplingCooldownMs;
+					this.cooldownAfterFlush = false;
+				}
 			});
+		return "started";
 	}
 
 	private async flushLoop(): Promise<void> {

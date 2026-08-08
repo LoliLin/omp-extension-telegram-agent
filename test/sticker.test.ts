@@ -29,6 +29,7 @@ function makeBot(overrides: Partial<BotConfig> = {}): BotConfig {
 		token: "t",
 		personaPath: "",
 		routingP: 0,
+		samplingCooldownMs: 2000,
 		model: "m",
 		reasoningEffort: "medium",
 		compactionThreshold: 128000,

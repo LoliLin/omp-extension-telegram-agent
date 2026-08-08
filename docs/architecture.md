@@ -41,7 +41,9 @@
 - deterministic：`u = HMAC(router_secret, chatId + ":" + messageId)` → 按配置数组顺序累积 `routing_p` 阈值：`u < p[0]` → bots[0]；`p[0] ≤ u < p[0]+p[1]` → bots[1]；…否则 nobody（Σp ≤ 1 启动期校验）
 - 优先级：明确 @mention > reply target > 名字关键词 > 概率 routing
 - Bot 消息不进 trigger（`routeMessage` 内部单一权威判断，REQ-TEST-0001 R3）
-- busy 时进 pending queue，settle 后合并 burst
+- router 返回 target + reason；只有 `probability` 走 runtime availability gate。bucket 先按原 HMAC 决定，目标 busy/cooldown 时直接 skip，绝不改投其他 bot。
+- 每 bot 的 probability run 完成后用 monotonic deadline 冷却 `sampling_cooldown_ms`（默认 2000 ms）；deadline 不设 timer、不补抽，之后只有新消息才重新采样。不同 bot 仍可并发。
+- mention/reply/name 是 explicit path：busy 时继续 pending coalesce，cooldown 中也可立即启动；shutdown 不等待 cooldown。
 
 ## Agent（Phase 3）
 
@@ -107,7 +109,7 @@
 
 ## 配置（REQ-CONF-0001 重构后）
 
-- **`bots.config.json`**（项目根，env `bots_config` 可改路径）：声明式 bot 列表——全局 `group_peer_id` / `router_secret_env` / `deepseek_key_env` / `tinyfish_key_env` / `auxiliary_visual_model` / `db_path` / 默认 `model` / `reasoning_effort` / `compaction_threshold` / `compaction_keep_recent`；每 bot `id`（`[A-Za-z0-9_-]+` 唯一；大写 A/B 兼容历史数据）/ `name`（显示与名字触发，缺省=id）/ `token_env`（env key 名，值在 .env）/ `persona_path`（绝对路径 / `~` / 相对项目根，可指仓库外）/ `routing_p`（累积阈值，Σ≤1），可选覆盖 model / reasoning_effort / compaction_threshold / compaction_keep_recent / tools（`{send, search, run_js}` 布尔开关，send 关 = 纯观察 bot）
+- **`bots.config.json`**（项目根，env `bots_config` 可改路径）：声明式 bot 列表——全局 `group_peer_id` / `router_secret_env` / `deepseek_key_env` / `tinyfish_key_env` / `auxiliary_visual_model` / `db_path` / 默认 `model` / `reasoning_effort` / `compaction_threshold` / `compaction_keep_recent` / `sampling_cooldown_ms`；每 bot `id`（`[A-Za-z0-9_-]+` 唯一；大写 A/B 兼容历史数据）/ `name`（显示与名字触发，缺省=id）/ `token_env`（env key 名，值在 .env）/ `persona_path`（绝对路径 / `~` / 相对项目根，可指仓库外）/ `routing_p`（累积阈值，Σ≤1），可选覆盖 model / reasoning_effort / compaction_threshold / compaction_keep_recent / sampling_cooldown_ms / tools（`{send, search, run_js}` 布尔开关，send 关 = 纯观察 bot）
 - **`.env`**（`key: value` 冒号格式，自解析）+ `.env.example`：只放 secret（bot tokens / deepseek / tinyfish / router_secret / gpg passphrase）
 - **启动期校验（REQ-OPS-0001 R2 + REQ-CONF-0001 R6 合并框架）**：JSON schema 校验（id 唯一合法、token_env 在 .env 存在、persona 文件可读、routing_p ∈[0,1] 且 Σ≤1、数值有限>0）+ env 数值检查；peer id 归一化（`-1004402809405` / `-4402809405` / `4402809405` → 裸正数）；校验失败收集**全部**错误一次性抛出（ConfigError 逐条点名），不静默 NaN
 - **进程管理（REQ-OPS-0001）**：daemon 最早时机 `openSync(wx)` 排他 pid 锁；`stop`/`status` 校验 cmdline 归属；死 pid 接管/清理；`start` 等 socket ready

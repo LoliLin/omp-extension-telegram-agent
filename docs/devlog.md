@@ -249,3 +249,11 @@
 - `ensureStickerCatalog` 返回并记录 catalog/sendable/missing mapping；部分 fetch 失败留下的全局 media 行不会进入当前 bot prefix。send preflight 仍在任何 network call 前执行，异常映射另记 `candidate_invariant`。
 - 回归 fixture 精确覆盖生产历史 A 的 `s241–s244`、B 的 `s144`，并覆盖 shared/A-only dynamic sticker 与缺映射 fixed row。
 - Cache impact: **INTENTIONAL**——`CACHE_SCHEMA_VERSION` 2→3；合法 prefix hash 不变，但部署中不可发送的旧行会被移除，下次 daemon 启动自动开新 epoch。动态候选减少，降低失败 tool turn 与 miss tokens。
+
+## 2026-08-08 (24) — probability routing busy gate 与自然冷却
+
+- routing decision 现在显式返回 `target + reason`；原 HMAC bucket/distribution 不变。daemon 只把 probability 标为采样，目标 busy/cooldown 时 runtime 原子拒绝且不改投。
+- BotRuntime 暴露 idle/busy/cooldown/stopping；probability run 的 flush 无论成功/沉默/受控失败，结束后以 monotonic deadline 冷却。默认/全局/per-bot `sampling_cooldown_ms=2000`，0 可关闭；不创建 timer，不自动补抽。
+- mention/reply/name 统一走 explicit path：busy 继续 pending coalesce，cooldown 中仍可立即启动。daemon 维护并打印 triggered/skipped_busy/skipped_cooldown counters，不记录消息正文。
+- 测试：router distribution/reason/no-redistribution、100-message persisted burst、fake clock 1999/2000 ms、失败后冷却、explicit 边界与 config validation；routing/flush/config/cache 44 pass，typecheck 通过。
+- Cache impact: **NONE**——system/tool/message grammar 与 provider bytes 不变；预期减少连续 LLM run、miss tokens 与成本。

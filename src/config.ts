@@ -25,6 +25,7 @@ export interface BotConfig {
 	token: string; // resolved from token_env
 	personaPath: string; // resolved absolute path
 	routingP: number; // probability a plain human message triggers this bot (cumulative thresholds)
+	samplingCooldownMs: number; // probability-only cooldown after a completed run (REQ-ROUTE-0001)
 	model: string;
 	reasoningEffort: string;
 	compactionThreshold: number;
@@ -83,6 +84,7 @@ export interface RawBotConfig {
 	token_env?: unknown;
 	persona_path?: unknown;
 	routing_p?: unknown;
+	sampling_cooldown_ms?: unknown;
 	model?: unknown;
 	reasoning_effort?: unknown;
 	compaction_threshold?: unknown;
@@ -102,6 +104,7 @@ export interface RawConfig {
 	reasoning_effort?: unknown;
 	compaction_threshold?: unknown;
 	compaction_keep_recent?: unknown;
+	sampling_cooldown_ms?: unknown;
 	bots?: unknown;
 }
 
@@ -166,6 +169,10 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 		if (p !== undefined && (typeof p !== "number" || !Number.isFinite(p) || p < 0 || p > 1)) {
 			errors.push(`[config] ${at}.routing_p: expected number in [0, 1], got ${JSON.stringify(p)}`);
 		}
+		const cooldown = b.sampling_cooldown_ms;
+		if (cooldown !== undefined && (typeof cooldown !== "number" || !Number.isFinite(cooldown) || cooldown < 0)) {
+			errors.push(`[config] ${at}.sampling_cooldown_ms: expected finite number >= 0, got ${JSON.stringify(cooldown)}`);
+		}
 		for (const key of ["compaction_threshold", "compaction_keep_recent"] as const) {
 			const v = b[key];
 			if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v <= 0)) {
@@ -206,6 +213,12 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 		if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v <= 0)) {
 			errors.push(`[config] ${key}: expected positive finite number, got ${JSON.stringify(v)}`);
 		}
+	}
+	if (
+		raw.sampling_cooldown_ms !== undefined &&
+		(typeof raw.sampling_cooldown_ms !== "number" || !Number.isFinite(raw.sampling_cooldown_ms) || raw.sampling_cooldown_ms < 0)
+	) {
+		errors.push(`[config] sampling_cooldown_ms: expected finite number >= 0, got ${JSON.stringify(raw.sampling_cooldown_ms)}`);
 	}
 	if (raw.group_peer_id !== undefined) {
 		const n = normalizePeerId(String(raw.group_peer_id));
@@ -266,6 +279,7 @@ export function loadConfig(rootDir: string): AppConfig {
 	const defaultEffort = typeof raw.reasoning_effort === "string" ? raw.reasoning_effort : "medium";
 	const defaultThreshold = num("compaction_threshold", 128000, 1, Number.MAX_SAFE_INTEGER);
 	const defaultKeepRecent = num("compaction_keep_recent", 20000, 1, Number.MAX_SAFE_INTEGER);
+	const defaultSamplingCooldown = num("sampling_cooldown_ms", 2000, 0, Number.MAX_SAFE_INTEGER);
 	const botList = raw.bots as RawBotConfig[];
 
 	const bots: BotConfig[] = botList.map((b) => {
@@ -277,6 +291,7 @@ export function loadConfig(rootDir: string): AppConfig {
 			token: env[tokenEnv] ?? "",
 			personaPath: resolvePath(rootDir, b.persona_path as string),
 			routingP: typeof b.routing_p === "number" ? b.routing_p : 0,
+			samplingCooldownMs: typeof b.sampling_cooldown_ms === "number" ? b.sampling_cooldown_ms : defaultSamplingCooldown,
 			model: typeof b.model === "string" ? b.model : defaultModel,
 			reasoningEffort: typeof b.reasoning_effort === "string" ? b.reasoning_effort : defaultEffort,
 			compactionThreshold: typeof b.compaction_threshold === "number" ? b.compaction_threshold : defaultThreshold,

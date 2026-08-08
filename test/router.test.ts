@@ -4,7 +4,17 @@ import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { routeMessage, routingValue, nameKeywordTrigger, type BotIdentity } from "../src/agent/router.ts";
+import {
+	dispatchRoutingDecision,
+	routeMessage,
+	routeMessageDecision,
+	routingValue,
+	nameKeywordTrigger,
+	type BotIdentity,
+	type RoutingRuntime,
+	type TriggerResult,
+	type TriggerSource,
+} from "../src/agent/router.ts";
 import type { MessageRow } from "../src/agent/serialize.ts";
 
 const CHAT = -1004402809405;
@@ -87,6 +97,31 @@ describe("routeMessage", () => {
 			entities: JSON.stringify([{ type: "mention", offset: 0, length: 14 }]),
 		});
 		expect(routeMessage(db, mentioned, bots, CFG)).toBe("A");
+		expect(routeMessageDecision(db, mentioned, bots, CFG)).toEqual({ target: "A", reason: "explicit" });
+	});
+
+	test("decision reason distinguishes reply, name, probability, and nobody", () => {
+		db.query(
+			`INSERT INTO messages (chat_id, message_id, date, sender_id, display_name, is_bot, text, first_seen_by)
+			 VALUES (?, 900, 1754600000, ?, '小雪', 1, 'parent', 'A')`,
+		).run(CHAT, bots[0]!.userId);
+		expect(routeMessageDecision(db, row({ message_id: 901, reply_to_message_id: 900 }), bots, CFG)).toEqual({
+			target: "A",
+			reason: "reply",
+		});
+		expect(routeMessageDecision(db, row({ message_id: 902, text: "小雨你怎么看" }), bots, CFG)).toEqual({
+			target: "B",
+			reason: "name",
+		});
+		let probabilityId = -1;
+		let nobodyId = -1;
+		for (let id = 1; id < 10_000 && (probabilityId < 0 || nobodyId < 0); id++) {
+			const decision = routeMessageDecision(db, row({ message_id: id }), bots, CFG);
+			if (decision.reason === "probability") probabilityId = id;
+			if (decision.reason === "nobody") nobodyId = id;
+		}
+		expect(routeMessageDecision(db, row({ message_id: probabilityId }), bots, CFG).reason).toBe("probability");
+		expect(routeMessageDecision(db, row({ message_id: nobodyId }), bots, CFG)).toEqual({ target: "nobody", reason: "nobody" });
 	});
 
 	test("name keyword beats probability", () => {
@@ -124,5 +159,47 @@ describe("routeMessage", () => {
 		// reply-to-bot path also dead for bot senders
 		const botReply = row({ message_id: 501, is_bot: 1, reply_to_message_id: 100 });
 		expect(routeMessage(db, botReply, bots, { secret: SECRET, probs: [1, 0] })).toBe("nobody");
+	});
+});
+
+describe("probability dispatch policy (REQ-ROUTE-0001)", () => {
+	class FakeRuntime implements RoutingRuntime {
+		readonly calls: TriggerSource[] = [];
+		constructor(private result: TriggerResult) {}
+		trigger(source: TriggerSource): TriggerResult {
+			this.calls.push(source);
+			return this.result;
+		}
+	}
+
+	test("a busy probability target is skipped without redistribution", () => {
+		const a = new FakeRuntime("skipped_busy");
+		const b = new FakeRuntime("started");
+		const result = dispatchRoutingDecision(
+			{ target: "A", reason: "probability" },
+			new Map<string, RoutingRuntime>([["A", a], ["B", b]]),
+		);
+		expect(result.outcome).toBe("skipped_busy");
+		expect(a.calls).toEqual(["probability"]);
+		expect(b.calls).toEqual([]);
+	});
+
+	test("different probability buckets can start A and B independently", () => {
+		const a = new FakeRuntime("started");
+		const b = new FakeRuntime("started");
+		const runtimes = new Map<string, RoutingRuntime>([["A", a], ["B", b]]);
+		expect(dispatchRoutingDecision({ target: "A", reason: "probability" }, runtimes).outcome).toBe("started");
+		expect(dispatchRoutingDecision({ target: "B", reason: "probability" }, runtimes).outcome).toBe("started");
+		expect(a.calls).toEqual(["probability"]);
+		expect(b.calls).toEqual(["probability"]);
+	});
+
+	test("mention/reply/name dispatch through the explicit coalescing path", () => {
+		for (const reason of ["explicit", "reply", "name"] as const) {
+			const runtime = new FakeRuntime("coalesced");
+			const result = dispatchRoutingDecision({ target: "A", reason }, new Map([["A", runtime]]));
+			expect(result.outcome).toBe("coalesced");
+			expect(runtime.calls).toEqual(["explicit"]);
+		}
 	});
 });

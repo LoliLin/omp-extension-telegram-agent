@@ -6,7 +6,7 @@ import { openDb, setBotState, getBotState, getDaemonState, setDaemonState } from
 import { BotApi } from "../telegram/api.ts";
 import { Poller } from "../telegram/poller.ts";
 import { BotRuntime } from "../agent/runtime.ts";
-import { routeMessage, type BotIdentity } from "../agent/router.ts";
+import { dispatchRoutingDecision, routeMessageDecision, type BotIdentity } from "../agent/router.ts";
 import { IpcServer } from "./ipc-server.ts";
 import { acquirePidLock, releasePidLock } from "./pid.ts";
 import type { MessageRow } from "../agent/serialize.ts";
@@ -72,6 +72,13 @@ const identities: BotIdentity[] = config.bots.map((bot) => ({
 	username: getBotState(db, bot.id, "bot_username") ?? "",
 	name: bot.name,
 }));
+const routeCounters = new Map<string, number>();
+
+function recordRouteMetric(metric: string, botId: string, messageId: number): void {
+	const count = (routeCounters.get(metric) ?? 0) + 1;
+	routeCounters.set(metric, count);
+	console.log(`[route] ${metric} bot=${botId} msg=#${messageId} count=${count}`);
+}
 
 // IPC server for TUI attach/detach
 const botNames = new Map(config.bots.map((b) => [b.id, b.name] as [string, string]));
@@ -97,13 +104,26 @@ function route(result: { chatId?: number; messageId?: number }): void {
 		.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
 		.get(result.chatId, result.messageId) as MessageRow | null;
 	if (!row) return; // missing row; is_bot is enforced inside routeMessage (REQ-TEST-0001 R3)
-	const target = routeMessage(db, row, identities, {
+	const decision = routeMessageDecision(db, row, identities, {
 		secret: config.routerSecret ?? "",
 		probs: config.bots.map((b) => b.routingP),
 	});
-	if (target !== "nobody") {
-		console.log(`[route] msg #${row.message_id} -> bot ${target}`);
-		runtimes.get(target)?.trigger();
+	const dispatched = dispatchRoutingDecision(decision, runtimes);
+	if (decision.target === "nobody") return;
+	if (decision.reason === "probability") {
+		const metric =
+			dispatched.outcome === "started"
+				? "route_probability_triggered"
+				: dispatched.outcome === "skipped_busy"
+					? "route_probability_skipped_busy"
+					: dispatched.outcome === "skipped_cooldown"
+						? "route_probability_skipped_cooldown"
+						: `route_probability_${dispatched.outcome}`;
+		recordRouteMetric(metric, decision.target, row.message_id);
+	} else {
+		console.log(
+			`[route] msg #${row.message_id} -> bot ${decision.target} reason=${decision.reason} outcome=${dispatched.outcome}`,
+		);
 	}
 }
 

@@ -4,7 +4,8 @@
 
 - `bots.config.json`（项目根，或设 env `bots_config` 指向其他路径）：bot 清单与参数。复制 `bots.config.example.json` 后编辑。
   - `group_peer_id`：群的裸正数 peer id（`-100...` 形式会被自动归一化）
-  - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1）、可选 `model` / `reasoning_effort` / `compaction_threshold` / `compaction_keep_recent` / `tools`（`{send, search, run_js}` 开关）/ `sticker_sets`（Telegram sticker set 名数组）
+  - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1）、可选 `model` / `reasoning_effort` / `compaction_threshold` / `compaction_keep_recent` / `sampling_cooldown_ms` / `tools`（`{send, search, run_js}` 开关）/ `sticker_sets`（Telegram sticker set 名数组）
+  - `sampling_cooldown_ms` 默认 2000，可全局设置并由单 bot 覆盖；必须有限且 `>=0`，0 关闭概率冷却。它只影响 probability routing，mention/reply/name 不会被静默吞掉。
 - `.env`（`key: value` 冒号格式）：只放 secret——bot tokens、`deepseek_api_key`、`tiny_fish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）
 - 改配置后重启 daemon 生效（无热重载）
 
