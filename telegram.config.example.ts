@@ -1,4 +1,4 @@
-import { defineConfig } from "./src/config-schema.ts";
+import { defineConfig } from "./src/config.ts";
 
 export default defineConfig({
 	// Telegram supergroup id. Bare, negative, and -100-prefixed forms are accepted.
@@ -17,7 +17,7 @@ export default defineConfig({
 	sampling_cooldown_ms: 2_000,
 	db_path: "data/agent.db",
 	router_secret_env: "router_secret",
-	tinyfish_key_env: "tinyfish_api_key",
+	tinyfish_key_env: "tiny_fish_api_key",
 	auxiliary_visual_model: "openai-codex/gpt-5.6-luna:low",
 	max_suffix_tokens: 12_000,
 	max_message_tokens: 4_096,
@@ -49,7 +49,7 @@ export default defineConfig({
 			sticker_sets: [],
 			tools: {
 				send: true,
-				// Enable only after adding tinyfish_api_key to .env.
+				// Enable only after adding tiny_fish_api_key to .env.
 				search: false,
 				run_js: false,
 			},

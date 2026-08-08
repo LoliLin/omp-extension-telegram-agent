@@ -1,8 +1,7 @@
 // Central configuration loader (REQ-CONF-0001).
 //
-// Three sources:
-//   1. `telegram.config.ts` (preferred) or legacy `bots.config.json` (project root, or env
-//      `bots_config` path) — trusted local bot list:
+// Two sources:
+//   1. `telegram.config.ts` (project root) — trusted local bot list:
 //      arbitrary number of bots, persona paths (abs / ~ / relative to project root), optional
 //      Pi provider/model selection, routing & tool switches.
 //   2. `.env` (`key: value` colon format) — Telegram/TinyFish/router secrets only. LLM
@@ -26,14 +25,79 @@ import {
 	normalizeAuxiliaryVisualModel,
 } from "./agent/model-ref.ts";
 
-export { defineConfig } from "./config-schema.ts";
-export type {
-	TelegramAdminInput,
-	TelegramBotConfigInput,
-	TelegramConfigInput,
-	TelegramToolsConfigInput,
-	TelegramVisionConfigInput,
-} from "./config-schema.ts";
+export interface TelegramToolsConfigInput {
+	send?: boolean;
+	search?: boolean;
+	run_js?: boolean;
+}
+
+export interface TelegramVisionConfigInput {
+	enabled?: boolean;
+	foreground_media_limit?: number;
+	concurrency?: number;
+	per_chat_hourly_limit?: number;
+	daily_limit?: number;
+}
+
+export type TelegramAdminInput = number | `@${string}`;
+
+export interface TelegramBotConfigInput {
+	/** Stable local id used by commands, sessions, routing, and telemetry. */
+	id: string;
+	/** Display name and explicit name trigger. Defaults to id. */
+	name?: string;
+	/** Name of the .env entry containing this Telegram bot token. */
+	token_env: string;
+	/** Absolute, home-relative, or project-relative trusted local Markdown file. */
+	persona_path: string;
+	/** Probability for unaddressed human messages; all bots together must total <= 1. */
+	routing_p?: number;
+	/** Probability-route cooldown after a completed turn. */
+	sampling_cooldown_ms?: number;
+	provider?: string;
+	model?: string;
+	reasoning_effort?: ThinkingLevel;
+	compaction_threshold?: number;
+	compaction_keep_recent?: number;
+	/** Cheap task model used only for compaction: provider/model:effort. */
+	compaction_model?: string;
+	cache_retention?: "none" | "short" | "long";
+	max_suffix_tokens?: number;
+	max_message_tokens?: number;
+	tools?: TelegramToolsConfigInput;
+	sticker_sets?: readonly string[];
+}
+
+/** Trusted local deployment config. Secret values belong in .env, never in this object. */
+export interface TelegramConfigInput {
+	group_peer_id: string | number;
+	router_secret_env?: string;
+	db_path?: string;
+	tinyfish_key_env?: string;
+	/** Pi task model reference for photo/sticker vision: provider/model:effort. */
+	auxiliary_visual_model?: string;
+	provider?: string;
+	model?: string;
+	reasoning_effort?: ThinkingLevel;
+	compaction_threshold?: number;
+	compaction_keep_recent?: number;
+	compaction_model?: string;
+	cache_retention?: "none" | "short" | "long";
+	max_suffix_tokens?: number;
+	max_message_tokens?: number;
+	sampling_cooldown_ms?: number;
+	vision?: TelegramVisionConfigInput;
+	telemetry_retention_days?: number;
+	raw_update_retention_days?: number;
+	message_event_retention_days?: number;
+	telegram_admins?: readonly TelegramAdminInput[];
+	bots: readonly TelegramBotConfigInput[];
+}
+
+/** Identity helper that supplies editor types without changing runtime configuration bytes. */
+export function defineConfig<const T extends TelegramConfigInput>(config: T): T {
+	return config;
+}
 
 export interface BotToolsConfig {
 	send: boolean;
@@ -142,7 +206,6 @@ export interface RawBotConfig {
 	sampling_cooldown_ms?: unknown;
 	provider?: unknown;
 	model?: unknown;
-	api_key_env?: unknown;
 	reasoning_effort?: unknown;
 	compaction_threshold?: unknown;
 	compaction_keep_recent?: unknown;
@@ -159,11 +222,9 @@ export interface RawConfig {
 	router_secret_env?: unknown;
 	db_path?: unknown;
 	tinyfish_key_env?: unknown;
-	deepseek_key_env?: unknown;
 	auxiliary_visual_model?: unknown;
 	provider?: unknown;
 	model?: unknown;
-	api_key_env?: unknown;
 	reasoning_effort?: unknown;
 	compaction_threshold?: unknown;
 	compaction_keep_recent?: unknown;
@@ -181,39 +242,13 @@ export interface RawConfig {
 }
 
 const TYPESCRIPT_CONFIG = "telegram.config.ts";
-const LEGACY_JSON_CONFIG = "bots.config.json";
 const configJiti = createJiti(import.meta.url, { interopDefault: false, moduleCache: false });
 
-export function defaultConfigPath(rootDir: string, override = process.env.bots_config): string {
-	if (override?.trim()) {
-		const path = isAbsolute(override) ? resolve(override) : resolve(rootDir, override);
-		if (!path.endsWith(".ts") && !path.endsWith(".json")) {
-			throw new ConfigError([`[config] bots_config: unsupported extension for ${path}; expected .ts or .json`]);
-		}
-		return path;
-	}
-	const typedPath = join(rootDir, TYPESCRIPT_CONFIG);
-	const legacyPath = join(rootDir, LEGACY_JSON_CONFIG);
-	if (existsSync(typedPath) && existsSync(legacyPath)) {
-		throw new ConfigError([
-			`[config] multiple configuration files found: ${typedPath}`,
-			`[config] multiple configuration files found: ${legacyPath}`,
-			`[config] keep exactly one, or set bots_config to an explicit .ts/.json path`,
-		]);
-	}
-	if (existsSync(typedPath)) return typedPath;
-	if (existsSync(legacyPath)) return legacyPath;
-	return typedPath;
+export function defaultConfigPath(rootDir: string): string {
+	return join(rootDir, TYPESCRIPT_CONFIG);
 }
 
 function loadConfigSource(path: string): unknown {
-	if (path.endsWith(".json")) {
-		try {
-			return JSON.parse(readFileSync(path, "utf8"));
-		} catch (error) {
-			throw new ConfigError([`[config] ${path}: invalid JSON: ${error instanceof Error ? error.message : String(error)}`]);
-		}
-	}
 	try {
 		const loaded = configJiti(path) as unknown;
 		return loaded && typeof loaded === "object" && "default" in loaded
@@ -224,14 +259,14 @@ function loadConfigSource(path: string): unknown {
 	}
 }
 
-/** Load + validate the preferred TypeScript or legacy JSON config. */
-export function loadBotConfig(rootDir: string, env: Record<string, string>): RawConfig {
+/** Load + validate the trusted TypeScript config. */
+export function loadBotConfig(rootDir: string, env: Record<string, string>, configPath?: string): RawConfig {
 	const errors: string[] = [];
-	const path = defaultConfigPath(rootDir, env.bots_config);
+	const path = configPath ?? defaultConfigPath(rootDir);
 	if (!existsSync(path)) {
 		throw new ConfigError([
 			`[config] missing configuration: ${path}`,
-			`[config] copy telegram.config.example.ts to ${TYPESCRIPT_CONFIG}, use legacy ${LEGACY_JSON_CONFIG}, or run /tg config`,
+			`[config] copy telegram.config.example.ts to ${TYPESCRIPT_CONFIG}, or run /tg config`,
 		]);
 	}
 	const source = loadConfigSource(path);
@@ -436,7 +471,7 @@ export function resolvePath(rootDir: string, p: string): string {
 }
 
 export interface LoadConfigOptions {
-	/** Explicit trusted local .ts/.json source, primarily for validating an editor draft. */
+	/** Explicit trusted local .ts source, primarily for validating an editor draft. */
 	configPath?: string;
 	/** In-memory values used by onboarding validation; values override file/process env. */
 	env?: Record<string, string>;
@@ -510,8 +545,7 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 		if (v !== undefined) env[k] = v;
 	}
 	Object.assign(env, options.env);
-	if (options.configPath) env.bots_config = options.configPath;
-	const raw = loadBotConfig(rootDir, env);
+	const raw = loadBotConfig(rootDir, env, options.configPath);
 	const rawBots = raw.bots as RawBotConfig[];
 	const needsPiDefaults = rawBots.some((bot) =>
 		(bot.provider === undefined && raw.provider === undefined)

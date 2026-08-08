@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { ConfigError, defaultConfigPath, parseEnvFile } from "../config.ts";
+import { ConfigError } from "../config.ts";
 import {
 	createSharedModelRuntime,
 	PiModelConfigurationError,
@@ -87,43 +87,18 @@ export async function runNativeConfigWizard(
 ): Promise<ConfigWizardResult> {
 	const rootDir = resolve(dependencies.rootDir);
 	const typedPath = join(rootDir, "telegram.config.ts");
-	const legacyPath = join(rootDir, "bots.config.json");
 	const envPath = join(rootDir, ".env");
-	const configOverride = process.env.bots_config ?? parseEnvFile(envPath).bots_config;
-	let explicitConfigPath: string | null = null;
-	if (configOverride?.trim()) {
-		try {
-			explicitConfigPath = defaultConfigPath(rootDir, configOverride);
-		} catch (error) {
-			ui.notify(formatSafeFailure("Configuration source override is invalid", error, "Fix or remove bots_config, then retry."), "error");
-			return { outcome: "failed" };
-		}
-		if (!existsSync(explicitConfigPath) && explicitConfigPath !== typedPath) {
-			ui.notify(
-				formatSafeFailure(
-					"Configuration source override is missing",
-					new OnboardingWriteError(`bots_config selects a missing source: ${basename(explicitConfigPath)}`),
-					"Create that file or remove bots_config, then retry.",
-				),
-				"error",
-			);
-			return { outcome: "failed" };
-		}
-	}
-	const defaultConfigFiles = [typedPath, legacyPath].filter(existsSync);
 	let existing: ReturnType<typeof readExistingConfigSource> | null = null;
 	try {
 		existing = readExistingConfigSource(rootDir);
 	} catch {
-		// Missing and ambiguous defaults are handled by the protected-file branch below.
+		// Missing and unreadable defaults are handled by the protected-file branch below.
 	}
 
 	let mode: OnboardingWriteMode = "create";
 	if (existing) {
 		const isProjectRootSource = dirname(existing.path) === rootDir;
-		const canFullReplace = explicitConfigPath === null
-			? existing.path === typedPath || existing.path === legacyPath
-			: existing.path === typedPath;
+		const canFullReplace = existing.path === typedPath;
 		const actions = [WIZARD_ACTION_VALIDATE];
 		if (isProjectRootSource) actions.push(WIZARD_ACTION_EDIT);
 		if (canFullReplace) actions.push(WIZARD_ACTION_REPLACE);
@@ -168,7 +143,7 @@ export async function runNativeConfigWizard(
 		);
 		if (!confirmed) return cancelled(ui);
 		mode = "backup-replace";
-	} else if (defaultConfigFiles.length > 0 || existsSync(envPath)) {
+	} else if (existsSync(typedPath) || existsSync(envPath)) {
 		const action = await ui.select("Partial or ambiguous Telegram configuration found", [WIZARD_ACTION_REPLACE, WIZARD_ACTION_CANCEL]);
 		if (!action || action === WIZARD_ACTION_CANCEL) return cancelled(ui);
 		const confirmed = await ui.confirm(

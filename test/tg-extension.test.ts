@@ -1,7 +1,7 @@
 process.env.TZ = "Asia/Singapore";
 
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { convertToPng, FooterComponent, initTheme, type Theme } from "@earendil-works/pi-coding-agent";
@@ -346,7 +346,10 @@ function makeOnboardingRoot(): string {
 	mkdirSync(join(root, "src"), { recursive: true });
 	mkdirSync(join(root, "personas"), { recursive: true });
 	mkdirSync(join(root, ".pi"), { recursive: true });
-	writeFileSync(join(root, "src/config-schema.ts"), readFileSync(join(import.meta.dir, "../src/config-schema.ts"), "utf8"));
+	writeFileSync(
+		join(root, "src/config.ts"),
+		`export * from ${JSON.stringify(join(import.meta.dir, "../src/config.ts"))};\n`,
+	);
 	writeFileSync(join(root, "personas/template.zh.md"), readFileSync(join(import.meta.dir, "../personas/template.zh.md"), "utf8"));
 	writeFileSync(join(root, "personas/template.en.md"), readFileSync(join(import.meta.dir, "../personas/template.en.md"), "utf8"));
 	writeFileSync(join(root, ".pi/settings.json"), JSON.stringify({
@@ -626,63 +629,6 @@ describe("native Pi Telegram extension", () => {
 			expect(host.notifies.at(-1)?.text).toContain("no files were changed");
 		} finally {
 			rmSync(root, { recursive: true, force: true });
-		}
-	});
-
-	test("config honors bots_config selection without replacing an unread source", async () => {
-		const customRoot = makeOnboardingRoot();
-		try {
-			writeFirstRunDeployment(customRoot, {
-				groupPeerId: "-1001234567890",
-				bot: {
-					id: "friend",
-					name: "Mochi",
-					tokenEnv: "telegram_bot_token",
-					token: ONBOARD_TELEGRAM_SECRET,
-					personaText: readFileSync(join(customRoot, "personas/template.en.md"), "utf8"),
-				},
-			}, { nonce: "custom-source" });
-			renameSync(join(customRoot, "telegram.config.ts"), join(customRoot, "custom.config.ts"));
-			writeFileSync(join(customRoot, ".env"), `${readFileSync(join(customRoot, ".env"), "utf8")}bots_config: custom.config.ts\n`);
-			const originalSource = readFileSync(join(customRoot, "custom.config.ts"));
-			const host = makeHost({ rootDir: customRoot }, {
-				selects: [WIZARD_ACTION_EDIT],
-				editors: [undefined],
-			});
-
-			await host.command("config");
-
-			expect(host.dialogCalls[0]?.options).toEqual([WIZARD_ACTION_VALIDATE, WIZARD_ACTION_EDIT, WIZARD_ACTION_CANCEL]);
-			expect(readFileSync(join(customRoot, "custom.config.ts"))).toEqual(originalSource);
-			expect(existsSync(join(customRoot, "telegram.config.ts"))).toBe(false);
-			expect(loadConfig(customRoot).bots[0]!.id).toBe("friend");
-		} finally {
-			rmSync(customRoot, { recursive: true, force: true });
-		}
-
-		const missingRoot = makeOnboardingRoot();
-		try {
-			const originalEnv = "bots_config: absent.config.ts\nunrelated: keep-exactly\n";
-			writeFileSync(join(missingRoot, ".env"), originalEnv);
-			let processCalls = 0;
-			const host = makeHost({
-				rootDir: missingRoot,
-				processRunner: async () => {
-					processCalls++;
-					return { status: 0, stdout: "daemon ready", stderr: "" };
-				},
-			});
-
-			await host.command("config");
-
-			expect(host.dialogCalls).toHaveLength(0);
-			expect(processCalls).toBe(0);
-			expect(readFileSync(join(missingRoot, ".env"), "utf8")).toBe(originalEnv);
-			expect(existsSync(join(missingRoot, "telegram.config.ts"))).toBe(false);
-			expect(host.notifies.at(-1)?.text).toContain("bots_config");
-			expect(host.notifies.at(-1)?.text).toContain("remove bots_config");
-		} finally {
-			rmSync(missingRoot, { recursive: true, force: true });
 		}
 	});
 

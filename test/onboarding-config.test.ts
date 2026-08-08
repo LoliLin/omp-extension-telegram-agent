@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, afterAll } from "bun:test";
 import {
 	existsSync,
 	mkdirSync,
@@ -26,6 +26,15 @@ import {
 
 const TELEGRAM_SECRET = "123456:THIS_IS_A_TEST_TOKEN_NOT_VALID";
 
+// Bun auto-loads the project .env into process.env, and loadConfig lets process.env override
+// the parsed file — the real tiny_fish_api_key must not bleed into the temp deployment.
+const savedTinyfishKey = process.env.tiny_fish_api_key;
+delete process.env.tiny_fish_api_key;
+afterAll(() => {
+	if (savedTinyfishKey === undefined) delete process.env.tiny_fish_api_key;
+	else process.env.tiny_fish_api_key = savedTinyfishKey;
+});
+
 function draft(overrides: Partial<FirstRunDraft> = {}): FirstRunDraft {
 	const base: FirstRunDraft = {
 		groupPeerId: "-1001234567890",
@@ -48,7 +57,10 @@ function makeRoot(): string {
 	const root = mkdtempSync(join(tmpdir(), "tg-onboarding-"));
 	mkdirSync(join(root, "src"));
 	mkdirSync(join(root, ".pi"));
-	writeFileSync(join(root, "src/config-schema.ts"), readFileSync("src/config-schema.ts", "utf8"));
+	writeFileSync(
+		join(root, "src/config.ts"),
+		`export * from ${JSON.stringify(join(process.cwd(), "src/config.ts"))};\n`,
+	);
 	writeFileSync(join(root, ".pi/settings.json"), JSON.stringify({
 		defaultProvider: "deepseek",
 		defaultModel: "deepseek-v4-flash",
@@ -256,7 +268,6 @@ describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
 		const userSurface = [
 			".env.example",
 			"telegram.config.example.ts",
-			"bots.config.example.json",
 			"README.md",
 			"README.en.md",
 			"docs/runbooks/daemon.md",
@@ -265,8 +276,6 @@ describe("atomic onboarding config core (REQ-ONBOARD-0001)", () => {
 		];
 		expect(forbiddenProviderKeyHits(userSurface)).toEqual([]);
 
-		const productionHits = forbiddenProviderKeyHits(textFilesUnder("src"));
-		expect(productionHits.length).toBeGreaterThan(0);
-		expect(productionHits.every((hit) => hit.startsWith("src/config.ts:") && /api_key_env|deepseek_key_env/.test(hit))).toBe(true);
+		expect(forbiddenProviderKeyHits(textFilesUnder("src"))).toEqual([]);
 	});
 });

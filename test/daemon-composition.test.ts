@@ -36,19 +36,20 @@ function makeFixture(count: number): string {
 		};
 	});
 	writeFileSync(join(dir, ".env"), [
-		"platform_provider_key: provider-test-key",
 		"platform_tinyfish_key: tinyfish-test-key",
 		...bots.map((bot, index) => `${bot.token_env}: ${index + 1}:telegram-test-token`),
 	].join("\n"));
-	writeFileSync(join(dir, "bots.config.json"), JSON.stringify({
-		group_peer_id: 4402809405,
-		provider: "deepseek",
-		model: "deepseek-v4-flash",
-		reasoning_effort: "medium",
-		api_key_env: "platform_provider_key",
-		tinyfish_key_env: "platform_tinyfish_key",
-		bots,
-	}));
+	writeFileSync(
+		join(dir, "telegram.config.ts"),
+		`export default ${JSON.stringify({
+			group_peer_id: 4402809405,
+			provider: "deepseek",
+			model: "deepseek-v4-flash",
+			reasoning_effort: "medium",
+			tinyfish_key_env: "platform_tinyfish_key",
+			bots,
+		}, null, 2)};\n`,
+	);
 	return dir;
 }
 

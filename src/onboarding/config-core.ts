@@ -11,7 +11,7 @@ import {
 	type Stats,
 } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
-import { defaultConfigPath, loadConfig, normalizePeerId, parseEnvFile, type AppConfig } from "../config.ts";
+import { defaultConfigPath, loadConfig, normalizePeerId, type AppConfig } from "../config.ts";
 
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const BOT_ID = /^[A-Za-z0-9_-]+$/;
@@ -165,7 +165,7 @@ function renderFirstRunConfig(
 	const pinnedModel = modelSelection
 		? `\tprovider: ${value(modelSelection.provider)},\n\tmodel: ${value(modelSelection.model)},\n`
 		: "";
-	return `import { defineConfig } from "./src/config-schema.ts";
+	return `import { defineConfig } from "./src/config.ts";
 
 export default defineConfig({
 	group_peer_id: ${value(draft.groupPeerIdNumber)},
@@ -178,7 +178,7 @@ ${pinnedModel}	reasoning_effort: "off",
 	max_message_tokens: 4_096,
 	sampling_cooldown_ms: 2_000,
 	db_path: "data/agent.db",
-	tinyfish_key_env: "tinyfish_api_key",
+	tinyfish_key_env: "tiny_fish_api_key",
 	vision: {
 		enabled: false,
 		foreground_media_limit: 2,
@@ -214,7 +214,6 @@ export function writeFirstRunDeployment(rootDir: string, draft: FirstRunDraft, o
 	const ops = options.fileOps ?? nodeConfigFileOps;
 	const nonce = options.nonce ?? randomUUID();
 	const configPath = join(root, "telegram.config.ts");
-	const legacyPath = join(root, "bots.config.json");
 	const envPath = join(root, ".env");
 	const personaPath = join(root, normalized.personaRelativePath);
 	options.onEvent?.({ phase: "validated", paths: [".env", "telegram.config.ts", normalized.personaRelativePath] });
@@ -232,7 +231,7 @@ export function writeFirstRunDeployment(rootDir: string, draft: FirstRunDraft, o
 		{ path: configPath, contents: renderFirstRunConfig(normalized, options.modelSelection), mode: PRIVATE_MODE },
 		{ path: personaPath, contents: ensureTrailingNewline(normalized.bot.personaText), mode: PRIVATE_MODE },
 	];
-	const transaction = installAtomically(files, [legacyPath], mode, nonce, ops);
+	const transaction = installAtomically(files, [], mode, nonce, ops);
 	options.onEvent?.({ phase: "installed", paths: files.map((file) => relative(root, file.path)) });
 	try {
 		const config = loadConfig(root, { configPath });
@@ -256,14 +255,13 @@ export function validateExistingDeployment(rootDir: string): DeploymentSummary {
 export function readExistingConfigSource(rootDir: string, ops: ConfigFileOps = nodeConfigFileOps): ConfigSource {
 	const root = resolve(rootDir);
 	const path = onboardingConfigPath(root);
-	if (!ops.exists(path)) throw new OnboardingWriteError("no existing .ts/.json configuration was found");
+	if (!ops.exists(path)) throw new OnboardingWriteError("no existing telegram.config.ts configuration was found");
 	assertRegularFile(path, ops);
 	return { path, source: ops.readFile(path) };
 }
 
 function onboardingConfigPath(rootDir: string): string {
-	const fileOverride = parseEnvFile(join(rootDir, ".env")).bots_config;
-	return defaultConfigPath(rootDir, process.env.bots_config ?? fileOverride);
+	return defaultConfigPath(rootDir);
 }
 
 export function validateEditedConfigSource(
@@ -274,8 +272,8 @@ export function validateEditedConfigSource(
 ): DeploymentSummary {
 	const root = resolve(rootDir);
 	const target = resolve(path);
-	if (dirname(target) !== root || ![".ts", ".json"].includes(extname(target))) {
-		throw new OnboardingWriteError("edited configuration must be the project-root .ts or .json source");
+	if (dirname(target) !== root || extname(target) !== ".ts") {
+		throw new OnboardingWriteError("edited configuration must be the project-root .ts source");
 	}
 	const ops = options.fileOps ?? nodeConfigFileOps;
 	const extension = extname(target);

@@ -11,7 +11,7 @@
   - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1），可选覆盖 provider/model/reasoning/cache retention、compaction、12k suffix/4096 message预算、cooldown、`tools`与`sticker_sets`。顶层另有vision scheduler和90/30/365天telemetry/raw/event retention。模型覆盖只是选择，不承载credential。
   - `sampling_cooldown_ms` 默认 2000，可全局设置并由单 bot 覆盖；必须有限且 `>=0`，0 关闭概率冷却。它只影响 probability routing，mention/reply/name 不会被静默吞掉。
   - `telegram_admins`：Telegram群内控制白名单，接受正整数user id或规范化`@username`；推荐固定numeric id。缺省/空数组会拒绝所有`compact/set/reset`，但不影响公开`help/bots/status`。
-- `.env`（`key: value` 冒号格式）：只放项目拥有的secret——bot tokens、`tinyfish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）。LLM credential由Pi auth store独占。只有至少一个bot启用`tools.search`时才强制要求对应TinyFish key；首配默认关闭search，可在补key后编辑配置开启。
+- `.env`（`key: value` 冒号格式）：只放项目拥有的secret——bot tokens、`tiny_fish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）。LLM credential由Pi auth store独占。只有至少一个bot启用`tools.search`时才强制要求对应TinyFish key；首配默认关闭search，可在补key后编辑配置开启。
 - 改配置后重启daemon生效（无热重载）；本机persona除公开模板外默认被Git忽略。model/persona/cache policy/tools等cache-visible字段变化会在restore前生成新fingerprint/session/epoch，旧session文件保留但不会错误恢复。
 - 一份配置/daemon只对应一个`group_peer_id`。同一checkout的`data/`、pid、socket与DB是共享deployment资源，不能只换`bots_config`并行跑第二个群；多群当前必须使用彼此隔离的工作目录与data目录，不能共享DB/session/socket/pid。
 

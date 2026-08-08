@@ -1,4 +1,4 @@
-// REQ-CONF-0001 + REQ-OPS-0001 regression tests: typed/legacy config validation,
+// REQ-CONF-0001 + REQ-OPS-0001 regression tests: typed config validation,
 // arbitrary bot counts, peer id normalization, pid lock exclusivity, example-file sanity.
 // The lock test spawns a fixture process whose cmdline matches our daemon check;
 // no real daemon or network is involved.
@@ -13,7 +13,6 @@ import {
 	parseEnvFile,
 	normalizePeerId,
 	normalizeTelegramAdmin,
-	defaultConfigPath,
 	ConfigError,
 } from "../src/config.ts";
 import { acquirePidLock, releasePidLock, readPid, pidAlive, isOurDaemon, isDaemonCommand, listOurDaemons } from "../src/daemon/pid.ts";
@@ -27,7 +26,6 @@ const FIXTURE_LOCK = join(import.meta.dir, "fixtures/daemon/index.ts");
 const ENV_KEYS = [
 	"telegram_bot_alpha", "telegram_bot_beta", "telegram_group_peer_id",
 	"deepseek_api_key", "anthropic_api_key", "alternate_deepseek_key", "tiny_fish_api_key", "auxiliary_visual_model", "router_secret",
-	"bots_config",
 ];
 const savedEnv = new Map<string, string | undefined>();
 for (const k of ENV_KEYS) savedEnv.set(k, process.env[k]);
@@ -54,15 +52,15 @@ function makeEnvDir(bots: unknown = VALID_BOTS, extraEnv: Record<string, string>
 	];
 	writeFileSync(join(dir, ".env"), lines.join("\n"));
 	writeFileSync(
-		join(dir, "bots.config.json"),
-		JSON.stringify({
+		join(dir, "telegram.config.ts"),
+		`export default ${JSON.stringify({
 			group_peer_id: 1234567890,
 			provider: "deepseek",
 			model: "deepseek-v4-flash",
 			reasoning_effort: "medium",
 			...extraConfig,
 			bots,
-		}),
+		}, null, 2)};\n`,
 	);
 	// persona files referenced by the default VALID_BOTS must exist under the temp dir
 	mkdirSync(join(dir, "personas"), { recursive: true });
@@ -71,60 +69,25 @@ function makeEnvDir(bots: unknown = VALID_BOTS, extraEnv: Record<string, string>
 	return dir;
 }
 
-function convertFixtureToTypedConfig(dir: string, keepLegacy = false): void {
-	const legacyPath = join(dir, "bots.config.json");
-	const config = JSON.parse(readFileSync(legacyPath, "utf8")) as Record<string, unknown>;
-	if (!keepLegacy) rmSync(legacyPath);
-	const helperUrl = pathToFileURL(join(process.cwd(), "src/config-schema.ts")).href;
-	writeFileSync(
-		join(dir, "telegram.config.ts"),
-		`import { defineConfig } from ${JSON.stringify(helperUrl)};\nexport default defineConfig(${JSON.stringify(config, null, 2)});\n`,
-	);
-}
-
 function makeTypedExampleDir(): string {
 	const dir = mkdtempSync(join(tmpdir(), "typed-config-example-"));
 	writeFileSync(join(dir, ".env"), [
 		"telegram_bot_token: 123:EXAMPLE",
-		"tinyfish_api_key: tf-example",
+		"tiny_fish_api_key: tf-example",
 		"router_secret: fixture-only",
 	].join("\n"));
 	mkdirSync(join(dir, "personas"));
 	writeFileSync(join(dir, "personas/template.en.md"), readFileSync("personas/template.en.md", "utf8"));
-	const helperUrl = pathToFileURL(join(process.cwd(), "src/config-schema.ts")).href;
+	const helperUrl = pathToFileURL(join(process.cwd(), "src/config.ts")).href;
 	const source = readFileSync("telegram.config.example.ts", "utf8")
-		.replace('"./src/config-schema.ts"', JSON.stringify(helperUrl));
+		.replace('"./src/config.ts"', JSON.stringify(helperUrl));
 	writeFileSync(join(dir, "telegram.config.ts"), source);
 	return dir;
 }
 
-describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
-	test("ONBOARD AC3: typed config and legacy JSON normalize identically", () => {
-		const legacyDir = makeEnvDir();
-		const typedDir = makeEnvDir();
-		convertFixtureToTypedConfig(typedDir);
-		try {
-			const project = (dir: string) => {
-				const config = loadConfig(dir);
-				return {
-					groupPeerId: config.groupPeerId,
-					telegramAdmins: config.telegramAdmins,
-					bots: config.bots.map(({ token: _token, personaPath, ...bot }) => ({
-						...bot,
-						personaPath: personaPath.slice(personaPath.lastIndexOf("/") + 1),
-					})),
-				};
-			};
-			expect(project(typedDir)).toEqual(project(legacyDir));
-		} finally {
-			rmSync(legacyDir, { recursive: true, force: true });
-			rmSync(typedDir, { recursive: true, force: true });
-		}
-	});
-
+describe("loadConfig typed sources (REQ-CONF-0001)", () => {
 	test("ONBOARD AC3: the same typed fixture loads equivalently under Bun and Node", () => {
 		const dir = makeEnvDir();
-		convertFixtureToTypedConfig(dir);
 		try {
 			const fixture = join(import.meta.dir, "fixtures/load-config-runtime.ts");
 			const bun = Bun.spawnSync(["bun", "run", fixture, dir], { cwd: process.cwd() });
@@ -132,19 +95,6 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 			expect(bun.exitCode, bun.stderr.toString()).toBe(0);
 			expect(node.exitCode, node.stderr.toString()).toBe(0);
 			expect(JSON.parse(node.stdout.toString())).toEqual(JSON.parse(bun.stdout.toString()));
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("ONBOARD AC3: ambiguous defaults fail fast and override extensions are explicit", () => {
-		const dir = makeEnvDir();
-		convertFixtureToTypedConfig(dir, true);
-		try {
-			expect(() => loadConfig(dir)).toThrow(/telegram\.config\.ts[\s\S]*bots\.config\.json/);
-			expect(defaultConfigPath(dir, "deployment.ts")).toBe(join(dir, "deployment.ts"));
-			expect(defaultConfigPath(dir, "deployment.json")).toBe(join(dir, "deployment.json"));
-			expect(() => defaultConfigPath(dir, "deployment.yaml")).toThrow(/expected \.ts or \.json/);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -339,15 +289,13 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 		const globalDir = makeEnvDir(VALID_BOTS, {}, {
 			provider: "anthropic",
 			model: "claude-sonnet-4-6",
-			api_key_env: "missing_legacy_key",
 		});
 		const mixedDir = makeEnvDir([
-			{ ...VALID_BOTS[0], api_key_env: "missing_legacy_deepseek_key" },
+			{ ...VALID_BOTS[0] },
 			{
 				...VALID_BOTS[1],
 				provider: "anthropic",
 				model: "claude-sonnet-4-6",
-				api_key_env: "missing_legacy_anthropic_key",
 			},
 		]);
 		try {
@@ -371,38 +319,22 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 
 	test("PLAT-0002 R3: provider overrides require a model but never a project auth env", () => {
 		const missingShapeDir = makeEnvDir([{ ...VALID_BOTS[0], provider: "anthropic" }]);
-		const ignoredSecretDir = makeEnvDir([
+		const overrideDir = makeEnvDir([
 			{
 				...VALID_BOTS[0],
 				provider: "anthropic",
 				model: "claude-sonnet-4-6",
-				api_key_env: "definitely_not_in_env",
 			},
 		]);
 		try {
 			expect(() => loadConfig(missingShapeDir)).toThrow(/model/);
-			expect(loadConfig(ignoredSecretDir).bots[0]).toMatchObject({
+			expect(loadConfig(overrideDir).bots[0]).toMatchObject({
 				provider: "anthropic",
 				model: "claude-sonnet-4-6",
 			});
 		} finally {
 			rmSync(missingShapeDir, { recursive: true, force: true });
-			rmSync(ignoredSecretDir, { recursive: true, force: true });
-		}
-	});
-
-	test("PLAT-0002 AC3: legacy provider key fields are accepted then discarded", () => {
-		const dir = makeEnvDir(VALID_BOTS, {}, {
-			deepseek_key_env: "missing_legacy_key",
-			api_key_env: "also_missing",
-		});
-		try {
-			const bots = loadConfig(dir).bots;
-			expect(bots.map((bot) => bot.provider)).toEqual(["deepseek", "deepseek"]);
-			expect(JSON.stringify(bots)).not.toContain("missing_legacy_key");
-			expect(JSON.stringify(bots)).not.toContain("also_missing");
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
+			rmSync(overrideDir, { recursive: true, force: true });
 		}
 	});
 
@@ -524,14 +456,14 @@ describe(".env.example (REQ-OPS-0001 R1)", () => {
 		const env = parseEnvFile(join(process.cwd(), ".env.example"));
 		expect(env.telegram_bot_token).toBe("123456:REPLACE_WITH_BOTFATHER_TOKEN");
 		expect(env.llm_api_key).toBeUndefined();
-		expect(env.tinyfish_api_key).toBe("REPLACE_WITH_TINYFISH_KEY");
+		expect(env.tiny_fish_api_key).toBe("REPLACE_WITH_TINYFISH_KEY");
 		expect(env.router_secret).toBe("REPLACE_WITH_RANDOM_LOCAL_SECRET");
 		expect(env.auxiliary_visual_model).toBeUndefined();
 		expect(Object.keys(env).sort()).toEqual([
 			"gpg_key_passphrase",
 			"router_secret",
 			"telegram_bot_token",
-			"tinyfish_api_key",
+			"tiny_fish_api_key",
 		]);
 	});
 });
@@ -551,10 +483,6 @@ describe("repo hygiene (REQ-OPS-0001 R3)", () => {
 	});
 
 	test("tracked examples and persona files are public-only", () => {
-		const example = JSON.parse(readFileSync(join(process.cwd(), "bots.config.example.json"), "utf8")) as {
-			telegram_admins?: unknown[];
-		};
-		expect(example.telegram_admins).toEqual([]);
 		const tracked = Bun.spawnSync([
 			"git", "ls-files", "--cached", "--others", "--exclude-standard", "personas",
 		], { cwd: process.cwd() });
@@ -564,9 +492,7 @@ describe("repo hygiene (REQ-OPS-0001 R3)", () => {
 			"personas/template.en.md",
 			"personas/template.zh.md",
 		]);
-		for (const path of ["bots.config.example.json", "telegram.config.example.ts"]) {
-			expect(readFileSync(join(process.cwd(), path), "utf8")).not.toMatch(/aac6fef|hastuyuki|kosamere|xiaoxue|xiaoyu/i);
-		}
+		expect(readFileSync(join(process.cwd(), "telegram.config.example.ts"), "utf8")).not.toMatch(/aac6fef|hastuyuki|kosamere|xiaoxue|xiaoyu/i);
 	});
 });
 
