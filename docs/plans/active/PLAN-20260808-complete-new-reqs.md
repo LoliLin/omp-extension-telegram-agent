@@ -87,6 +87,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13m** — 按现行官方字段在既有search tool增加TinyFish fetch、安全边界并bump cache v6；validates: SEARCH-0001 AC1–AC7；commit: `0c450cd`
 - [x] **T13n** — 脱敏审计现有send参数与RichMessage blocks，重开UI-0005并正式化Markdown entities修复；validates: UI-0005/TG-0004 documented scope/AC；commit: docs/research only
 - [x] **T13o** — attach默认进入scope compose，多bot提交复用Pi原生select，并保留sticky/off/unknown边界；validates: UI-0005 AC1–AC8；commit: native editor behavior
+- [x] **T13p0** — 将TinyFish已经验证的public HTTP(S) literal validator机械提到共享模块，供Markdown link复用；validates: behavior unchanged；commit: mechanical refactor
 - [ ] **T13p** — 复用Pi公开Marked lexer把agent Markdown转为Telegram text/entities，退役出站RichMessage paragraph并bump cache v7；validates: TG-0004 AC1–AC8；commit: Markdown transport behavior
 - [ ] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
 
@@ -138,6 +139,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - T13j/T13k/T13l: **NONE** grammar；Pi认证源、必要vision等待和TUI media side channel不改system/tools/message/summary格式，也不新增LLM call。
 - T13m: **INTENTIONAL**；既有search schema增加url/recency，cache schema 5→6并开新epoch；不新增tool项或eager fetch。
 - T13n/T13o: **NONE**；需求文档与operator/Pi UI行为不进入provider context，selector不新增模型调用。
+- T13p0: **NONE**；纯机械移动已经测试的literal URL validator，TinyFish请求、结果与provider bytes不变。
 - T13p: **INTENTIONAL**；只更新既有send说明并把cache schema 6→7；Markdown转换为本地确定性代码，0新增tool/call/dynamic token。
 
 ## 风险

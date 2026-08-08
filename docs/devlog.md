@@ -715,3 +715,9 @@
 - command tree把compose参数改为optional，help/parser/completion仍由同一树生成。footer status区分`SEND AS`、`CHOOSE BOT ON SEND`、choosing与sending；没有替换Pi editor或selector，也没有新增TUI component。
 - extension/engine/IPC/manual/cache目标验证100 pass / 1156 assertions，typecheck与cache v6 golden通过；中英README/guide、runbook、架构和相关REQ同步。真实Pi/Telegram交互留T14后才勾选REQ-LIST。
 - Cache impact: **NONE**——只改变operator输入与Pi UI状态；IPC/DB/provider grammar、context epoch、LLM调用和token逐字节不变。
+
+## 2026-08-08 (83) — 提取共享public URL literal校验
+
+- 将TinyFish fetch已经覆盖的HTTP(S)、userinfo、localhost/local、IPv4/IPv6 private/link-local/CGNAT/documentation/multicast判断机械移动到`src/net/public-url.ts`；共享函数只解析literal，不做DNS或网络。
+- `src/tools/search.ts`继续导出同名validator并把null折叠为原有`TinyFishClientError("invalid_url")`，现有请求、错误、telemetry和provider输出不变。这个最小共享边界供下一项Markdown `text_link`安全复用，避免Telegram层反向依赖tool模块或复制约百行网络地址规则。
+- Cache impact: **NONE**——纯机械职责移动；tool schema、TinyFish wire、system/messages/summary、context epoch、调用与token逐字节不变。
