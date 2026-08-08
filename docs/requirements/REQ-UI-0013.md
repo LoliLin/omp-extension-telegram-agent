@@ -1,6 +1,6 @@
 # REQ-UI-0013: Pi 原生 sticker 卡片使用紧凑尺寸
 
-- **Status:** Approved（2026-08-08 已调查，未实现）
+- **Status:** Done（2026-08-08；implementation `533c9ec`，真实 Kitty/Ghostty terminal smoke 汇总到 T14）
 - **Priority:** P2
 - **Source:** 用户在 `REQ-LIST` 新增：「sticker渲染有点太大」
 - **依赖:** REQ-UI-0001、REQ-UI-0011、REQ-UI-0012
@@ -50,4 +50,4 @@ sticker 在原生聊天卡片中使用紧凑的24列×12行上限；photo等现�
 ## 追溯
 
 - Plans: `PLAN-20260808-complete-new-reqs#T10ab/T10ac/T10ad`
-- Commits: 从`Requirement: REQ-UI-0013` git trailer查
+- Commits: implementation `533c9ec`；其余从`Requirement: REQ-UI-0013` git trailer查
