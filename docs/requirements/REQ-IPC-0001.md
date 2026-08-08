@@ -1,6 +1,6 @@
 # REQ-IPC-0001: IPC 与 TUI 健壮性
 
-- **Status:** Approved
+- **Status:** Done（2026-08-08；socket/分页/重连与真实Pi feed链路已验收）
 - **Priority:** P1
 - **Source:** 2026-08-07 code review
 

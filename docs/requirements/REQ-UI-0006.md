@@ -1,6 +1,6 @@
 # REQ-UI-0006: 在媒体下方实时显示辅助视觉模型理解
 
-- **Status:** Implemented（2026-08-08 T7 transport + T8 native card merge 已实现；真实 Pi live media smoke 留到 T14）
+- **Status:** Done（2026-08-08；真实 Pi 原生媒体卡片已观察到 vision 原位更新）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「用户发的 image/sticker 识别完成后，在 UI 下方插入辅助视觉模型的理解文字；不动上下文，仅 UI」
 - **依赖:** REQ-UI-0001、REQ-UI-0004

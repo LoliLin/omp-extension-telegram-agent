@@ -1,6 +1,6 @@
 # PLAN-20260807-complete-req-list: 完成 REQ-LIST 剩余 8 篇
 
-- **Status:** Active
+- **Status:** Completed（UI-0003 的旧 widget 方案后由 Pi 原生 FooterComponent 方案取代）
 - **Requirements:** REQ-IPC-0001, REQ-OPS-0001, REQ-TEST-0001, REQ-CONF-0001, REQ-STICKER-0001, REQ-UI-0001, REQ-UI-0002, REQ-UI-0003
 
 ## 结果
@@ -30,12 +30,18 @@ REQ-LIST 全部打勾；IPC 字节正确/背压有界/分页不丢/本机攻击�
 
 ## 任务
 
-- [ ] **T1** — REQ-IPC-0001 全部 + 回归测试; validates: AC1–AC6
-- [ ] **T2** — REQ-OPS-0001 全部 + 回归测试; validates: AC1–AC6
-- [ ] **T3** — REQ-TEST-0001 全部; validates: AC1–AC6
-- [ ] **T4** — REQ-CONF-0001 全部 + 迁移; validates: AC1–AC6
-- [ ] **T5** — REQ-STICKER-0001 全部; validates: AC1–AC5
-- [ ] **T6** — REQ-UI-0001/2/3 全部; validates: 各 AC
+- [x] **T1** — REQ-IPC-0001 全部 + 回归测试; validates: AC1–AC6；commit `d0d5d56`
+- [x] **T2** — REQ-OPS-0001 全部 + 回归测试; validates: AC1–AC6；commit `ca55ec0`
+- [x] **T3** — REQ-TEST-0001 全部; validates: AC1–AC6；commit `c8fcd67`
+- [x] **T4** — REQ-CONF-0001 全部 + 迁移; validates: AC1–AC6；commit `3027e95`
+- [x] **T5** — REQ-STICKER-0001 全部; validates: AC1–AC5；commit `84da315`
+- [x] **T6** — REQ-UI-0001/2/3 全部; validates: 各 AC；native transcript commit `19819c9`，UI-0003最终footer commit `bf19671`
+
+## 完成记录
+
+- 所列REQ均已在`docs/requirements/REQ-LIST.md`勾选；2026-08-08总验收见`PLAN-20260808-complete-new-reqs.md`。
+- 本计划最初把UI-0003描述为自定义面板，后续用户要求改为Pi原生`FooterComponent`；旧实现不再作为UI-0003完成依据，最终依据为`bf19671`。
+- Cache impact：以各行为commit记录为准；本次计划归档为**NONE**。
 
 ## 验证计划
 

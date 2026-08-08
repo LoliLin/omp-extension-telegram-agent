@@ -729,3 +729,11 @@
 - converter固定4096 code points、4096 token nodes和100 entities；空/超限/复杂/非法错误在网络前以固定category拒绝且不含source。组合message+sticker+reply、terminating ACK、tool顺序与provider call数不变；event改记`markdown_sent`或`plain_fallback`且不含正文/URL/entities。
 - 目标Markdown/send/sticker/cache 42 pass / 200 assertions；全量424 pass / 5059 assertions与typecheck通过。真实群plain/bold/list/code/reply smoke并入T14；自动测试由全局network guard保持0真实Telegram/TinyFish调用。
 - Cache impact: **INTENTIONAL**——只更新既有send说明并增加message 4096 schema约束，`CACHE_SCHEMA_VERSION` 6→7、tools hash`09d2e154259d`→`280868a5b3a9`；systemA/B、serialization、summary、catalog、tool项/顺序、LLM调用与dynamic token不变。
+
+## 2026-08-08 (85) — 完成全部Telegram Pi插件需求
+
+- T14受控重启后以真实Pi验收attach/editor、原生footer、一级/动态bot二级补全、assistant/tool连续stream和media/vision原位卡片；filtered editor marker在Telegram与canonical DB都恰好一条。一次无模型Markdown smoke只产生一次Telegram create、一次canonical insert与一个`markdown_sent` event，entities包含bold/italic/code。
+- 新photo由Telegram直连脚手架创建后按durable-first路径缓存为0600并进入原生卡片；脚手架未写入仓库。只读脱敏SQLite审计只输出`bot-1`序号与聚合：两只bot都有自身`media_file_ids`可发送的目录sticker、message+sticker、reply与超过5秒run；reply obligation为7/7、19/19交付且pending=0。
+- `REQ-LIST.md`全部勾选，18篇待总验收REQ改为Done；计划移入completed，testing/handoff同步。第三bot真实token、fresh credential向导和首次Pages main deploy按各AC明确记录为外部opt-in，不伪造成功也不阻塞已有确定性验收。
+- 离线全量424 pass / 0 fail / 5059 assertions、typecheck、cache v7 golden与mdBook 18 Markdown/98 links、21 HTML/620 links通过。全局test preload继续只允许loopback；T14没有调用provider/TinyFish，tracked tests中没有真实TinyFish脚手架。
+- Cache impact: **NONE**——本条只收口验证与追溯；不改system/tool/message/summary grammar、context epoch、provider调用或每turn token。

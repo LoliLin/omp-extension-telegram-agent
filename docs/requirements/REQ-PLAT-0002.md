@@ -1,6 +1,6 @@
 # REQ-PLAT-0002: 复用 Pi 的模型设置与认证
 
-- **Status:** Completed（2026-08-08；实现与真实脱敏 smoke 均通过）
+- **Status:** Done（2026-08-08；实现与真实脱敏 smoke 均通过）
 - **Priority:** P0
 - **Source:** 用户新增 REQ-LIST：「直接复用 Pi 的配置，不要在项目配置里填写 API key；已经用 Pi 登录 DeepSeek 和 Codex」
 - **依赖:** REQ-PLAT-0001、REQ-ONBOARD-0001

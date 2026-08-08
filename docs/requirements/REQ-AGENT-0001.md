@@ -1,6 +1,6 @@
 # REQ-AGENT-0001: agent 触发 / flush 生命周期收敛为串行状态机
 
-- **Status:** Approved
+- **Status:** Done（2026-08-08；串行 flush/compaction 全链回归与生产运行已验收）
 - **Priority:** P0
 - **Source:** 2026-08-07 code review（生产 daemon.log 已发生真实消息丢失）
 

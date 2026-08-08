@@ -1,6 +1,6 @@
 # REQ-STICKER-0001: 固定 sticker set 支持
 
-- **Status:** Draft
+- **Status:** Done（2026-08-08；固定目录、set内/外真实发送与遥测聚合均已验收）
 - **Priority:** P2
 - **Source:** 用户 REQ-LIST 第 3 条（「缓存率 up，同时 bot 能发出现在上下文的 sticker」）
 

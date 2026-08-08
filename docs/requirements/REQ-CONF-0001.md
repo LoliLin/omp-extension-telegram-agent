@@ -1,8 +1,10 @@
 # REQ-CONF-0001: 配置体系重构——任意数量 bot、persona 外置
 
-- **Status:** Approved
+- **Status:** Done（2026-08-08；1/2/3-bot配置与完整dry-run composition均已验收）
 - **Priority:** P1
 - **Source:** 用户 REQ-LIST 第 2 条 + 2026-08-07 用户澄清（bot 数量不固定为两个，必须通用）
+
+> 现行配置权威已由 REQ-ONBOARD-0001 更新为首选 ignored `telegram.config.ts`；本文最初拍板的 `bots.config.json` 继续作为 legacy 兼容载体。REQ-PLAT-0002 也已取消项目 provider credential。任意数量 bot、persona 外置、严格校验和零 provider-byte drift 仍是本文有效 invariant。
 
 ## 问题
 

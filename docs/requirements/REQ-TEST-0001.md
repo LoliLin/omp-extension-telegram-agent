@@ -1,6 +1,6 @@
 # REQ-TEST-0001: 测试体系修复（网络隔离、golden 补全、e2e 可信）
 
-- **Status:** Approved
+- **Status:** Done（2026-08-08；全量guard、cache golden与e2e退出语义已验收）
 - **Priority:** P2
 - **Source:** 2026-08-07 code review
 

@@ -1,6 +1,6 @@
 # REQ-UI-0003: 用 Pi 原生 FooterComponent 呈现实时可观测性
 
-- **Status:** Implemented（2026-08-08；真实 Pi TTY smoke 留 T14）
+- **Status:** Done（2026-08-08；Pi 原生 footer 已通过真实 TTY 与受控重启验收）
 - **Priority:** P1
 - **Source:** 原 TUI 面板需求；用户实机复核要求统计必须进入 Pi 原生 `↑/↓/R/CH/$/context/model` 行，不接受 editor 上方 widget 或额外 status 行
 - **依赖:** REQ-UI-0004
@@ -74,4 +74,4 @@ attach 或兼容 `/tg panel` 开启后，Telegram usage 由 Pi 自己的 `Footer
 
 - fake Pi host 直接实例化并渲染 Pi 导出的 `FooterComponent`；fixture 精确得到 `↑13k ↓817 R20k CH60.6% $0.002 1.5%/1.0M (auto)` 与配置 model/reasoning。
 - filtered/global aggregation、24/80/180 列、compose status 共存、真实 session entries 不变、detach/disconnect/shutdown/off cleanup 均有回归测试。
-- `test/tg-extension.test.ts`、timeline/IPC/cache targeted 53 tests 与 typecheck 通过；真实 TTY footer 留最终验收。
+- `test/tg-extension.test.ts`、timeline/IPC/cache targeted 53 tests 与 typecheck 通过；T14 受控重启后的真实 Pi TTY footer 已显示 lifetime Telegram 指标与 compose status。

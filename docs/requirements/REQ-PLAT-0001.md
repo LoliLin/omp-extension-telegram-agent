@@ -1,9 +1,11 @@
 # REQ-PLAT-0001: 收口为通用、快速、简洁的可配置 bot 平台
 
-- **Status:** Implemented（T11/T12 runtime/composition + T13e public docs；真实第三bot smoke仍为opt-in未执行项）
+- **Status:** Done（T11/T12/T13e 已验收；真实第三 bot 因无第三 token 按 AC7 明确保留为 opt-in）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「当前平台想做通用快速简洁的 bot 聊天机器人；全面 review 基于固定两个机器人的设计，提高通用可配置性」
 - **依赖:** REQ-CONF-0001
+
+> T11曾建立项目内provider credential抽象；现行认证边界已由REQ-PLAT-0002取代为Pi settings/catalog/auth与单shared runtime。本文仍权威约束N-bot身份、composition、脚本、产品文案和单群deployment边界。
 
 ## 问题
 

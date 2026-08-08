@@ -1,6 +1,6 @@
 # REQ-SEARCH-0001: 用 TinyFish 读取群友链接并增强检索
 
-- **Status:** Implemented（2026-08-08）
+- **Status:** Done（2026-08-08；offline全链与一次性shape smoke已验收，真实脚手架已删除）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「添加 tinyfish 的 fetch 功能看群友发的链接以及搜索加强」
 - **依赖:** REQ-AGENT-0001、REQ-SEND-0001

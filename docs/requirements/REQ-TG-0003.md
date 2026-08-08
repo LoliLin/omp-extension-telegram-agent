@@ -1,6 +1,6 @@
 # REQ-TG-0003: 支持 Telegram Rich Messages 的收发与持久化
 
-- **Status:** Implemented / Partially Superseded（incoming、持久化与projection保留；agent出站`sendRichMessage`由REQ-TG-0004取代）
+- **Status:** Done / Outbound Superseded（incoming、持久化与 projection 已验收；agent 出站由 REQ-TG-0004 取代）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「为 bot 增加 Telegram rich messages 的支持」
 - **依赖:** REQ-SEND-0001、REQ-TG-0001、REQ-UI-0001

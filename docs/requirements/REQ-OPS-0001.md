@@ -1,6 +1,6 @@
 # REQ-OPS-0001: 配置校验、进程管理与仓库卫生
 
-- **Status:** Approved
+- **Status:** Done（2026-08-08；配置校验、PID锁与受控进程运行已验收）
 - **Priority:** P1
 - **Source:** 2026-08-07 code review（.env.example 与 .gitignore 问题已核实）
 

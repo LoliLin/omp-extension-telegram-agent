@@ -1,6 +1,6 @@
 # REQ-TG-0002: 在 Bot 处理响应机会期间续约 Telegram 输入状态
 
-- **Status:** Implemented（2026-08-08 fake-clock/unit/integration 已验证；真实群长 run smoke 留 T14）
+- **Status:** Done（2026-08-08；精确 lease 回归与当前双 bot 超过 5 秒的真实处理轮次共同验收）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「当信息被采样到 bot 的时候在 Telegram 展示正在输入/正在思考，直到模型放弃发送或发送成功；状态至多展示 5 秒，所以要续约」
 - **依赖:** REQ-AGENT-0001、REQ-ROUTE-0001、REQ-TG-0001

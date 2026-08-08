@@ -1,6 +1,6 @@
 # REQ-UI-0005: 用 Pi 底部 editor 直接发送 Telegram 消息
 
-- **Status:** Implemented（2026-08-08 T13o；真实Pi/Telegram smoke留T14后勾选）
+- **Status:** Done（2026-08-08；filtered attach 后 Pi editor 直发只创建一条 Telegram/canonical 消息）
 - **Priority:** P1
 - **Source:** 用户原始需求「用底部的输入栏作为 bot 发送消息」；追加纠正「输入文本按 Pi 的发送键盘直接发送，如果有多个 bot 跳出来选择框（复用 Pi）」
 - **依赖:** REQ-UI-0004、REQ-CONF-0001

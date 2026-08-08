@@ -1,6 +1,6 @@
 # REQ-UI-0009: Footer 使用数据库全生命周期 telemetry 并补齐原生指标
 
-- **Status:** Implemented（2026-08-08；真实 Pi/restart smoke 留 T14）
+- **Status:** Done（2026-08-08；真实重启后 lifetime telemetry 与原生 footer 已验收）
 - **Priority:** P1
 - **Source:** 用户在 REQ-LIST 追问 footer token 是否为启动以来全部，并要求在可能时展示更多有用统计
 - **依赖:** REQ-UI-0003、REQ-UI-0007
@@ -74,4 +74,4 @@
 - file-backed SQLite 在关闭/reopen 与 IpcServer 重建后仍返回首条 run 起的 lifetime baseline；removed bot 不进入 global，后续 live run按 id 恰好合并一次。
 - legacy schema migration 保留旧行、`cache_write=0` 且重复执行幂等；runtime fixture 锁定 cacheWrite/reasoning/latency 的 DB 行与 live push。
 - 真实 Pi `FooterComponent` fixture 渲染 `↑100 ↓50 R800 W100 CH80.0% $0.004`；session entries 不变。`/tg status` 覆盖 lifetime/latest/avg 与零 run。
-- DB/runtime/IPC/plugin/cache targeted 70 tests 与 typecheck 通过；真实 deployment restart/footer/status 留最终验收。
+- DB/runtime/IPC/plugin/cache targeted 70 tests 与 typecheck 通过；T14 真实 deployment restart 后 schema v7、数据库 lifetime rows 与 Pi 原生 footer/status 都保留。

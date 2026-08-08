@@ -1,6 +1,6 @@
 # REQ-UI-0012: Pi 原生媒体在 Kitty/Ghostty 中正确显示
 
-- **Status:** Done（2026-08-08；implementation `49e3067`，真实 Kitty/Ghostty terminal smoke 汇总到 T14）
+- **Status:** Done（2026-08-08；implementation `49e3067`，protocol fixtures、Pi converter与真实原生媒体卡片已验收）
 - **Priority:** P1
 - **Source:** 用户新增 `REQ-LIST`：「Kitty(libghostty) 没显示正确媒体」
 - **依赖:** REQ-UI-0001、REQ-UI-0004、REQ-UI-0006

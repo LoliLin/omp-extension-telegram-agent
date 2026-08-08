@@ -1,6 +1,6 @@
 # REQ-UI-0014: 群友照片不依赖 vision 即时进入 Pi 原生卡片
 
-- **Status:** Implemented（2026-08-08；unit/full/typecheck/cache验证通过，真实群新photo smoke留T14后再勾选）
+- **Status:** Done（2026-08-08；真实新 photo 已 durable、缓存为 0600 并进入 Pi 原生卡片）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「群友发的图片不展示」
 - **依赖:** REQ-UI-0001、REQ-UI-0006、REQ-UI-0012、REQ-UI-0013

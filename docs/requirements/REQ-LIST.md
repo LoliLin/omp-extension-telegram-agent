@@ -15,23 +15,23 @@
 ## 功能
 
 - [x] [REQ-CONF-0001](REQ-CONF-0001.md) 配置体系：任意数量 bot、persona 外置（P1）（commit 3027e95）
-  （附注：AC2–AC6 已验证；AC1「第三 bot 真实上线」待真实群验证）
+  （附注：AC1允许的三bot dry-run已通过完整composition/IPC链；当前无第三token的真实C仍是PLAT-0001 AC7文档化opt-in）
 - [x] [REQ-STICKER-0001](REQ-STICKER-0001.md) 固定 sticker set 支持（P2）（commit 84da315）
-  （附注：AC1/AC4/AC5 已验证；AC2/AC2b「真实群发送 set 内/外 sticker」、AC3「遥测对比」待长运行验证）
+  （附注：T14脱敏审计确认两只bot都已有固定set内与set外真实发送，且short_id都映射到各自file_id）
 - [x] [REQ-UI-0004](REQ-UI-0004.md) Telegram 前端成为真正的 Pi 原生 transcript 插件（P0）（commit 19819c9）
 - [x] [REQ-UI-0001](REQ-UI-0001.md) 用 Pi 原生组件呈现 Telegram 消息与媒体（P1，依赖 UI-0004）（commit 19819c9）
 - [x] [REQ-UI-0002](REQ-UI-0002.md) 原生 transcript 中 attach / more / detach 与任意 bot 过滤（P1，依赖 UI-0004）（commit 19819c9）
-- [ ] [REQ-UI-0003](REQ-UI-0003.md) 用 Pi 原生 FooterComponent 呈现实时可观测性（P1，已重新调查；`19819c9` widget 不满足）
-- [ ] [REQ-UI-0009](REQ-UI-0009.md) Footer 使用数据库全生命周期 telemetry 并补齐原生指标（P1，已调查/未实现）
-- [ ] [REQ-UI-0005](REQ-UI-0005.md) attach 后用 Pi editor 直发；多 bot 复用 Pi 原生选择框（P1，按追加反馈重开）
-- [ ] [REQ-UI-0006](REQ-UI-0006.md) 媒体识别完成后在原生 UI 下方显示视觉理解（P1，UI-only，已调查/未实现）
-- [ ] [REQ-ROUTE-0001](REQ-ROUTE-0001.md) 忙碌 bot 跳过概率采样；配置名称是绕过 gate 的强制回复关键词（P1，已实现/待总验收勾选）
-- [ ] [REQ-UI-0007](REQ-UI-0007.md) 用 Pi 原生 footer status 呈现 Telegram 统计（P2，已调查/未实现）
-- [ ] [REQ-UI-0008](REQ-UI-0008.md) 为 `/tg` 提供原生分级命令补全（P2，已调查/未实现）
+- [x] [REQ-UI-0003](REQ-UI-0003.md) 用 Pi 原生 FooterComponent 呈现实时可观测性（P1，commit `bf19671`）
+- [x] [REQ-UI-0009](REQ-UI-0009.md) Footer 使用数据库全生命周期 telemetry 并补齐原生指标（P1，commit `d20ea5c`）
+- [x] [REQ-UI-0005](REQ-UI-0005.md) attach 后用 Pi editor 直发；多 bot 复用 Pi 原生选择框（P1，commits `0b3fad0`、`4e29d45`、`d640de8`）
+- [x] [REQ-UI-0006](REQ-UI-0006.md) 媒体识别完成后在原生 UI 下方显示视觉理解（P1，commits `132118c`、`16f69a2`）
+- [x] [REQ-ROUTE-0001](REQ-ROUTE-0001.md) 忙碌 bot 跳过概率采样；配置名称是绕过 gate 的强制回复关键词（P1，commits `440b0c7`、`627d576`）
+- [x] [REQ-UI-0007](REQ-UI-0007.md) 用 Pi 原生 footer status 呈现 Telegram 统计（P2，commit `bf19671`）
+- [x] [REQ-UI-0008](REQ-UI-0008.md) 为 `/tg` 提供原生分级命令补全（P2，commit `967a6db`）
 - [x] [REQ-CMD-0001](REQ-CMD-0001.md) Telegram 群内 help/status、手动 compact、参数调整与可配置管理员白名单（P1，commit `c0e5f26`）
-- [ ] [REQ-TG-0002](REQ-TG-0002.md) Bot 获得响应机会后显示 Telegram 原生处理状态（P1，群内 typing 已实现/待真实群总验收）
-- [ ] [REQ-TG-0003](REQ-TG-0003.md) 支持 Telegram Rich Messages 的收发与持久化（P1，收发/data plane/cache v5已实现，待真实群总验收勾选）
-- [ ] [REQ-REPLY-0001](REQ-REPLY-0001.md) 直接回复 bot 的消息保证进入对应模型上下文（P1，durable provider-delivery已实现，待真实 A/B trace 后勾选）
+- [x] [REQ-TG-0002](REQ-TG-0002.md) Bot 获得响应机会后显示 Telegram 原生处理状态（P1，commit `25e76bb`）
+- [x] [REQ-TG-0003](REQ-TG-0003.md) Telegram Rich Messages 接收、持久化与有界投影（P1，incoming commit `1efd544`；agent 出站由 REQ-TG-0004 取代）
+- [x] [REQ-REPLY-0001](REQ-REPLY-0001.md) 直接回复 bot 的消息保证进入对应模型上下文（P1，commit `df107f7`）
 - [x] [REQ-OPS-0002](REQ-OPS-0002.md) 从 Pi 一键受控重启全部 bot 服务（P1，commit `3d7f9b3`）
 - [x] [REQ-UI-0011](REQ-UI-0011.md) 用 Pi 原生 stack 优化聊天卡片信息层级、trailing 对齐与窄终端退化（P2，commit `614d6d3`）
 - [x] [REQ-SEARCH-0001](REQ-SEARCH-0001.md) 用 TinyFish 读取群友链接并增强检索（P1，commit `0c450cd`）
@@ -39,31 +39,29 @@
 
 ## Bug
 
-- [ ] [REQ-STICKER-0002](REQ-STICKER-0002.md) 固定目录与动态候选必须按 bot 可发送性隔离（P0，已复现定位/未修复）
-- [ ] [REQ-SEND-0001](REQ-SEND-0001.md) 统一 message/sticker/reply_to、tool-local 用法与 terminating 最小结果（P1，已实现/待真实群总验收）
-- [ ] [REQ-UI-0010](REQ-UI-0010.md) 恢复 Pi 原生 feed 的即时刷新与流式 Agent 输出（P1，已实现/待真实 Pi 总验收）
+- [x] [REQ-STICKER-0002](REQ-STICKER-0002.md) 固定目录与动态候选必须按 bot 可发送性隔离（P0，commit `8eb3b97`）
+- [x] [REQ-SEND-0001](REQ-SEND-0001.md) 统一 message/sticker/reply_to、tool-local 用法与 terminating 最小结果（P1，commit `8efd5ba`）
+- [x] [REQ-UI-0010](REQ-UI-0010.md) 恢复 Pi 原生 feed 的即时刷新与流式 Agent 输出（P1，commit `f85045f`）
 - [x] [REQ-SEND-0002](REQ-SEND-0002.md) Telegram 远端提交后不得因本地失败而重复发送（P0，commit `bd4be62`）
 - [x] [REQ-UI-0012](REQ-UI-0012.md) 用Pi原生PNG转换与Image修复Kitty/Ghostty媒体显示（P1，commit `49e3067`）
-- [ ] [REQ-UI-0014](REQ-UI-0014.md) 群友照片不依赖 vision 即时进入 Pi 原生卡片（P1，已实现并通过全量回归，待真实群photo smoke后勾选）
+- [x] [REQ-UI-0014](REQ-UI-0014.md) 群友照片不依赖 vision 即时进入 Pi 原生卡片（P1，commit `50eec13`）
 - [x] [REQ-UI-0013](REQ-UI-0013.md) 用Pi原生Image语义化缩小sticker卡片、保持photo尺寸（P2，commit `533c9ec`）
 - [x] [REQ-ROUTE-0002](REQ-ROUTE-0002.md) 验证 0.66/0.34 概率桶频率并区分回应机会与公开发言（P1，commit `a1321f1`）
 - [x] [REQ-VISION-0001](REQ-VISION-0001.md) 群内动态媒体在 provider 提交前同步识别，目录 sticker 保持后台处理（P1，commits `f4ff63b`、`6efd768`、`8b2d410`）
 - [x] [REQ-PLAT-0002](REQ-PLAT-0002.md) 复用 Pi 的模型设置与认证，取消项目 provider API key（P0，commits `0859490`、`f30e22c`、`c95c695`、`f4ff63b`）
-- [ ] [REQ-TG-0004](REQ-TG-0004.md) 将 Agent Markdown 映射为 Telegram entities，修复 RichMessage paragraph 整段粗体（P1，已实现/待真实群 T14）
+- [x] [REQ-TG-0004](REQ-TG-0004.md) 将 Agent Markdown 映射为 Telegram entities，修复 RichMessage paragraph 整段粗体（P1，commit `3b56fa4`）
 
 
 ## 代码库与文档
 
-- [ ] [REQ-PLAT-0001](REQ-PLAT-0001.md) 收口为通用、快速、简洁的可配置 bot 平台（P1，已完成代码库调查/未实现）
-- [ ] [REQ-DOC-0001](REQ-DOC-0001.md) README 从用户视角解释平台、配置、使用与边界（P1，已调查/未实现）
-- [ ] [REQ-ONBOARD-0001](REQ-ONBOARD-0001.md) clone → `bun run pi` → `/tg config`、TypeScript 本机配置、提示词隐私与双语 mdBook 用户文档（P1，已调查/未实现）
+- [x] [REQ-PLAT-0001](REQ-PLAT-0001.md) 收口为通用、快速、简洁的可配置 bot 平台（P1，commits `51b77f9`、`37499d0`；真实第三 bot 为文档化 opt-in）
+- [x] [REQ-DOC-0001](REQ-DOC-0001.md) README 从用户视角解释平台、配置、使用与边界（P1，commit `37499d0`）
+- [x] [REQ-ONBOARD-0001](REQ-ONBOARD-0001.md) clone → `bun run pi` → `/tg config`、TypeScript 本机配置、提示词隐私与双语 mdBook 用户文档（P1，commits `77a7d34`、`88e75d1`、`5dbf199`、`a0736f8`、`37499d0`、`27aca5a`）
 - [x] [REQ-DOC-0002](REQ-DOC-0002.md) 明确单目录单群与极简省 token 的项目哲学（P1，commit `dfc23b5`）
 
 ## 顺序与依赖
 
-已完成主线：SEC → AGENT → TG / IPC / OPS → TEST → CONF → STICKER-0001 → UI-0004 → UI-0001 / UI-0002 / UI-0003。
-
-建议后续顺序：STICKER-0002（生产 bug）→ ROUTE-0001 → UI-0005 / UI-0006 / UI-0007 / UI-0008 → PLAT-0001。
+全部需求均已完成；实现、验证与未执行的外部 credential 可选项记录在各 REQ、`../testing.md` 与已完成计划中。
 
 - REQ-UI-0002 依赖 REQ-CONF-0001
 - REQ-UI-0001 / 0002 / 0003 依赖 REQ-UI-0004 的 Pi package、版本与原生 transcript 接入

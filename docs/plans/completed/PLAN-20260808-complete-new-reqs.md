@@ -1,6 +1,6 @@
 # PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
 
-- **Status:** Active
+- **Status:** Completed
 - **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-ROUTE-0002, REQ-SEND-0001, REQ-SEND-0002, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-TG-0004, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-UI-0011, REQ-UI-0012, REQ-UI-0013, REQ-UI-0014, REQ-PLAT-0001, REQ-PLAT-0002, REQ-DOC-0001, REQ-DOC-0002, REQ-ONBOARD-0001, REQ-VISION-0001, REQ-SEARCH-0001
 - **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
 
@@ -8,7 +8,7 @@
 
 REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegram plugin 能从 Pi editor 发消息、实时补视觉理解、使用 lifetime 原生 footer stats 与分级命令补全；router 有 busy/cooldown gate；sticker 候选满足 per-bot sendability；平台外围收口为可配置 N-bot/provider；fresh clone 可从 `bun run pi` + `/tg config` 进入双语用户旅程，真实 persona 不再被新 HEAD 跟踪。每个 task 是一个独立签名 commit。
 
-## 已确认边界
+## 启动时已确认边界（历史）
 
 - 当前 working tree 的 native transcript 重写已通过 149 tests + real Pi smoke，但尚未提交，必须先按独立 task 落库。
 - Pi 官方 extension API：`input` handler 的 `handled` 可阻止进入 agent；`setStatus` 使用默认 footer；`getArgumentCompletions` 原生支持 argument completion。
@@ -89,7 +89,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13o** — attach默认进入scope compose，多bot提交复用Pi原生select，并保留sticky/off/unknown边界；validates: UI-0005 AC1–AC8；commit: native editor behavior
 - [x] **T13p0** — 将TinyFish已经验证的public HTTP(S) literal validator机械提到共享模块，供Markdown link复用；validates: behavior unchanged；commit: mechanical refactor
 - [x] **T13p** — 复用Pi公开Marked lexer把agent Markdown转为Telegram text/entities，退役出站RichMessage paragraph并bump cache v7；validates: TG-0004 AC1–AC8；commit: Markdown transport behavior
-- [ ] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
+- [x] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
 
 ## 每个 commit 的固定流程
 
@@ -166,6 +166,10 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 
 ## 完成记录
 
-- 验证证据: 待 T14
-- 需求状态已更新: no
-- commits: 待逐 task 填写
+- 验证证据：离线全量 `424 pass / 0 fail / 5059 assertions`，`bun run check`、cache v7 golden、`git diff --check`通过；mdBook 0.5.4 检查18个Markdown/98 links与21个HTML/620 links通过。test preload在真实`.env`存在时仍拒绝全部非loopback网络，T14没有触发provider或TinyFish。
+- 真实 Pi：受控restart后原生`FooterComponent`保留lifetime telemetry；attach scope editor直发只产生一条目标bot canonical row；原生completion一级与动态bot二级菜单、assistant/tool连续stream、media/vision原位卡片均通过。
+- 真实 Telegram：一次无模型Markdown runtime smoke只创建一条消息/一条canonical row/一个`markdown_sent` event，entities含bold/italic/code；新photo在durable canonical之后缓存为0600并进入Pi卡片。只读脱敏审计确认两只bot都有自身file-id映射sticker、组合与reply发送；reply obligation分别7/7和19/19交付，pending为0；两只bot均有超过5秒真实run。
+- 明确未执行的外部可选项：当前没有第三bot token，故REQ-PLAT-0001 AC7的真实C smoke保留为runbook opt-in；为避免覆盖当前deployment且没有新credential，未重跑fresh-clone真实Telegram写入向导，按REQ-ONBOARD-0001 AC12由隔离fixture与真实Pi extension load验收；首次GitHub Pages main deploy等待远端环境。三项均不以付费调用替代确定性测试。
+- 需求状态已更新：yes；`REQ-LIST.md`无未勾选项，各REQ status与`docs/testing.md`已同步。
+- commits：行为提交逐项记录在REQ-LIST；T14 completion commit由`Task: PLAN-20260808-complete-new-reqs#T14`与各`Requirement:` trailer查询。
+- Cache impact：**NONE**——T14只做验证、只读审计和文档状态收口，不改provider-visible bytes、epoch、调用数或每turn token。

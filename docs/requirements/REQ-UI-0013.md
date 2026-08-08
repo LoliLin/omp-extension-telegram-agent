@@ -1,6 +1,6 @@
 # REQ-UI-0013: Pi 原生 sticker 卡片使用紧凑尺寸
 
-- **Status:** Done（2026-08-08；implementation `533c9ec`，真实 Kitty/Ghostty terminal smoke 汇总到 T14）
+- **Status:** Done（2026-08-08；implementation `533c9ec`，多宽度fixture与真实Pi原生媒体卡片已验收）
 - **Priority:** P2
 - **Source:** 用户在 `REQ-LIST` 新增：「sticker渲染有点太大」
 - **依赖:** REQ-UI-0001、REQ-UI-0011、REQ-UI-0012

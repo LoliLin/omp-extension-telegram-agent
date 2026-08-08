@@ -1,6 +1,6 @@
 # REQ-DOC-0001: README 从用户视角解释并引导配置平台
 
-- **Status:** Implemented（2026-08-08 T13e；待 T14 总验收记录）
+- **Status:** Done（2026-08-08；双语 README/用户指南与最终 mdBook/link gate 已验收）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「README 不应只是机械文档列表；应从用户视角解释平台、配置方法，并加强用户文档与通用可配置性」
 - **依赖:** REQ-PLAT-0001

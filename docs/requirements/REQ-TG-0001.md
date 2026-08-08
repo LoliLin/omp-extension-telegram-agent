@@ -1,6 +1,6 @@
 # REQ-TG-0001: Telegram ingestion 与 poller 可靠性
 
-- **Status:** Approved
+- **Status:** Done（2026-08-08；ingest/edit/dedupe/poller/restart已验收）
 - **Priority:** P1
 - **Source:** 2026-08-07 code review（revision bug 已实证）
 

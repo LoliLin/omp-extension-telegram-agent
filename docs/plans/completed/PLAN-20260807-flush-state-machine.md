@@ -25,12 +25,18 @@ Cache impact: NONE——不改 system prompt / 序列化 grammar / tool schema /
 
 ## 任务
 
-- [ ] **T1** — runtime.ts：flush 串行状态机（flushing/pendingTrigger/stopping）、markExposed 后移、全链路 catch、stop 有界等待; validates: AC1, AC2; 预期涉及: src/agent/runtime.ts
-- [ ] **T2** — runtime.ts：compaction_end 成败区分 + kept tail 解析对齐 + 空摘要 cancel; validates: AC3, AC4; 预期涉及: src/agent/runtime.ts
-- [ ] **T3** — search.ts 超时 + 响应护栏、runtime search tool 结构化错误; validates: AC5; 预期涉及: src/tools/search.ts, src/agent/runtime.ts
-- [ ] **T4** — executeSend 先校验后发送; validates: R7; 预期涉及: src/agent/runtime.ts
-- [ ] **T5** — 回归测试 test/flush.test.ts（AC1–AC4）+ search 超时/护栏测试 + R7 测试; validates: AC1–AC6; 预期涉及: test/
-- [ ] **T6** — 文档同步（architecture/cache/devlog/handoff/testing/REQ-LIST）+ 签名提交
+- [x] **T1** — runtime.ts：flush 串行状态机（flushing/pendingTrigger/stopping）、markExposed 后移、全链路 catch、stop 有界等待; validates: AC1, AC2
+- [x] **T2** — runtime.ts：compaction_end 成败区分 + kept tail 解析对齐 + 空摘要 cancel; validates: AC3, AC4
+- [x] **T3** — search.ts 超时 + 响应护栏、runtime search tool 结构化错误; validates: AC5
+- [x] **T4** — executeSend 先校验后发送; validates: R7
+- [x] **T5** — 回归测试 test/flush.test.ts（AC1–AC4）+ search 超时/护栏测试 + R7 测试; validates: AC1–AC6
+- [x] **T6** — 文档同步（architecture/cache/devlog/handoff/testing/REQ-LIST）+ 签名提交
+
+## 完成记录
+
+- 行为与测试签名提交：`a549335`；REQ-AGENT-0001已在总清单完成。
+- 后续全量基线持续覆盖flush/compaction/search/send invariant；计划归档不改变行为。
+- Cache impact：**NONE**。
 
 ## 验证计划
 

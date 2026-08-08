@@ -1,6 +1,6 @@
 # REQ-UI-0007: 将 Telegram stats 生命周期接入 Pi 原生 footer
 
-- **Status:** Implemented（2026-08-08；真实 Pi TTY smoke 留 T14）
+- **Status:** Done（2026-08-08；真实 Pi TTY 使用原生 footer status 呈现 Telegram 统计）
 - **Priority:** P1
 - **Source:** 用户要求统计位于输入栏底端且完全使用 Pi 样式；后续实机反馈明确拒绝 widget 与额外 `setStatus` 行
 - **依赖:** REQ-UI-0003、REQ-UI-0004

@@ -1,6 +1,6 @@
 # REQ-SEC-0001: run_js 沙箱威胁模型与隔离加固
 
-- **Status:** Approved
+- **Status:** Done（2026-08-08；sandbox回归与默认测试零外网策略已验收）
 - **Priority:** P0
 - **Source:** 2026-08-07 code review（逃逸已实证）
 

@@ -1,6 +1,6 @@
 # REQ-VISION-0001: cache-visible 视觉结果在 provider 提交前同步确定
 
-- **Status:** Completed（2026-08-08；fake、全量与匿名真实基准均通过）
+- **Status:** Done（2026-08-08；fake、全量与匿名真实基准均通过）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「群聊图像与未识别sticker要在bot读上下文前同步；目录sticker保持异步；用Codex 5.6 Luna low并按成本/延迟数据取舍」
 - **依赖:** REQ-AGENT-0001、REQ-STICKER-0001、REQ-UI-0006、REQ-PLAT-0002

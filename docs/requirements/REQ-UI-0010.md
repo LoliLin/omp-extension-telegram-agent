@@ -1,6 +1,6 @@
 # REQ-UI-0010: 恢复 Pi 原生 feed 的即时刷新与流式 Agent 输出
 
-- **Status:** Implemented（2026-08-08 unit/integration 已验证；真实 Pi 连续流式 smoke 留 T14）
+- **Status:** Done（2026-08-08；真实 Pi 已观察同一卡片连续 assistant/tool stream 刷新与完成态）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「pi 的界面似乎刷新有延迟，并且原来 pi 是有流式的，但这个界面没有流式，看起来不好」
 - **依赖:** REQ-UI-0004、REQ-IPC-0001

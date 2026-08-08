@@ -1,6 +1,6 @@
 # REQ-TG-0004: 将 Agent Markdown 映射为 Telegram 文本 entities
 
-- **Status:** Implemented（2026-08-08；offline unit/integration/cache/typecheck 已验证，真实群格式 smoke 留 T14 后勾选）
+- **Status:** Done（2026-08-08；真实 classic sendMessage 已创建 bold/italic/code entities 且 canonical/event 各一次）
 - **Priority:** P1
 - **Source:** 用户反馈「加入 rich text 后 bot 永远在写粗体字；让 bot 用 Markdown 语法自动格式化成为 Telegram 支持的 rich text」
 - **依赖:** REQ-TG-0003、REQ-SEND-0001、REQ-SEND-0002
@@ -52,7 +52,7 @@ Telegram当前`sendMessage`支持`entities`；offset/length使用UTF-16 code uni
 - Token/cost: converter完全确定性，0 LLM call；更精确的短说明替换旧RichMessage描述，不复制到persona。
 - Compatibility: canonical DB key、rich inbound列、IPC、message serialization、reply与send ACK grammar不变。
 - Safety: 不启用Telegram HTML/MarkdownV2 parser，不访问link，不记录正文/URL；unknown remote outcome不重试。
-- 运维: 不在daemon启动时发送capability probe；真实smoke只在T14显式执行。
+- 运维: 不在daemon启动时发送capability probe；T14一次性真实smoke已完成，未来真实smoke仍须显式opt-in且不得进入自动测试。
 
 ## 例子与边界 case
 
