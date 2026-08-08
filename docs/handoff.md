@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：REQ-SEARCH-0001已由`0c450cd`完成并勾选；真实脚手架已删除，`bun test`全局拒绝外网，最终409/4981通过。UI-0014仍等真实群photo smoke；下一步正式化并逐项实现editor多bot selector与Rich Markdown raw notes。
+2026-08-08：TinyFish已完成且自动测试永久断网。新增raw notes已调查：UI-0005重开为attach直发/多bot Pi原生select；TG-0004用Markdown→Telegram entities退役出站RichMessage paragraph。下一步T13o/T13p逐项实现，再做T14真实总验收。
 
 ## 已完成
 

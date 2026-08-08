@@ -699,3 +699,11 @@
 - 用签名行为提交`0c450cd`记录REQ-SEARCH-0001实现、现行API纠正、cache 5→6、离线guard和双语文档；AC1–AC7全部有可重复证据后才在REQ-LIST勾选。
 - 自动测试永久只走loopback fake upstream；一次性真实search/fetch脚手架已经删除。全量409 pass / 4981 assertions、typecheck、cache v6 golden与双语mdBook门禁通过。
 - Cache impact: **NONE**——本条只更新完成追溯与清单；provider-visible bytes、context epoch、调用数和token不再变化。
+
+## 2026-08-08 (81) — 正式化Pi直发与Markdown entities修复
+
+- 把用户追加的两条raw note改写为可验收契约：UI-0005从“attach只读、必须显式compose”重开为attach即scope compose，filtered/单bot直接发送，全局多bot每次提交复用Pi `ctx.ui.select`；sticky bot、off、取消恢复、unknown/no-retry与lifecycle边界保留。
+- 只读脱敏审计634个model send参数：630个纯文本、0个整段`**…**`；最近200条rich source有209个paragraph block，定位“总是粗体”为出站RichMessage paragraph presentation而非模型Markdown。未输出正文、身份、路径、URL或secret。
+- 现行Telegram官方契约确认classic `sendMessage`支持entities且offset为UTF-16；TG-0004要求复用Pi公开的Marked lexer，把自然Markdown确定性转换为text/entities。incoming RichMessage normalize/persistence/projection继续保留，agent出站`sendRichMessage`将退役。
+- 原始REQ-LIST文字只替换成未勾选链接，没有提前声明完成；计划拆为docs调查、native editor行为、Markdown transport三个独立签名提交。
+- Cache impact: **NONE（本提交）**——只改REQ/PLAN/handoff/devlog。未来TG-0004行为会INTENTIONAL更新唯一send tool说明并bump schema 6→7；转换器0新增LLM call或dynamic token。

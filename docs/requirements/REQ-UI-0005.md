@@ -1,77 +1,86 @@
 # REQ-UI-0005: 用 Pi 底部 editor 直接发送 Telegram 消息
 
-- **Status:** Implemented（2026-08-08 T5 daemon + T6 Pi compose/editor；真实 Pi/Telegram smoke 留到 T14 总验收）
+- **Status:** In Progress（2026-08-08 按用户反馈重开；daemon 写链已完成，attach 直发与多 bot 原生选择待实现）
 - **Priority:** P1
-- **Source:** 用户新增 REQ-LIST：「用底部的输入栏作为 bot 发送消息」
+- **Source:** 用户原始需求「用底部的输入栏作为 bot 发送消息」；追加纠正「输入文本按 Pi 的发送键盘直接发送，如果有多个 bot 跳出来选择框（复用 Pi）」
 - **依赖:** REQ-UI-0004、REQ-CONF-0001
 
 ## 问题
 
-Telegram feed 已在 Pi transcript 中显示，但 Pi 底部 editor 仍只会向 Pi coding agent 提交 prompt。观察群聊后若要以某个 bot 身份发言，用户必须切回 Telegram 客户端，插件没有发送链路。
+首版实现只在显式执行 `/tg compose <bot-id>` 后拦截 Pi editor；`/tg attach` 本身仍是只读。这个额外模式与用户希望的聊天体验不一致：打开 Telegram feed 后，editor 应直接属于 Telegram；当全局 feed 对应多个 bot 时，发送当下才需要选择身份。
+
+当前 daemon request-id send → canonical SQLite → live broadcast 链已经满足 exactly-once 边界，缺口只在 Pi extension 的输入模式与身份选择。不得为此替换 editor 或自绘 selector。
 
 ## 调查结论
 
-- Pi extension 的 `input` event 在已注册 extension command 之后、skill/template 展开之前触发；返回 `{ action: "handled" }` 可保留原生 editor，同时阻止输入进入 Pi agent。这比替换 editor component 更小、更兼容。
-- 当前 IPC 只有 hello/history/live/usage，没有写请求；发送必须在 daemon 内完成，extension 不应读取 bot token。
-- daemon 已有正确发送事务链：Telegram API 成功 → `insertSentMessage` → IPC broadcast；新入口应复用同一个应用服务，而不是复制 `BotRuntime.executeSend`。
-- 全局 attach 没有唯一发送身份。必须显式选择 bot，且 editor/footer 要持续显示当前模式，避免把私密 Pi prompt 误发到群里。
+- Pi 0.84.1 的 extension `input` event 在 agent 处理前触发；返回 `{ action: "handled" }` 会保留原生 editor、历史与键位，同时阻止文本进入 Pi agent。
+- Pi `ExtensionUIContext.select(title, options)` 是当前公开的原生选择器；取消返回 `undefined`。它已经被项目 onboarding 使用，不需要新增 TUI component。
+- active feed 已持有 `filter`。过滤到一个 bot 时身份唯一；全局 feed 在一个配置 bot 时也唯一；只有全局 feed + 多 bot 才需要 selector。
+- `/tg compose <bot-id>` 仍有价值：它是连续以同一 bot 发言的显式 sticky override；`compose off` 则是在 feed 保持可见时把 editor 暂时还给 Pi。
 
 ## 目标
 
-在明确的 Telegram compose 模式下，用户仍使用 Pi 原生底部 editor；Enter 将纯文本以选定 bot 身份发送到当前配置群，并立即出现在 native transcript。退出 compose 后，editor 恢复正常 Pi prompt 行为。
+`/tg attach [bot]` 成功挂载 feed 后，interactive editor 默认直接发送 Telegram。身份唯一时直接发送；配置多个 bot 的全局 feed 在每次提交时使用 Pi 原生 selector 选择身份。所有路径继续复用 daemon 写链，不进入 Pi session/provider context。
 
 ## 非目标
 
-- 本需求不发送图片、文件、sticker、reply 或 Telegram entities。
-- 不让 extension 直接持有 bot token 或直连 Telegram。
-- 不把手动发送文本注入任一 bot 的 provider context；后续 poller 是否让其他 bot 看见，沿用现有 ingestion/routing 规则。
-- 不替换 Pi 的 editor、历史、autocomplete 或键位实现。
+- 不发送图片、文件、sticker、reply 或 Telegram entities；operator editor 仍是 literal plain text。
+- 不让 extension 读取 bot token 或直连 Telegram。
+- 不替换 Pi editor、autocomplete、history、提交键或 selector。
+- 不记忆全局 selector 的上一次选择；若要固定身份，使用 `/tg compose <bot-id>`。
+- 不把 operator 手动发送注入任一 bot 的 provider context；poller 后续如何让其他 bot 看见沿用现有 ingestion/routing。
 
 ## 需求
 
-- **R1 — 明确模式：** `/tg attach <bot-id>` 可选择观察/发送身份；全局 `/tg attach` 保持只读。提供 `/tg compose <bot-id>` 与 `/tg compose off`（最终命令名实现前可微调），任何发送前都必须有唯一有效 bot。
-- **R2 — 原生输入拦截：** 只拦截 `event.source === "interactive"` 的普通 editor 提交；extension command 继续按 Pi 的既定顺序优先执行。compose off 时返回 `continue`，行为逐字节等同当前 Pi。
-- **R3 — IPC 写契约：** 新增有 request id 的 `send_message { botId, text }` / success / error 响应。daemon 校验 bot id、非空文本与 Telegram 长度上限，再调用共享发送服务；token 永不发给 extension。
-- **R4 — 持久化与实时显示：** Telegram API 成功后立即 `insertSentMessage`，再经现有 live broadcast 进入 feed；poller echo 仍按 `(chat_id,message_id)` 去重。
-- **R5 — 失败语义：** 提交期间防重复；明确失败将原文本放回 editor 或提供可复制恢复方式。连接在 Telegram 已可能成功但 ACK 未到时，不得自动重试，必须提示“结果未知，请先检查群聊”，避免重复发送。
-- **R6 — 防误发提示：** footer/widget 与 editor border 至少一处持续显示 `TELEGRAM · SEND AS <id/name>`；compose off 显示 Pi 默认状态。切换 attach、detach、daemon 断线、session shutdown 时发送模式必须安全关闭。
-- **R7 — 附件边界：** compose 模式收到 `event.images` 时阻止提交并提示“不支持附件”，不得静默把附件转交 Pi agent或只发送文字部分。
-- **R8 — 上下文隔离：** input handler 返回 handled，不调用 `pi.sendUserMessage` / `ctx.sendUserMessage` / `appendMessage`；手动发送 UI 本身不产生 provider-visible 内容。
+- **R1 — attach 即可发送：** `/tg attach <bot-id>` 进入 scope compose，editor 直接以该 bot 发送；全局 `/tg attach` 也进入 scope compose。配置恰有一个 bot 时直接发送，多个 bot 时执行 R2。attach 不得再默认只读。
+- **R2 — Pi 原生身份选择：** 全局 feed + 多 bot 的每次 interactive 普通文本提交都调用 `ctx.ui.select`。选项由当前配置动态生成并同时显示稳定 bot id/name；选中后只发送一次。取消时恢复原始 editor 文本、返回 `handled`，既不发 Telegram 也不进入 Pi。
+- **R3 — 可逆 override：** `/tg compose <bot-id>` 保留为 sticky identity 并跳过 selector；`/tg compose` 无参数恢复当前 feed 的 scope compose；`/tg compose off` 保持 feed 但令后续 editor 输入返回 `continue` 给 Pi。命令树、help、parser 与 completion 共同表达 `[bot|off]`。
+- **R4 — 原生输入拦截：** 只拦截 `event.source === "interactive"`；extension command 仍由 Pi 先处理，RPC/extension source永远`continue`。任何Telegram输入路径返回`handled`，不调用`sendUserMessage`、`appendMessage`或其他provider-visible API。
+- **R5 — 唯一写链：** extension只调用已有request-id `send_message {botId,text}` IPC；daemon继续负责bot/text/长度校验、Telegram API、canonical persistence与broadcast。token不离开daemon。
+- **R6 — 失败与并发：** selector展示和发送期间都阻止第二次提交。明确失败、selector取消、附件和空文本恢复原文；Telegram可能成功但ACK丢失时关闭compose并提示先查群，绝不自动重试。
+- **R7 — 持续可见身份：** filtered/single-bot scope或sticky override显示`TELEGRAM · SEND AS <id/name>`；全局多bot scope显示`TELEGRAM · CHOOSE BOT ON SEND`；选择或发送期间显示有界busy状态。`compose off`清除该status。
+- **R8 — 生命周期：** 新attach替换旧scope；detach、daemon disconnect、session shutdown、受控restart/config变更都安全关闭compose与未确认选择。迟到selector结果或ACK不得向已替换feed发送。
+- **R9 — 附件边界：** Telegram compose收到`event.images`时阻止提交并提示不支持附件；不得静默交给Pi或只发caption。
 
 ## 验收标准
 
-- **AC1:** `/tg compose A` 后在原生 editor 输入 `hello`，fake daemon 只收到一次 `send_message(A,"hello")`，Pi agent 没有开始 run。
-- **AC2:** daemon 真实 fixture 返回 Telegram message 后，DB 只有一条 canonical row，feed live 显示它；poller echo 不重复。
-- **AC3:** compose off、全局只读 attach、RPC/extension source、非法 bot、空文本、超长文本和附件都有确定行为与测试。
-- **AC4:** send API 400/401、daemon 断线、ACK 丢失不导致自动双发；UI 可恢复原始文本或明确报告未知结果。
-- **AC5:** footer/editor 明确显示发送身份；detach/shutdown 后普通 editor 再次进入 Pi agent。
-- **AC6:** `bun test`、`bun run check`、真实 Pi TTY smoke 与 cache golden 通过。
+- **AC1:** `/tg attach A` 后直接输入 `hello`，fake daemon精确收到一次`send_message(A,"hello")`；没有先执行`/tg compose A`，Pi agent也没有开始run。
+- **AC2:** 全局attach + A/B/C时，提交一次只出现一个Pi native select，选B后只发送B；选项顺序与配置一致且label可区分id/name。
+- **AC3:** selector取消恢复逐字节相同的原文、发送数为0、结果为`handled`；全局只有一个bot时selector调用数为0。
+- **AC4:** sticky `/tg compose A` 连续发送不弹selector；`compose off`后interactive输入交给Pi；无参数`/tg compose`后恢复scope行为。
+- **AC5:** daemon fake返回Telegram Message后DB只有一条canonical row且feed live显示；poller echo不重复。400/401、断线、ACK丢失与pending double-submit都不双发。
+- **AC6:** RPC/extension source、空文本、超长文本、非法bot、附件、attach replacement、detach/shutdown/restart都有确定行为和回归测试。
+- **AC7:** footer status精确区分`SEND AS`与`CHOOSE BOT ON SEND`；实现中不存在自定义editor/select component。
+- **AC8:** `bun test test/tg-extension.test.ts test/tg-engine.test.ts test/ipc.test.ts test/manual-send.test.ts`、`bun run check`、cache golden与真实Pi/Telegram smoke通过。
 
 ## 约束
 
-- Cache impact: **NONE**。这是 operator → Telegram 的确定性 I/O，不增加 LLM 调用或 provider token。
-- IPC 变化必须 additive，旧 observer client 继续可用；更新 `src/ipc.ts`、daemon、plugin 与跨边界测试。
-- Secret 只留在 daemon；Unix socket 继续 chmod 600。
+- Cache impact: **NONE**。operator → Telegram是provider外的确定性I/O；selector不增加LLM call或token。
+- IPC保持additive；当前request-id/no-auto-retry协议不变。
+- Secret只留daemon，Unix socket继续0600。
+- 配置读取或selector失败必须恢复原文并保持身份明确，不得猜bot。
 
 ## 例子与边界 case
 
-- `/tg attach`（全局）后直接输入：仍是 Pi prompt，除非先 `/tg compose A`。
-- `/tg compose A` 后输入未知 slash 文本：Pi 已注册 command 仍优先；普通文本由 Telegram 模式处理。
-- 发送中 daemon 退出：不重试，editor 恢复文本并标记结果未知。
+- `/tg attach A` → status `SEND AS A` → Enter直接发A。
+- `/tg attach`，配置A/B/C → status `CHOOSE BOT ON SEND` → Enter → Pi select → B → 发B；下一条再次选择。
+- `/tg compose A` → sticky A；`/tg compose off` → editor回到Pi；`/tg compose` → 回到当前attach scope。
+- selector打开期间feed被detach/restart：选择结果作废，原文恢复，不发送。
+- 未知slash文本仍遵循Pi command precedence；只有普通interactive input到本handler。
 
 ## 可观察性
 
-发送开始/成功/失败/未知结果进入插件本地状态；不得写 provider context。daemon 可记录不含 token 的 bot id、request id、Telegram message id。
+本地UI只显示scope、选择中、发送中、成功/失败/unknown；daemon日志可含bot id、request id、Telegram message id，不含正文/token。selector取消不写daemon event。
 
 ## 文档影响
 
-`docs/architecture.md`、`docs/runbooks/daemon.md`、`docs/testing.md`、IPC reference（实现时补）。
+实现时同步`docs/architecture.md`、中英Pi使用指南、`docs/runbooks/daemon.md`、`docs/testing.md`与command help。
 
 ## 待决问题
 
-- **已决：** `/tg attach A` 只选择观察范围，不自动打开发送；必须显式 `/tg compose A`。全局 attach 也可显式 compose 某个有效 bot，但 footer 始终显示唯一身份。
+无。用户追加说明已经决定attach默认直发、多bot使用Pi原生selector；显式compose只作为override/off控制。
 
 ## 追溯
 
-- Plans: `PLAN-20260808-complete-new-reqs` T5/T6
-- Commits: `0b3fad0`（daemon contract）；Pi editor commit 从 `Requirement: REQ-UI-0005` trailer 查
+- Plans: `PLAN-20260808-complete-new-reqs#T5`、`#T6`、`#T13o`
+- Commits: `0b3fad0`（daemon contract）；其余从`Requirement: REQ-UI-0005` trailer查

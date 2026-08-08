@@ -23,7 +23,7 @@
 - [x] [REQ-UI-0002](REQ-UI-0002.md) 原生 transcript 中 attach / more / detach 与任意 bot 过滤（P1，依赖 UI-0004）（commit 19819c9）
 - [ ] [REQ-UI-0003](REQ-UI-0003.md) 用 Pi 原生 FooterComponent 呈现实时可观测性（P1，已重新调查；`19819c9` widget 不满足）
 - [ ] [REQ-UI-0009](REQ-UI-0009.md) Footer 使用数据库全生命周期 telemetry 并补齐原生指标（P1，已调查/未实现）
-- [ ] [REQ-UI-0005](REQ-UI-0005.md) 用 Pi 底部 editor 直接发送 Telegram 消息（P1，已调查/未实现）
+- [ ] [REQ-UI-0005](REQ-UI-0005.md) attach 后用 Pi editor 直发；多 bot 复用 Pi 原生选择框（P1，按追加反馈重开）
 - [ ] [REQ-UI-0006](REQ-UI-0006.md) 媒体识别完成后在原生 UI 下方显示视觉理解（P1，UI-only，已调查/未实现）
 - [ ] [REQ-ROUTE-0001](REQ-ROUTE-0001.md) 忙碌 bot 跳过概率采样；配置名称是绕过 gate 的强制回复关键词（P1，已实现/待总验收勾选）
 - [ ] [REQ-UI-0007](REQ-UI-0007.md) 用 Pi 原生 footer status 呈现 Telegram 统计（P2，已调查/未实现）
@@ -49,6 +49,7 @@
 - [x] [REQ-ROUTE-0002](REQ-ROUTE-0002.md) 验证 0.66/0.34 概率桶频率并区分回应机会与公开发言（P1，commit `a1321f1`）
 - [x] [REQ-VISION-0001](REQ-VISION-0001.md) 群内动态媒体在 provider 提交前同步识别，目录 sticker 保持后台处理（P1，commits `f4ff63b`、`6efd768`、`8b2d410`）
 - [x] [REQ-PLAT-0002](REQ-PLAT-0002.md) 复用 Pi 的模型设置与认证，取消项目 provider API key（P0，commits `0859490`、`f30e22c`、`c95c695`、`f4ff63b`）
+- [ ] [REQ-TG-0004](REQ-TG-0004.md) 将 Agent Markdown 映射为 Telegram entities，修复 RichMessage paragraph 整段粗体（P1，已调查/未实现）
 
 
 ## 代码库与文档
@@ -77,7 +78,8 @@
 - REQ-UI-0011 只重组 UI-0001/0006/0010 的现有卡片数据，复用 Pi `HStack/VStack` 与 theme；不新增生产渲染 LOC、依赖、数据字段或provider字节
 - REQ-UI-0012 继续由Pi检测Kitty/Ghostty并由`Tui.Image`渲染；插件只按Pi公开模式异步把非PNG归一化为Kitty `f=100`所需PNG，不自写terminal protocol
 - REQ-TG-0002 承认 private draft 原生 Thinking；当前 supergroup 使用 `typing` lease 每 4 秒续约，绝不误发 trigger sender 私聊；send 成功或 flush settle 后停止
-- REQ-TG-0003 用现有 `send.message` 承载 Rich Markdown，incoming/outgoing rich structure持久化后只把有界纯文本投影交给 Pi/provider；group 不调用 private draft
+- REQ-TG-0003 保留incoming RichMessage、raw persistence与有界projection；其首版agent outbound transport由REQ-TG-0004取代，group仍不调用private draft
+- REQ-TG-0004 取代 REQ-TG-0003 的 agent 出站 transport：incoming RichMessage data plane保留，outbound改为Markdown→classic message entities；只更新单一send tool说明并bump cache schema
 - REQ-REPLY-0001 保证 direct reply 的原始消息进入对应 bot provider suffix，不提供 runtime 内容兜底；嵌套父 sender、busy/catch-up 与 restart 都不得丢 obligation
 - REQ-OPS-0002 按当前共享进程架构做 deployment-wide graceful restart；Pi `/tg restart` 复用 PID 身份/ready 检查并恢复原 feed，不在进程内热重建单个 bot
 - REQ-CMD-0001 是 Telegram 群内 deterministic control plane；只读命令公开，compact/set/reset 只认 deployment allowlist，命令不得进入 agent context

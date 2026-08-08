@@ -1,11 +1,13 @@
 # REQ-TG-0003: 支持 Telegram Rich Messages 的收发与持久化
 
-- **Status:** Implemented（2026-08-08 T10k/T10l；真实 Bot API smoke 留 T14 总验收）
+- **Status:** Implemented / Partially Superseded（incoming、持久化与projection保留；agent出站`sendRichMessage`由REQ-TG-0004取代）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「为 bot 增加 Telegram rich messages 的支持」
 - **依赖:** REQ-SEND-0001、REQ-TG-0001、REQ-UI-0001
 
 ## 问题
+
+> 2026-08-08 生产视觉反馈：RichMessage paragraph令普通agent回复表现为整段粗体。本文保留incoming RichMessage/data-plane要求；R2/R3及对应出站验收作为历史实现证据，当前出站权威要求见 [REQ-TG-0004](REQ-TG-0004.md)。
 
 Telegram Bot API 10.1 新增 `RichMessage`、`InputRichMessage`、`sendRichMessage` 与 `sendRichMessageDraft`；10.2 又补充显式 media 和 thinking block。当前项目只读取 `Message.text/caption`，只调用 `sendMessage`，因此：
 

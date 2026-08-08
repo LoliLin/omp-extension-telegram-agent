@@ -1,7 +1,7 @@
 # PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
 
 - **Status:** Active
-- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-ROUTE-0002, REQ-SEND-0001, REQ-SEND-0002, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-UI-0011, REQ-UI-0012, REQ-UI-0013, REQ-UI-0014, REQ-PLAT-0001, REQ-PLAT-0002, REQ-DOC-0001, REQ-DOC-0002, REQ-ONBOARD-0001, REQ-VISION-0001, REQ-SEARCH-0001
+- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-ROUTE-0002, REQ-SEND-0001, REQ-SEND-0002, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-TG-0004, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-UI-0011, REQ-UI-0012, REQ-UI-0013, REQ-UI-0014, REQ-PLAT-0001, REQ-PLAT-0002, REQ-DOC-0001, REQ-DOC-0002, REQ-ONBOARD-0001, REQ-VISION-0001, REQ-SEARCH-0001
 - **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
 
 ## 结果
@@ -85,6 +85,9 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13k2** — 用T13k1a–T13k1c真实commit hash记录VISION-0001完成并在REQ-LIST勾选；validates: VISION-0001 traceability；commit: completion record
 - [x] **T13l** — 增加durable-first photo precache/backfill与`media_ready`原位Pi更新；validates: UI-0014 AC1–AC7；commit: native photo readiness（真实群smoke与hash在T14记录）
 - [x] **T13m** — 按现行官方字段在既有search tool增加TinyFish fetch、安全边界并bump cache v6；validates: SEARCH-0001 AC1–AC7；commit: `0c450cd`
+- [x] **T13n** — 脱敏审计现有send参数与RichMessage blocks，重开UI-0005并正式化Markdown entities修复；validates: UI-0005/TG-0004 documented scope/AC；commit: docs/research only
+- [ ] **T13o** — attach默认进入scope compose，多bot提交复用Pi原生select，并保留sticky/off/unknown边界；validates: UI-0005 AC1–AC8；commit: native editor behavior
+- [ ] **T13p** — 复用Pi公开Marked lexer把agent Markdown转为Telegram text/entities，退役出站RichMessage paragraph并bump cache v7；validates: TG-0004 AC1–AC8；commit: Markdown transport behavior
 - [ ] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
 
 ## 每个 commit 的固定流程
@@ -106,6 +109,8 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 | Native media | `bun test test/tg-extension.test.ts test/tg-engine.test.ts` + Pi real converter fixture | T10z |
 | Telegram control | `bun test test/config.test.ts test/control-state.test.ts test/control-command.test.ts test/poller.test.ts` | T10m1–T10m3 |
 | Config/platform | `bun test test/config.test.ts` + 新 composition tests | T11–T13 |
+| Native direct input | `bun test test/tg-extension.test.ts test/tg-engine.test.ts test/ipc.test.ts test/manual-send.test.ts` | T13o |
+| Markdown entities | `bun test test/telegram-markdown.test.ts test/rich-send.test.ts test/sticker.test.ts test/send-tool.test.ts test/cache.test.ts` | T13p |
 | 全量 | `bun test` + `bun run check` + `git diff --check` | T14 |
 | Real Pi | `bun run pi`: attach/compose/send/more/footer/completion/vision | T14 |
 | Real Telegram | 每 bot fixed sticker + manual text + live vision | T3/T6/T8/T14 |
@@ -132,6 +137,8 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - T13g/T13h/T13i: **NONE**；需求/哲学/只读审计不改provider bytes或调用。
 - T13j/T13k/T13l: **NONE** grammar；Pi认证源、必要vision等待和TUI media side channel不改system/tools/message/summary格式，也不新增LLM call。
 - T13m: **INTENTIONAL**；既有search schema增加url/recency，cache schema 5→6并开新epoch；不新增tool项或eager fetch。
+- T13n/T13o: **NONE**；需求文档与operator/Pi UI行为不进入provider context，selector不新增模型调用。
+- T13p: **INTENTIONAL**；只更新既有send说明并把cache schema 6→7；Markdown转换为本地确定性代码，0新增tool/call/dynamic token。
 
 ## 风险
 
@@ -152,6 +159,8 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - photo download反卡poller或无限扫库：durable-first、pending128/并发2/startup100，完成只发additive identity update。
 - 网页prompt injection或signed URL泄漏：显式tool fetch、host-only event与untrusted result envelope；不自动抓取群链接。
 - native card 右对齐在窄/CJK终端溢出：40/60/80/120列visible-width tests，身份/正文优先，metadata次行退化；禁止自绘compositor。
+- 多bot selector取消或feed替换后迟到选择误发：选择/发送共用generation与busy gate，取消恢复原文，lifecycle失效旧结果。
+- Markdown entity offset在emoji/nesting下被Telegram拒绝：Marked token renderer按UTF-16构造并锁CJK/emoji/nested ranges；仅确定性400允许一次plain fallback。
 
 ## 完成记录
 
