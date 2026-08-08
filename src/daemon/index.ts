@@ -16,6 +16,9 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CACHE_SCHEMA_VERSION } from "../agent/prompt.ts";
 import { ManualSendService } from "./manual-send.ts";
+import { TelegramControlState } from "../telegram/control-state.ts";
+import { parseTelegramControlCommand, TelegramControlCommandService } from "../telegram/control-command.ts";
+import { publishTelegramControlMenus, TelegramControlCoordinator } from "../telegram/control-integration.ts";
 
 const rootDir = process.cwd();
 const config = loadConfig(rootDir);
@@ -24,6 +27,8 @@ const config = loadConfig(rootDir);
 // (REQ-OPS-0001 R4). Released on shutdown; stale pid files are taken over.
 const pidFd = acquirePidLock(config.dataDir);
 const db = openDb(config.dbPath);
+// Restore effective overrides before BotRuntime captures the shared BotConfig objects.
+const telegramControlState = new TelegramControlState(db, config.bots);
 
 // router secret: stable across restarts, generated once
 if (!config.routerSecret) {
@@ -119,6 +124,32 @@ for (const [botId, rt] of runtimes) {
 }
 ipc.start();
 
+const telegramControl = new TelegramControlCommandService(
+	db,
+	config.bots,
+	telegramControlState,
+	runtimes,
+	config.telegramAdmins,
+);
+const telegramControlCoordinator = new TelegramControlCoordinator(
+	db,
+	telegramControl,
+	botApis,
+	({ chatId, messageId }) => {
+		const row = db.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?").get(chatId, messageId) as MessageRow | null;
+		if (row) ipc.broadcast(ipc.msgToItem(row));
+	},
+);
+const controlTasks = new Set<Promise<unknown>>();
+function runTelegramControl(command: NonNullable<ReturnType<typeof parseTelegramControlCommand>>): void {
+	const task = telegramControlCoordinator.handle(command).catch(() => {
+		console.error(`[telegram-control] coordinator failed bot=${command.replyBotId} msg=#${command.messageId}`);
+	});
+	controlTasks.add(task);
+	void task.finally(() => controlTasks.delete(task));
+}
+void publishTelegramControlMenus(botApis);
+
 // Direct replies are durable response opportunities. Restore them only after each
 // session and observer sink is ready, before fresh polling can add more work.
 for (const [botId, rt] of runtimes) {
@@ -158,9 +189,11 @@ function route(result: { chatId?: number; messageId?: number }): void {
 
 const pollers = config.bots.map(
 	(bot) =>
-		new Poller(db, bot.id, bot.token, config.groupPeerId, (result, _update, botId) => {
+		new Poller(db, bot.id, bot.token, config.groupPeerId, (result, update, botId) => {
 			console.log(`[msg] bot=${botId} ${result.kind} chat=${result.chatId} msg=${result.messageId}`);
-			route(result);
+			const command = parseTelegramControlCommand(update, botId, identities);
+			if (command) runTelegramControl(command);
+			else route(result);
 			if (result.chatId != null && result.messageId != null) {
 				const row = db
 					.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
@@ -184,6 +217,12 @@ async function shutdown(signal: string) {
 	hardTimer.unref?.();
 	for (const p of pollers) p.stop();
 	for (const rt of runtimes.values()) await rt.stop();
+	if (controlTasks.size > 0) {
+		await Promise.race([
+			Promise.allSettled([...controlTasks]),
+			new Promise((resolve) => setTimeout(resolve, 5_000)),
+		]);
+	}
 	ipc.stop();
 	releasePidLock(pidFd, config.dataDir);
 	// give pollers a moment to exit their loops

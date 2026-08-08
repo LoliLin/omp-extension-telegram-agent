@@ -150,4 +150,37 @@ describe("Poller (REQ-TG-0001)", () => {
 		await expect(p.run()).rejects.toThrow(/401/);
 		expect(p.running).toBe(false);
 	});
+
+	test("a post-ingest async message handler failure keeps the durable offset and polling loop alive", async () => {
+		const db = freshDb();
+		let handlerCalls = 0;
+		const p = new Poller(db, "A", "token", GROUP, async () => {
+			handlerCalls++;
+			throw new Error("secret detail must stay local");
+		});
+		let polls = 0;
+		injectApi(p, {
+			getUpdates: async () => {
+				polls++;
+				if (polls === 1) return [makeUpdate(5)];
+				await sleep(10);
+				return [];
+			},
+		});
+		const errors: string[] = [];
+		const originalError = console.error;
+		console.error = (...parts: unknown[]) => errors.push(parts.join(" "));
+		try {
+			const running = p.run();
+			await waitFor(() => polls >= 2);
+			p.stop();
+			await running;
+		} finally {
+			console.error = originalError;
+		}
+		expect(handlerCalls).toBe(1);
+		expect(getBotState(db, "A", "update_offset")).toBe("6");
+		expect(errors).toEqual(["[poller A] message handler failed for update 5"]);
+		expect(errors[0]).not.toContain("secret detail");
+	});
 });

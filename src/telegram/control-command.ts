@@ -182,8 +182,9 @@ export class TelegramControlCommandService {
 	) {}
 
 	async handle(command: ParsedTelegramControlCommand): Promise<TelegramControlResult> {
+		const claimed = this.claim(command);
 		this.consumeEveryRuntime(command.messageId);
-		if (!this.claim(command)) return this.result(command, null, true);
+		if (!claimed) return this.result(command, null, true);
 		const startedAt = this.now();
 		if (command.edited) {
 			this.audit(command, false, "ignored_edit", startedAt);
@@ -333,7 +334,15 @@ export class TelegramControlCommandService {
 	}
 
 	private consumeEveryRuntime(messageId: number): void {
-		for (const runtime of this.runtimes.values()) runtime.consumeControlMessage(messageId);
+		for (const [botId, runtime] of this.runtimes) {
+			try {
+				runtime.consumeControlMessage(messageId);
+			} catch {
+				// The durable claim/reply marker remains the flush authority even if an
+				// in-memory exposure write races shutdown.
+				console.warn(`[telegram-control] exposure failed bot=${botId} msg=#${messageId}`);
+			}
+		}
 	}
 
 	private audit(command: ParsedTelegramControlCommand, authorized: boolean, outcome: string, startedAt: number): void {

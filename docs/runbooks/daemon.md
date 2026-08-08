@@ -6,6 +6,7 @@
   - `group_peer_id`：群的裸正数 peer id（`-100...` 形式会被自动归一化）
   - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1）、可选 `model` / `reasoning_effort` / `compaction_threshold` / `compaction_keep_recent` / `sampling_cooldown_ms` / `tools`（`{send, search, run_js}` 开关）/ `sticker_sets`（Telegram sticker set 名数组）
   - `sampling_cooldown_ms` 默认 2000，可全局设置并由单 bot 覆盖；必须有限且 `>=0`，0 关闭概率冷却。它只影响 probability routing，mention/reply/name 不会被静默吞掉。
+  - `telegram_admins`：Telegram群内控制白名单，接受正整数user id或规范化`@username`；推荐固定numeric id。缺省/空数组会拒绝所有`compact/set/reset`，但不影响公开`help/bots/status`。
 - `.env`（`key: value` 冒号格式）：只放 secret——bot tokens、`deepseek_api_key`、`tiny_fish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）
 - 改配置后重启 daemon 生效（无热重载）
 
@@ -59,6 +60,25 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。
 - `/tg restart`先关闭compose并中止旧IPC；在途manual send按unknown outcome处理且绝不自动重发。ready后保留原transcript，自动以原A/all filter重连并恢复此前的原生footer scope；失败时保留已显示内容与可执行诊断。
 
+## Telegram 群内控制
+
+下列命令直接发到配置群，由daemon确定性处理；它们不会进入persona或主LLM上下文。Telegram客户端菜单不可见时仍可手工输入：
+
+```text
+/tg help
+/tg bots
+/tg status [bot]
+/tg compact <bot|all>                       # telegram_admins only
+/tg set <bot> routing_p <0..1>              # telegram_admins only
+/tg set <bot> cooldown_ms <0..3600000>      # telegram_admins only
+/tg reset <bot> <routing_p|cooldown_ms>      # telegram_admins only
+```
+
+- `/tg@<bot_username> ...`由该suffix bot回复；未知deployment suffix不接管。
+- `set/reset`立即更新effective值并持久化SQLite override；重启后保留，reset恢复文件配置。routing总和超过1时整次拒绝。
+- `compact`只接受bot id或`all`，不接受自定义instructions。busy/stopping bot不会被abort；`all`按配置顺序汇总结果。它会调用既有辅助摘要模型并产生相应费用。
+- 回复始终引用原命令。命令edit只消费、不执行；replay/second-bot副本不会重复mutation或回复。发送结果未知时daemon不自动重试。
+
 ## 新增一个 bot
 
 1. `.env` 加一行 token：`my_bot_token: 123:...`
@@ -73,4 +93,5 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - 面板无数据：尚无 llm_runs（bot 从未被触发）
 - `/tg attach` 报「unknown bot id」：id 拼错，错误信息会列出全部配置的 id
 - `/tg compose` 报 no connected feed：先 `/tg attach [bot]`，确认 transcript 已收到 snapshot；compose 不会自行启动 daemon
+- Telegram群内mutation报权限不足：检查发送者的canonical numeric user id/`@username`是否在`telegram_admins`；display name、群匿名身份和bot身份都不会授权。
 - 发送提示 unknown outcome：原文会恢复且 compose 自动关闭；先在 Telegram 群确认是否已出现，再决定是否重发

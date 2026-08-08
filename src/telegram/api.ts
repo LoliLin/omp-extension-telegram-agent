@@ -74,6 +74,10 @@ export class BotApi {
 		);
 	}
 
+	setMyCommands(commands: readonly { command: string; description: string }[]): Promise<true> {
+		return this.call<true>("setMyCommands", { commands });
+	}
+
 	sendMessage(
 		chatId: number,
 		text: string,

@@ -517,3 +517,11 @@
 - BotRuntime新增只读control snapshot、跨runtime consume接口及manual compact lock。只有idle session无instructions调用一次Pi `compact()`；busy/stopping为零调用，compact期间explicit只coalesce、probability skip，完成后再drain。claim/reply audit id被flush永久排除，因此统一compaction handler清epoch exposure后也不会泄入provider。
 - command/state/flush targeted 31 tests / 324 assertions；全量298 / 4272、typecheck、cache v5 golden与diff check通过。poller/daemon canonical reply、IPC broadcast与`setMyCommands`留T10m3。
 - Cache impact: **NONE**——控制消息走确定性side channel并被suffix过滤；system/tool/message/summary grammar、context epoch与普通聊天token/call不变。只有用户显式compact复用既有aux summary调用。
+
+## 2026-08-08 (58) — 接通 Telegram 群控制全链
+
+- daemon在创建任何BotRuntime前恢复Telegram overrides；poller canonical ingest/offset成功后先按原始update解析control entity，合法命令走control coordinator并跳过normal router。command task不阻塞long poll，shutdown会先stop runtime/abort相关session工作，再有界等待回复任务。
+- plain command reply使用现有`sendTextAndPersist`：suffix指定bot优先，否则由实际接收bot发送，`reply_parameters`引用原message；canonical成功后写reply消费标记、向所有runtime expose并只broadcast一次。Telegram unknown/local persistence/marker/broadcast失败均不重放remote create，只输出无正文/token/path/stack的category。
+- BotApi新增`setMyCommands`，daemon并行best-effort为每bot发布同一`/tg`菜单；任一失败不阻塞polling。poller允许async observer但其异常发生在durable offset之后，只记脱敏错误，不把update当ingest failure重放。
+- fake Poller→`/tg@beta_bot set A ...`→B BotApi→canonical DB→fake IPC锁定重复update只执行一次、A override立即变化、命令/回复各一行且所有runtime消费；另锁菜单payload/failure、500单次发送、reply marker跨epoch。command/cache targeted 45/374；全量302/4298、typecheck、cache v5 golden与diff check通过。真实群smoke并入T14。
+- Cache impact: **NONE**——control command/reply由claim marker永久排除provider suffix，未改system/tool/message/summary grammar或context epoch；普通聊天0新增token/call，只有显式compact沿用现有aux summary成本。

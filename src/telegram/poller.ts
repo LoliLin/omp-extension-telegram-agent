@@ -10,7 +10,7 @@ const POLL_TIMEOUT_SEC = 25;
 const OFFSET_KEY = "update_offset";
 const INGEST_FAILURE_WARN_THRESHOLD = 5;
 
-export type MessageHandler = (result: IngestResult, update: unknown, botId: string) => void;
+export type MessageHandler = (result: IngestResult, update: unknown, botId: string) => void | Promise<void>;
 
 export class Poller {
 	private api: BotApi;
@@ -90,7 +90,13 @@ export class Poller {
 					setBotState(this.db, this.botId, OFFSET_KEY, String(updateId + 1));
 					ingestFailures = 0;
 					if (result.kind === "inserted" || result.kind === "edited" || result.kind === "enriched") {
-						this.onMessage?.(result, update, this.botId);
+						try {
+							await this.onMessage?.(result, update, this.botId);
+						} catch {
+							// The update and offset are already durable. A side-channel handler failure
+							// must not replay or halt polling.
+							console.error(`[poller ${this.botId}] message handler failed for update ${updateId}`);
+						}
 					}
 				} catch (err) {
 					ingestFailures++;

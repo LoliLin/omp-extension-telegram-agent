@@ -447,10 +447,15 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 		const rt = makeRuntime();
 		const fake = attachFakeSession(rt);
 		insertMsg({ message_id: 81, text: "/tg status" });
+		insertMsg({ message_id: 82, date: 1754600001, sender_id: 777, display_name: "小雪", username: "alpha_bot", is_bot: 1, text: "status reply" });
 		db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('A', 1, 'telegram_control_claim', ?)").run(
 			JSON.stringify({ chat_id: CHAT, message_id: 81, command: "status" }),
 		);
+		db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('A', 2, 'telegram_control_reply', ?)").run(
+			JSON.stringify({ chat_id: CHAT, message_id: 82 }),
+		);
 		rt.consumeControlMessage(81);
+		rt.consumeControlMessage(82);
 		fake.listener!({
 			type: "compaction_end",
 			reason: "manual",
@@ -458,12 +463,13 @@ describe("flush state machine (REQ-AGENT-0001)", () => {
 			willRetry: false,
 			result: { summary: "bounded", firstKeptEntryId: "x", tokensBefore: 100 },
 		});
-		insertMsg({ message_id: 82, date: 1754600001, text: "ordinary" });
+		insertMsg({ message_id: 83, date: 1754600002, text: "ordinary" });
 		expect(rt.trigger()).toBe("started");
 		await (rt as any).flushPromise;
 		expect(fake.sent).toHaveLength(1);
 		expect(fake.sent[0]).not.toContain("#81 ");
-		expect(fake.sent[0]).toContain("#82 ");
+		expect(fake.sent[0]).not.toContain("#82 ");
+		expect(fake.sent[0]).toContain("#83 ");
 	});
 
 	test("R7: executeSend validates the sticker before any network send", async () => {
