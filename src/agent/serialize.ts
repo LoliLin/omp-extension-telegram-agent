@@ -35,11 +35,10 @@ export function getOrCreateAlias(db: Database, chatId: number, userId: number): 
 		| { alias: string }
 		| null;
 	if (existing) return existing.alias;
-	const max = db
-		.query("SELECT COUNT(*) c FROM aliases WHERE chat_id = ?")
-		.get(chatId) as { c: number };
-	const alias = `u${max.c + 1}`;
-	db.query("INSERT INTO aliases (chat_id, user_id, alias) VALUES (?, ?, ?)").run(chatId, userId, alias);
+	// alias from rowid: stable, unique, race-free (same pattern as sticker short_id).
+	const { lastInsertRowid } = db.query("INSERT INTO aliases (chat_id, user_id, alias) VALUES (?, ?, '')").run(chatId, userId);
+	const alias = `u${lastInsertRowid}`;
+	db.query("UPDATE aliases SET alias = ? WHERE rowid = ?").run(alias, lastInsertRowid);
 	return alias;
 }
 

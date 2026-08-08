@@ -143,11 +143,7 @@ function boundedDisplay(value: string, max: number): string {
 }
 
 function displayJson(value: unknown): string {
-	try {
-		return JSON.stringify(value ?? {}) ?? "{}";
-	} catch {
-		return "[unserializable arguments]";
-	}
+	return JSON.stringify(value ?? {}) ?? "{}";
 }
 
 export class BotRuntime {
@@ -1192,7 +1188,6 @@ export class BotRuntime {
 			visibleMessageIds: packed.visibleMessageIds,
 			deliveredObligationIds,
 		});
-		for (const messageId of packed.visibleMessageIds) this.visibleMessageIds.add(messageId);
 		for (const obligation of delivered) {
 			this.recordEvent("reply_obligation_delivered", { message_id: obligation.messageId });
 		}

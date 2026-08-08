@@ -102,8 +102,6 @@ export interface EnsureVisionOptions {
 interface PiVisionExecutorOptions {
 	convert?: typeof convertToPng;
 	monotonicNow?: () => number;
-	scheduleTimeout?: (callback: () => void, delayMs: number) => unknown;
-	clearScheduledTimeout?: (handle: unknown) => void;
 }
 
 type VisionModelRuntime = Pick<ModelRuntime, "getModel" | "completeSimple">;
@@ -172,8 +170,6 @@ export function createPiVisionExecutor(
 			: null;
 	const convert = options.convert ?? convertToPng;
 	const monotonicNow = options.monotonicNow ?? (() => performance.now());
-	const scheduleTimeout = options.scheduleTimeout ?? ((callback, delayMs) => setTimeout(callback, delayMs));
-	const clearScheduledTimeout = options.clearScheduledTimeout ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
 
 	return {
 		modelRef: selection.canonical,
@@ -224,34 +220,16 @@ export function createPiVisionExecutor(
 					timestamp: Date.now(),
 				}],
 			};
-			const controller = new AbortController();
-			const timeoutMarker = Symbol("vision-timeout");
-			let timeoutHandle: unknown;
-			const timeout = new Promise<typeof timeoutMarker>((resolve) => {
-				timeoutHandle = scheduleTimeout(() => {
-					controller.abort(new DOMException("vision request timed out", "TimeoutError"));
-					resolve(timeoutMarker);
-				}, VISION_TIMEOUT_MS);
-			});
-
 			let message: AssistantMessage;
 			try {
-				const completion = runtime.completeSimple(model!, context, {
+				// Single timeout layer: the SDK enforces VISION_TIMEOUT_MS inside completeSimple.
+				message = await runtime.completeSimple(model!, context, {
 					cacheRetention: "none",
 					maxTokens: VISION_MAX_OUTPUT_TOKENS,
 					maxRetries: 0,
 					reasoning: selection.thinkingLevel,
-					signal: controller.signal,
 					timeoutMs: VISION_TIMEOUT_MS,
 				});
-				const settled = await Promise.race([completion, timeout]);
-				if (settled === timeoutMarker) {
-					return {
-						text: null,
-						telemetry: usageTelemetry(input.kind, sourceBytes, convertedBytes, monotonicNow() - startedAt, "provider_timeout"),
-					};
-				}
-				message = settled;
 			} catch (error) {
 				return {
 					text: null,
@@ -263,14 +241,10 @@ export function createPiVisionExecutor(
 						classifyPiProviderFailure(error),
 					),
 				};
-			} finally {
-				if (timeoutHandle !== undefined) clearScheduledTimeout(timeoutHandle);
 			}
 
 			if (message.stopReason === "error" || message.stopReason === "aborted") {
-				const category = message.stopReason === "aborted" && controller.signal.aborted
-					? "provider_timeout"
-					: classifyPiProviderFailure(new Error(message.errorMessage ?? message.stopReason));
+				const category = classifyPiProviderFailure(new Error(message.errorMessage ?? message.stopReason));
 				return {
 					text: null,
 					telemetry: usageTelemetry(input.kind, sourceBytes, convertedBytes, monotonicNow() - startedAt, category, message),

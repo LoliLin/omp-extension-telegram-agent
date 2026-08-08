@@ -212,7 +212,7 @@ export function writeFirstRunDeployment(rootDir: string, draft: FirstRunDraft, o
 	const normalized = validateFirstRunDraft(draft);
 	const mode = options.mode ?? "create";
 	const ops = options.fileOps ?? nodeConfigFileOps;
-	const nonce = normalizeNonce(options.nonce);
+	const nonce = options.nonce ?? randomUUID();
 	const configPath = join(root, "telegram.config.ts");
 	const legacyPath = join(root, "bots.config.json");
 	const envPath = join(root, ".env");
@@ -280,7 +280,7 @@ export function validateEditedConfigSource(
 	const ops = options.fileOps ?? nodeConfigFileOps;
 	const extension = extname(target);
 	const stem = basename(target, extension);
-	const temporary = join(root, `.${stem}.edit-${normalizeNonce(options.nonce)}${extension}`);
+	const temporary = join(root, `.${stem}.edit-${options.nonce ?? randomUUID()}${extension}`);
 	if (ops.exists(temporary)) throw new OnboardingWriteError(`temporary file already exists: ${basename(temporary)}`);
 	let created = false;
 	try {
@@ -308,7 +308,7 @@ export function replaceExistingConfigSource(
 		[{ path: target, contents: source, mode: PRIVATE_MODE }],
 		[],
 		"backup-replace",
-		normalizeNonce(options.nonce),
+		options.nonce ?? randomUUID(),
 		ops,
 	);
 	try {
@@ -421,11 +421,6 @@ function assertRegularFile(path: string, ops: ConfigFileOps): void {
 function unlinkIfExists(path: string, ops: ConfigFileOps): void {
 	if (!ops.exists(path)) return;
 	ops.unlink(path);
-}
-
-function normalizeNonce(value?: string): string {
-	const nonce = value ?? randomUUID();
-	return /^[A-Za-z0-9_-]+$/.test(nonce) ? nonce : randomUUID();
 }
 
 function ensureTrailingNewline(value: string): string {

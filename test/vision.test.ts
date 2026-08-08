@@ -162,7 +162,6 @@ describe("Pi vision executor (REQ-VISION-0001 R7)", () => {
 			reasoning: "low",
 			timeoutMs: VISION_TIMEOUT_MS,
 		});
-		expect(captured!.options.signal).toBeInstanceOf(AbortSignal);
 		expect(captured!.context.messages).toHaveLength(1);
 		const content = captured!.context.messages[0].content;
 		expect(content[0]).toMatchObject({ type: "text" });
@@ -236,37 +235,6 @@ describe("Pi vision executor (REQ-VISION-0001 R7)", () => {
 		const emptyResult = await empty.describe({ kind: "sticker", bytes: new Uint8Array([1]), mimeType: "image/png" });
 		expect(emptyResult).toMatchObject({ text: null, telemetry: { outcome: "empty_response" } });
 		expect(JSON.stringify(emptyResult)).not.toContain(privateBody);
-	});
-
-	test("aborts a hanging provider at exactly 90 seconds with retries disabled", async () => {
-		let fireTimeout: (() => void) | null = null;
-		let scheduledDelay = 0;
-		let capturedSignal: AbortSignal | null = null;
-		let capturedRetries: number | null = null;
-		const executor = createPiVisionExecutor({
-			getModel: () => ({ input: ["text", "image"] }) as never,
-			completeSimple: (_model: unknown, _context: unknown, options: any) => {
-				capturedSignal = options.signal;
-				capturedRetries = options.maxRetries;
-				return new Promise(() => {});
-			},
-		} as never, DEFAULT_AUXILIARY_VISUAL_MODEL, {
-			scheduleTimeout: (callback, delayMs) => {
-				fireTimeout = callback;
-				scheduledDelay = delayMs;
-				return 1;
-			},
-			clearScheduledTimeout: () => {},
-		});
-
-		const pending = executor.describe({ kind: "photo", bytes: new Uint8Array([1]), mimeType: "image/png" });
-		expect(scheduledDelay).toBe(VISION_TIMEOUT_MS);
-		expect(Number(capturedRetries)).toBe(0);
-		expect(capturedSignal!.aborted).toBe(false);
-		fireTimeout!();
-		const result = await pending;
-		expect(capturedSignal!.aborted).toBe(true);
-		expect(result).toMatchObject({ text: null, telemetry: { outcome: "provider_timeout" } });
 	});
 });
 

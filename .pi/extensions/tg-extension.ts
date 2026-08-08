@@ -84,15 +84,11 @@ export class NativeMediaCache {
 		private readonly capabilities: () => Tui.TerminalCapabilities = () => Tui.getCapabilities(),
 		limits: NativeMediaCacheLimits = {},
 	) {
-		const positive = (value: number | undefined, fallback: number) => {
-			const candidate = value ?? fallback;
-			return Number.isFinite(candidate) ? Math.max(1, Math.floor(candidate)) : fallback;
-		};
 		this.limits = {
-			maxEntries: positive(limits.maxEntries, MEDIA_CACHE_MAX_ENTRIES),
-			maxTotalBase64Bytes: positive(limits.maxTotalBase64Bytes, MEDIA_CACHE_MAX_BASE64_BYTES),
-			maxItemBase64Bytes: positive(limits.maxItemBase64Bytes, MEDIA_CACHE_MAX_ITEM_BASE64_BYTES),
-			maxPending: positive(limits.maxPending, MEDIA_CONVERSION_MAX_PENDING),
+			maxEntries: limits.maxEntries ?? MEDIA_CACHE_MAX_ENTRIES,
+			maxTotalBase64Bytes: limits.maxTotalBase64Bytes ?? MEDIA_CACHE_MAX_BASE64_BYTES,
+			maxItemBase64Bytes: limits.maxItemBase64Bytes ?? MEDIA_CACHE_MAX_ITEM_BASE64_BYTES,
+			maxPending: limits.maxPending ?? MEDIA_CONVERSION_MAX_PENDING,
 		};
 	}
 
