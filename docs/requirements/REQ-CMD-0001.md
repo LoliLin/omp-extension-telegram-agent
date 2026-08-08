@@ -1,6 +1,6 @@
 # REQ-CMD-0001: Telegram 群内控制命令与管理员白名单
 
-- **Status:** Approved（2026-08-08 已调查，未实现）
+- **Status:** Done（2026-08-08；implementation `fa311ea` + `f22ed0c` + `c0e5f26`，真实群权限/set-reset/compact smoke 汇总到 T14）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：Telegram bot 指令支持手动 compact、调整参数、查看信息及其他实用命令；除查看信息外均为管理员命令；白名单可配置，当前 deployment 只允许 `t.me/aac6fef`
 - **依赖:** REQ-AGENT-0001、REQ-CONF-0001、REQ-PLAT-0001
@@ -92,4 +92,4 @@
 ## 追溯
 
 - Plans: `PLAN-20260808-complete-new-reqs#T10m`
-- Commits: 从 `Requirement:` git trailer 查
+- Commits: config/state `fa311ea`；parser/service/runtime `f22ed0c`；daemon/reply/menu `c0e5f26`；其余从 `Requirement: REQ-CMD-0001` git trailer查
