@@ -149,6 +149,8 @@ session.subscribe(e => { /* message_update/message_end/turn_end/agent_settled/en
 
 ## REQ-UI-0001 R1 研究：pi-tui 插件形态 vs 独立进程 + kitty 图像（2026-08-07）
 
+> **已被 2026-08-08 复核推翻。** 本节把“扩展内手写 viewport”误当成 Pi 插件完成态，并且真实探针运行的是全局 Pi 0.83.0，不是项目依赖的 0.84.1。保留本节只用于解释错误方向的来源；当前决策见下一节。
+
 **问题**：Telegram 历史界面要不要写成 pi 插件（extension）形态，以复用 pi 主程序的 TUI 与 kitty 图像能力？
 
 **结论：不采用插件形态，保持独立 TUI 进程；kitty 图像支持直接复用 pi-tui 的 `Image` 组件。**
@@ -161,3 +163,103 @@ session.subscribe(e => { /* message_update/message_end/turn_end/agent_settled/en
 4. **媒体传输路径**（R5）：daemon 的 media 缓存已有稳定本地路径 `data/media/<file_unique_id>.<ext>`（vision.ts local_path），TUI 与 daemon 同 uid、socket chmod 600 —— IPC 只传路径字符串，TUI 自行读文件转 base64；tgs/webm/超限文件降级占位符。不扩大本机暴露面。
 
 **落地**（REQ-UI-0001 R2–R5）：TUI 保持独立进程；`MsgItem` 增加 `mediaPath`/`mediaDesc`（additive 协议字段）；有本地缓存且 ≤1MB 的 photo/sticker 渲染 `Image`，其余（tgs/webm/大图/无缓存）保持现有占位符 + vision 描述文本。
+
+---
+
+## REQ-UI-0004 复核：Pi 原生 transcript custom entry（2026-08-08）
+
+**结论：Telegram feed 应成为 Pi transcript 中一个 TUI-only custom entry；不再使用 `ctx.ui.custom` 聊天窗口，也不再自己管理 viewport。**
+
+### 版本事实
+
+- 项目 `package.json` 的四个 Pi 包均指向 `../pi` 0.84.1；项目入口 `bun run pi` 使用这份声明依赖。
+- 0.84.1 的 coding-agent fullscreen transcript 管理滚动与 Kitty viewport cropping。早先围绕系统旧版 binary 的探针已失效，不再是当前运维问题。
+
+### API 边界
+
+1. `ctx.ui.custom()` 只临时替换 editor container。它不是 transcript 插槽；要让它像聊天窗口一样滚动，仍需项目自己维护高度、scrollTop 和输入，正是要删除的重复代码。
+2. `pi.registerMessageRenderer` 对应 custom message，消息会参加 LLM context，不适合 observer UI。
+3. `pi.registerEntryRenderer` + `pi.appendEntry` 对应 custom entry，官方文档明确说明 **不进入 LLM context**。renderer 返回普通 Pi `Component`，宿主把它放进自己的 transcript。
+4. 每条 Telegram 消息各 append 一个 entry 会让 Pi session 随群历史线性膨胀。正确粒度是：一次 attach 只 append 一个锚点 entry；entry 的动态 `Container` 在内存中接收 snapshot/live/page，真实持久历史仍在 SQLite。
+5. public extension API 不暴露宿主 transcript 的 scroll-top 事件。历史分页采用显式 `/tg more`；这比读取私有 layout/scroll 状态或轮询终端尺寸稳定。
+
+### 组件与生命周期
+
+- message/event/date/media：只组合 `Container`、`Box`、`Text`、`Markdown`、`Image`、`Spacer`，颜色来自 entry renderer 的 `theme`。
+- scrolling、resize、mouse/keyboard、selection、width guarding、Kitty placement/cropping：全部由 Pi fullscreen transcript 拥有。
+- session restore 时，旧 attach entry 只渲染 detached 摘要；只有当前 `/tg attach` 产生的 instance id 能拿到内存 activation 并建立 IPC socket，避免 reload 重复连接。
+- `/tg attach` 保证单 live feed，`/tg more` 分页，`/tg detach` dispose；panel 使用 `setWidget` component factory。
+
+### Cache / token 结论
+
+custom entry 不进入 LLM context；IPC 与 provider serialization 不变。Cache impact = **NONE**，由 `test/cache.test.ts` golden 复核。
+
+---
+
+## REQ-UI-0005 调查：复用 Pi editor，而不是再造输入框（2026-08-08）
+
+**结论：使用 extension `input` event 拦截 compose 模式的 interactive submit；不替换 editor component。**
+
+- Pi 当前 extension 文档规定处理顺序：已注册 extension command → `input` event → skill/template expansion → agent。handler 返回 `{ action: "handled" }` 可跳过 agent。
+- 因而 Telegram compose 可以完整保留 Pi 原生 editor/history/autocomplete/keybindings；只有显式模式下的普通文本被送到 daemon。
+- 当前 IPC 是 observer-only，extension 也没有 bot token。实现需要 additive request/reply，由 daemon 复用 Telegram send → canonical DB insert → live broadcast 链路。
+- 风险不是 UI 技术，而是发送身份与误发：全局 attach 没有唯一 bot，必须显式选择并持续显示 `SEND AS <bot>`；断线后的未知结果不得自动重试。
+- 详细验收边界见 `requirements/REQ-UI-0005.md`。
+
+## REQ-UI-0006 调查：vision 结果已有，但 live UI 缺 update（2026-08-08）
+
+**结论：复用 `media.vision`，新增完成通知并更新现有 TUI-only card；不触发额外识别。**
+
+- `IpcServer.msgToItem()` 在 snapshot/history 时会读取 `media.vision` 到 `mediaDesc`，所以重连后能看到描述。
+- `ensureVision()` 完成只持久化 SQLite；live feed 没有 `vision_update`，初次广播的 message card 不会自动补描述。
+- 最小链路是 additive `fileUniqueId` + `vision_update`，timeline 合并后 invalidate；同一 media 的多个 message card 一起更新。
+- UI 更新只改变 custom entry 内存组件树，不 append Pi entry、不改 `serializeMessages`，Cache impact = **NONE**。默认也不为 UI 新增视觉 provider call。
+- 详细验收边界见 `requirements/REQ-UI-0006.md`。
+
+## REQ-STICKER-0002 调查：跨 bot 候选泄漏导致 no file_id（2026-08-08）
+
+**结论：生产 bug 已定位到 `stickerCandidatesBlock()` 缺少 per-bot sendability filter。**
+
+- session 历史：A 对 `s243/s241/s244/s242`、B 对 `s144` 的 send tool 均返回 `not sendable by this bot (no file_id)`。
+- SQLite：`s241–s244` 属于 B 的 Mikufufu 且只有 B file_id；`s144` 属于 A 的 myadestes set 且只有 A file_id。
+- 动态候选目前只排除当前 bot 自己配置的 set，却查询全局 `media`；于是“另一个 bot 的固定目录”会变成“我的 set 外动态候选”。
+- `executeSend` preflight 已正确阻止 network send，故没有半发送；修复点是让固定目录与动态候选都只暴露当前 bot 可发送的 mapping。
+- 过滤稳定 catalog prefix 会改变 provider bytes；实现必须 bump `CACHE_SCHEMA_VERSION` 并开新 epoch。详细要求见 `requirements/REQ-STICKER-0002.md`。
+
+## REQ-PLAT-0001 调查：N-bot 核心已通用，外围和 provider 仍有固定假设（2026-08-08）
+
+**结论：不要重写 daemon；收口剩余明确缺口。**
+
+- 已通用：配置数组、daemon composition、router、TEXT bot_id、IPC stats/filter 与 Pi UI 都按任意 bot id/数量工作；单 bot和三 bot配置已有 unit test。
+- 未收口：runtime model lookup 固定 `deepseek` 与单全局 key；e2e scripts 隐式 `bots[0]`；package/project/runbook 仍把小雪/小雨双 bot 当产品本体；第三 bot 完整启动链未验证。
+- 当前“一份 deployment = 一个群 + N bots”是合理的简洁边界，应明确文档化；多群不应被误宣称已支持。
+- 现有双 bot deployment 必须保持 cache/provider bytes 不变；通用性来自 config dispatch，不能靠给 prompt 塞平台 metadata。
+- 详细审计清单见 `requirements/REQ-PLAT-0001.md`。
+
+## REQ-ROUTE-0001 调查：当前 busy trigger 会排下一轮，不会跳过采样（2026-08-08）
+
+**结论：在 daemon probability scheduler 增加 availability/cooldown gate；不改 ingestion 或阻塞 poller。**
+
+- canonical duplicate 不会重复 route；Poller 只对 inserted/edited 调 callback。
+- 每条 callback 当前都调用 `routeMessage`，router 不知道 runtime 状态。命中 busy bot 后，`BotRuntime.trigger()` 设置 `pendingTrigger`，当前 flush 结束立刻再 flush，正是 burst 中连续 run 的来源。
+- 不同 BotRuntime 已可并发，所以 A busy 时本来命中 B 概率桶的新消息可正常让 B 工作；只需让 busy/cooldown target 的概率命中 skip，且不要重新分配给另一个 bot。
+- 2 秒停顿用 `cooldownUntil` + 可注入 clock，不用真实 sleep；skip 的消息只存库，不在 cooldown 到期时补抽，下一次合法 trigger 再由 exposure batch 带入。
+- explicit mention/reply/name 不是概率采样，调查建议保留 pending coalesce，避免直接呼叫丢失。详细边界见 `requirements/REQ-ROUTE-0001.md`。
+
+## REQ-UI-0007 调查：Pi default footer 已有原生 extension status 行（2026-08-08）
+
+**结论：stats 使用 `ctx.ui.setStatus`；不要把 widget 移位置，也不要替换 footer。**
+
+- 当前 `TelegramStatsPanel` 是自定义 Container/Text，并以默认 `setWidget` placement 出现在 editor 上方。
+- Pi `FooterComponent` 会在默认 cwd/usage/model 行下方渲染 `setStatus` 的 extension statuses，统一完成 control sanitization、排序、theme 与宽度截断。
+- `setWidget(...,{placement:"belowEditor"})` 仍是自定义样式；`setFooter()` 会复制并替换 Pi 原生 footer，两者都不符合用户要求。
+- footer status 是单行：常驻只显示 active/filter 的紧凑关键指标，完整多 bot 数值继续由 `/tg status` 提供。详见 `requirements/REQ-UI-0007.md`。
+
+## REQ-UI-0008 调查：一个 `/tg` 可用原生 API 做任意层参数补全（2026-08-08）
+
+**结论：为 `registerCommand("tg")` 实现 `getArgumentCompletions`，用共享命令树返回完整 argument value。**
+
+- Pi 在 `/tg ` 后把完整 argument text 传入 completion callback；选择 item 后替换完整 argument prefix。
+- 因此一级建议 value=`attach`，二级建议 value=`attach A`，未来三级同理。callback 可返回动态 bot id/name 与 `off`。
+- 不需要自定义 autocomplete provider/editor/menu；命令树应同时生成 handler dispatch、completion 与 help，防止清单漂移。
+- 详细 prefix/leaf/config-error 验收见 `requirements/REQ-UI-0008.md`。

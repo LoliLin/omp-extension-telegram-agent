@@ -2,7 +2,7 @@
 
 ## 是什么
 
-一个真正"住在 Telegram 群里"的 AI 群友系统：两个 Telegram Bot（小雪/ hatsuyuki、小雨 / kosame）各自有独立人设，看得到群聊和彼此的发言，自主决定是否插话，能发文字和 sticker，能理解图片，必要时搜索/计算。
+一个真正“住在 Telegram 群里”的可配置 AI 群友系统：daemon 可按配置运行 1..N 个 Telegram bot，每个 bot 有独立 persona/session/routing；当前示例部署是小雪与小雨两只 bot。它们看得到群聊和彼此发言，自主决定是否插话，能发文字和 sticker、理解图片，必要时搜索/计算。
 
 ## 三个世界（严格分离）
 
@@ -24,10 +24,10 @@
 
 ## 用户体验
 
-- 启动 daemon → 两个 bot 长期在线 → 消息落库 → Agent 按规则运行
-- 用户随时打开 TUI 查看（完整群聊 + bot 内部思考/tool call/usage），随时退出，daemon 不受影响
-- 重开 TUI：历史完整恢复，实时事件继续
-- 命令：`start` / `status` / `attach`（打开 TUI）/ `stop`
+- 启动 daemon → 配置的 bots 长期在线 → 消息落库 → Agent 按规则运行
+- 用户随时在项目目录运行 `bun run pi`，用 `/tg attach [bot-id]` 在 Pi 原生 transcript 查看完整群聊、LOCAL 事件与 usage；关闭 Pi 不影响 daemon
+- `/tg more` 加载更早历史，`/tg detach` 断开实时订阅，`/tg panel` 显示原生 stats widget
+- daemon 运维：`start` / `status` / `stop`；详见 `docs/runbooks/daemon.md`
 
 ## 主要约束
 
@@ -45,7 +45,7 @@
 - **canonical message**：Telegram 群消息的本地统一表示，identity = (chat_id, message_id)
 - **LOCAL**：TUI 中标记只有本地可见的 bot 内部行为（区别于 Telegram 真实发言）
 
-## 人设
+## 当前示例部署
 
 - 小雪（Bot A，token env `teleram_hastuyuki_bot`）：温柔软糯猫娘，暖群夸夸担当，人设全文在 `personas/xiaoxue.md`
 - 小雨（Bot B，token env `telegram_kosamerobot`）：清冷毒舌猫娘，技术担当，人设全文在 `personas/xiaoyu.md`

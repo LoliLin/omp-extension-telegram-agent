@@ -13,7 +13,7 @@
 
 ### messages — canonical 群消息
 
-- `(chat_id, message_id)` 唯一 —— 双 bot 收到同一条群消息只存一条
+- `(chat_id, message_id)` 唯一 —— 多个 bot 收到同一条群消息只存一条
 - 元数据：send_time、thread_id、sender_id、display_name、username、sender_tag、sender_chat、is_bot、text、caption、entities(JSON)、reply_to_message_id、quote(JSON)、forward_origin(JSON)、edit_time、media 引用
 - edit：messages 表永远是最新版，旧版进 message_revisions
 
@@ -25,7 +25,7 @@
 ### media — 媒体身份与本地缓存（Phase 7）
 
 - `file_unique_id` 为主身份；存 file_id(per bot)、mime、尺寸、本地路径
-- vision 结果按 file_unique_id 缓存，双 bot 共享
+- vision 结果按 file_unique_id 缓存，所有配置 bot 共享
 
 ### agent_events — bot 内部行为
 
@@ -48,7 +48,7 @@
 ## ID / dedupe 规则
 
 - update 唯一性：`(bot_id, update_id)`；重复 update 直接跳过
-- 消息唯一性：`(chat_id, message_id)`；双 bot 各收到一次 → 第二条视为 duplicate
+- 消息唯一性：`(chat_id, message_id)`；多个 bot 各收到一次 → 后续副本视为 duplicate
 - restart：offset 从 bot_state 恢复，Telegram 重发的旧 update 被 raw_updates 去重
 - bot 自发消息：send 返回即落库；随后 poller 也会收到同一条 → 按 (chat_id, message_id) 去重，不重复
 

@@ -201,3 +201,44 @@
 - 测试：145/145 + check ✅（tg-engine.test.ts 真 socket 6 条、tg-extension.test.ts 5 条）
 - Cache impact: NONE（纯前端形态）
 - 下一步：真实群长运行观察（当前 daemon 健康，无新 error）
+
+## 2026-08-08 (19) — 推翻自绘 hack，以 Pi native transcript 重做 Telegram 前端
+
+- 用户纠正：上一版虽叫 extension，实际仍有 `TgAttachView`、手写行缓冲/scrollTop/终端尺寸/键盘/render/ANSI，extension + engine 617 行，高于旧独立 TUI 389 行；REQ-UI-0001/2/3/4 先全部取消勾选并重写验收标准。
+- API 调查：通过 Context7 当前 Pi 文档与项目 `../pi` 0.84.1 source 确认，`ctx.ui.custom` 是 editor replacement；TUI-only transcript 应使用 `registerEntryRenderer` + `appendEntry`。public API 无 scroll-top event，所以采用显式 `/tg more`。
+- 实现：
+  - `.pi/extensions/tg-extension.ts` 改为一个动态 native custom entry，消息/LOCAL/date/media 只组合 Pi `Container`/`Box`/`Text`/`Image`/`Spacer` 与 theme；Pi host 拥有 fullscreen scroll/resize/editor/image placement。
+  - `src/tui/engine.ts` 删除，新增 `src/plugin/timeline.ts`，只做 IPC snapshot/live/more、复合 cursor、dedupe、stats merge 与 ≤1 MiB media read。
+  - attach 单例与 activation map 防 session restore 重连；`/tg more` prepend、`/tg detach` 保留内容；panel 改 component factory 并严格区分 feed/standalone socket ownership。
+  - `package.json` 增加 Pi package manifest、`pi-package` keyword 与项目 launcher；`.pi/settings.json` 启用 fullscreen。
+- 验证：目标测试 35 pass；全量 `bun test` 149 pass / 0 fail / 2821 assertions；`bun run check`、cache golden、`git diff --check` 通过；禁止手写 UI symbol 的 `rg` 0 命中；生产代码 611 行 < 617 基线。真实 Pi TTY：attach A 显示 #19061–#19063，more prepend 到 #18961，detach 后内容保留，native media fallback/widget/footer 正常。
+- 文档：architecture/testing/runbook/research/requirements/handoff 同步；完成 plan 移到 `docs/plans/completed/`；四篇 UI REQ 重新勾选为完成（working tree 未提交）。
+- Cache impact: **NONE**——custom entry 是 TUI-only；IPC、DB、system prompt、tool schema、message/summary grammar 均未变，golden 6/6。
+
+## 2026-08-08 (20) — REQ-LIST 新增项调查与需求文档（未实现）
+
+- 将用户新增四项改写为可验收文档：`REQ-UI-0005`（Pi editor 发送 Telegram）、`REQ-UI-0006`（live vision 描述 UI update）、`REQ-STICKER-0002`（per-bot sticker sendability）、`REQ-PLAT-0001`（通用平台收口）。本条只调查/写文档，没有实现这些行为。
+- UI-0005：Pi `input` event 可在 extension command 之后拦截 interactive submit并返回 handled，保留原生 editor；当前 IPC 无 write contract，未来由 daemon 复用 send→DB→broadcast，且必须显式 `SEND AS bot` 防误发。
+- UI-0006：snapshot/history 已读 `media.vision`，但 `ensureVision` 写库后没有 IPC update；未来用 additive media identity + `vision_update` 更新现有 TUI-only card，默认不增加视觉模型调用。
+- STICKER-0002：session 历史实证 A 的 `s243/s241/s244/s242` 与 B 的 `s144` 均 no file_id；DB 映射证明它们属于另一个 bot 的固定 set。根因是 `stickerCandidatesBlock()` 查询全局 media、只排除自己的 set，却未按当前 `media_file_ids.bot_id` filter。preflight 正常阻止 network send，未发生半发送。
+- PLAT-0001：daemon loop/Map/router/DB/IPC/Pi UI 已支持 N bots，不重写；剩余 runtime provider 固定 DeepSeek、e2e scripts `bots[0]`、package/project 双 persona 文案、第三 bot 全链未验证。单 deployment 单群作为明确边界，不在本需求膨胀为多租户。
+- Cache impact: **NONE（本条纯文档）**。未来 UI-0005/0006 与既有 deployment 泛型化要求 NONE；STICKER-0002 从稳定 prefix 移除不可发送目录项是 INTENTIONAL，必须 bump `CACHE_SCHEMA_VERSION` + new epoch + golden。
+- 下一步：先修 P0 STICKER-0002，再实现 UI-0005/UI-0006，最后收口 PLAT-0001；每项开始前单独建 active plan。
+
+## 2026-08-08 (21) — 继续吸收 REQ-LIST 并调查 routing/footer/command tree（未实现）
+
+- 在最终复核时发现用户又追加三项，全部保留为未勾选并写成 REQ：`REQ-ROUTE-0001`、`REQ-UI-0007`、`REQ-UI-0008`；没有实现代码。
+- ROUTE-0001：Poller duplicate 不会双 route；真正现状是每个 inserted/edited 都采样，概率命中 busy runtime 时 `trigger()` 设 pending，当前 run 结束立刻再 flush。设计为 probability-only availability gate：A/B 可并发、busy/cooldown target 不重分配、全忙时只存库、settle 后 2 秒用 deadline（非阻塞 sleep）、到期不补抽；explicit trigger 保留 pending coalesce。
+- UI-0007：当前 stats 是自定义 `TelegramStatsPanel` + editor 上方 widget。Pi default `FooterComponent` 已原生消费 `ctx.ui.setStatus`，并负责 sanitizer/theme/sort/width truncation；未来应删 custom panel，用 status 行放紧凑指标，完整明细保留 `/tg status`。移动 widget 或 `setFooter` 都仍是造样式。
+- UI-0008：`registerCommand.getArgumentCompletions` 收完整 argument prefix，选择后替换完整 prefix；共享 command tree 可返回 `attach` → `attach A` → future level，动态读取 bot id/name，无需自定义 editor/autocomplete provider。
+- Cache impact: **NONE（纯文档）**。未来三项也要求 provider bytes 不变；ROUTE-0001 预期减少 calls/miss tokens，UI 两项 token 增量 0。
+- 下一步顺序更新：STICKER-0002 → ROUTE-0001 → UI-0005/0006/0007/0008 → PLAT-0001。
+
+## 2026-08-08 (22) — 原子提交规范与新需求实施基线
+
+- 用户授权把剩余需求逐项实现并原子签名提交；根 `AGENTS.md` 现在强制 commit-sized PLAN task、显式 staging/staged diff review、目标测试后立即签名提交、英文祈使 subject 与 Requirement/Task trailers。详细规则在 `docs/engineering/traceability.md`。
+- 建立 `PLAN-20260808-complete-new-reqs`，将 7 个 REQ 拆为 daemon contract、plugin UI、routing、cache、provider/config、verification 等可独立回滚的 tasks。
+- 签名提交：`c32d937` 固化 workflow；`19819c9` 提交 Pi native transcript（REQ-UI-0001/2/3/4），trailer 与 GPG signature 已机械验证。
+- 本次文档基线提交 7 篇 Proposed REQ、调查证据、依赖顺序和当前 handoff；不实现这些新行为。
+- Cache impact: **NONE**（workflow/docs only）。native transcript commit 的 cache impact 也是 NONE，golden 已通过。
+- 下一步：T3 优先修 REQ-STICKER-0002，并执行唯一一次预期的 cache schema bump。

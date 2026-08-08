@@ -18,18 +18,39 @@
   （附注：AC2–AC6 已验证；AC1「第三 bot 真实上线」待真实群验证）
 - [x] [REQ-STICKER-0001](REQ-STICKER-0001.md) 固定 sticker set 支持（P2）（commit 84da315）
   （附注：AC1/AC4/AC5 已验证；AC2/AC2b「真实群发送 set 内/外 sticker」、AC3「遥测对比」待长运行验证）
-- [x] [REQ-UI-0001](REQ-UI-0001.md) 基于 pi-tui 插件化重做 Telegram 历史界面（P2）
-  （插件形态实现见 REQ-UI-0004；真实 pi TTY 验证 2026-08-08：/tg attach 显示真实群消息 #18902-18904；kitty 内联图像因 bundled pi-tui 缺 ScrollView 降级为占位+vision 描述，见 REQ-UI-0004 头注）
-- [x] [REQ-UI-0004](REQ-UI-0004.md) Telegram 前端 pi 插件化——复用 pi 成果，废弃全部自绘前端（P1，用户 2026-08-07 明确要求）
-- [x] [REQ-UI-0002](REQ-UI-0002.md) attach 到任意已配置的 bot（P2）
-  （真实 pi 验证：/tg attach A 单 bot 过滤、/tg attach nobody 报错列出 A, B；服务端过滤+测试见 commit 014ec4c）
-- [x] [REQ-UI-0003](REQ-UI-0003.md) TUI 底部可观测性面板（P2）
-  （真实 pi 验证：/tg panel A 常驻 widget 显示 A · ep6 · last 16.0K · cum in 727.7K；/tg status A 同样）
+- [x] [REQ-UI-0004](REQ-UI-0004.md) Telegram 前端成为真正的 Pi 原生 transcript 插件（P0）（commit 19819c9）
+- [x] [REQ-UI-0001](REQ-UI-0001.md) 用 Pi 原生组件呈现 Telegram 消息与媒体（P1，依赖 UI-0004）（commit 19819c9）
+- [x] [REQ-UI-0002](REQ-UI-0002.md) 原生 transcript 中 attach / more / detach 与任意 bot 过滤（P1，依赖 UI-0004）（commit 19819c9）
+- [x] [REQ-UI-0003](REQ-UI-0003.md) 用 Pi 原生 widget 呈现实时可观测性（P2，依赖 UI-0004）（commit 19819c9）
+- [ ] [REQ-UI-0005](REQ-UI-0005.md) 用 Pi 底部 editor 直接发送 Telegram 消息（P1，已调查/未实现）
+- [ ] [REQ-UI-0006](REQ-UI-0006.md) 媒体识别完成后在原生 UI 下方显示视觉理解（P1，UI-only，已调查/未实现）
+- [ ] [REQ-ROUTE-0001](REQ-ROUTE-0001.md) 忙碌 bot 跳过概率采样并在回复后冷却 2 秒（P1，已调查/未实现）
+- [ ] [REQ-UI-0007](REQ-UI-0007.md) 用 Pi 原生 footer status 呈现 Telegram 统计（P2，已调查/未实现）
+- [ ] [REQ-UI-0008](REQ-UI-0008.md) 为 `/tg` 提供原生分级命令补全（P2，已调查/未实现）
+
+
+## Bug
+
+- [ ] [REQ-STICKER-0002](REQ-STICKER-0002.md) 固定目录与动态候选必须按 bot 可发送性隔离（P0，已复现定位/未修复）
+
+
+## 代码库与文档
+
+- [ ] [REQ-PLAT-0001](REQ-PLAT-0001.md) 收口为通用、快速、简洁的可配置 bot 平台（P1，已完成代码库调查/未实现）
 
 ## 顺序与依赖
 
-实施顺序：SEC → AGENT → TG / IPC / OPS → TEST → CONF → STICKER → UI。
+已完成主线：SEC → AGENT → TG / IPC / OPS → TEST → CONF → STICKER-0001 → UI-0004 → UI-0001 / UI-0002 / UI-0003。
+
+建议后续顺序：STICKER-0002（生产 bug）→ ROUTE-0001 → UI-0005 / UI-0006 / UI-0007 / UI-0008 → PLAT-0001。
 
 - REQ-UI-0002 依赖 REQ-CONF-0001
-- REQ-UI-0001 的 R2–R5 依赖其 R1（pi-tui 插件机制研究）
+- REQ-UI-0001 / 0002 / 0003 依赖 REQ-UI-0004 的 Pi package、版本与原生 transcript 接入
+- REQ-UI-0005 依赖 REQ-UI-0004 的 input/lifecycle 边界与 REQ-CONF-0001 的任意 bot identity
+- REQ-UI-0006 依赖 REQ-UI-0001 的 native media card；只消费现有 lazy vision 结果
+- REQ-ROUTE-0001 依赖 REQ-AGENT-0001 的串行 flush 状态，但只 gate probability path；explicit trigger 仍可 pending coalesce
+- REQ-UI-0007 是 REQ-UI-0003 的交互后继：stats 数据层保留，presentation 从自定义 widget 改用 Pi default footer `setStatus`
+- REQ-UI-0008 使用 Pi `registerCommand.getArgumentCompletions`；命令树需吸收 UI-0005/0007 新增/调整的子命令
+- REQ-STICKER-0002 是 REQ-STICKER-0001 的 per-bot sendability 回归修复，并会触发 cache schema bump
+- REQ-PLAT-0001 复用 REQ-CONF-0001 已完成的 N-bot 核心，不重复重写 daemon composition
 - REQ-STICKER-0001 的 R3 与 REQ-AGENT-0001 的 R7（send 先校验后发）协同
