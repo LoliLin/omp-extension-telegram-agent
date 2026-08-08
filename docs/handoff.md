@@ -10,7 +10,7 @@
 
 - `.pi/extensions/tg-extension.ts` 用 `registerEntryRenderer` + `appendEntry` 挂一个 TUI-only feed；Pi host 负责 scroll/resize/editor/theme/images。
 - `src/plugin/timeline.ts` 只保留 IPC、history cursor、dedupe、stats 与有界媒体读取；旧 `src/tui/engine.ts` 已删除。
-- `/tg config`、`/tg attach [bot]`、显式 `/tg compose <bot|off>`、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]` 与 daemon commands 可用。
+- `/tg config`、attach即直发的`/tg attach [bot]`、`/tg compose [bot|off]` override、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]`与daemon commands可用。
 - package manifest、项目 Pi launcher、fullscreen settings、native Image 和 Pi `FooterComponent` telemetry 已落地。
 - 全量验证：372 tests pass / 0 fail / 4836 assertions；`bun run check`、cache v5 golden、双mdBook 18 Markdown/98 links与21 HTML/608 links通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Telegram群control及Kitty/Ghostty媒体、Rich/reply/组合发送trace留T14。
 
@@ -18,7 +18,7 @@
 
 1. **已实现 `REQ-STICKER-0002`**：fixed/dynamic catalog 只暴露当前 bot 有 file_id mapping 的 short id；A `s241–s244` / B `s144` 回归已锁，cache schema 2→3。真实群各 bot 发送 smoke 留到总验收。
 2. **已实现 `REQ-ROUTE-0001`**：probability 命中 busy/cooldown target 时 fast-skip 且不改投；默认 2 秒 monotonic deadline；`routing_p=0` 的“我叫小雨”仍以 name explicit 在 busy/cooldown coalesce/bypass。46 个 targeted tests 通过。
-3. **已实现 `REQ-UI-0005`**：daemon request-id send→DB→broadcast + Pi interactive `handled` compose 全链完成；footer 唯一身份、附件/失败恢复、ACK unknown/no-retry 与 lifecycle cleanup 共 39 个 plugin/IPC targeted tests 通过。真实发送 smoke 留 T14。
+3. **已实现 `REQ-UI-0005`**：daemon request-id send→DB→broadcast不变；attach自动scope compose，filtered/单bot直发，全局多bot逐条Pi原生select，sticky/off/取消恢复/迟到失效/ACK unknown-no-retry已锁。100个targeted tests通过，真实发送留T14。
 4. **已实现 `REQ-UI-0006`**：T7/T8 完成 identity update、256-entry/10-minute 乱序缓存、多引用/older page/重复幂等合并，以及 `视觉理解` native card 原位刷新与 sanitize；真实 media smoke 留 T14。
 5. **已实现 `REQ-UI-0003/0007`**：删除 stats widget；`setFooter` 直接返回 Pi `FooterComponent`，IPC stats 只做内存 read view，完整明细保留 `/tg status`。targeted 53 tests/typecheck/cache golden 通过，真实 TTY footer 留 T14。
 6. **已实现 `REQ-UI-0008`**：递归 command tree 同时驱动 help/parser/dispatch/completion；A/B/C、config error 与 future third-level targeted tests 通过，真实 Pi 菜单留 T14。
@@ -55,11 +55,11 @@ UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 
 ```bash
 bun run src/main.ts start   # 或 restart
 bun run pi
-# Pi 内：/tg attach A · /tg compose A · 输入纯文本 · /tg compose off
+# Pi 内：/tg attach A · 直接输入纯文本；全局attach会按需选择bot · /tg compose off
 bun run src/main.ts stop
 ```
 
-attach 默认只读；仅显式 compose 时 interactive editor 发 Telegram，off 后恢复 Pi。未知结果先查群，不自动重试。
+attach默认进入Telegram输入scope；多bot复用Pi原生选择，`compose off`后恢复Pi。未知结果先查群，不自动重试。
 
 ## Cache / 数据边界
 

@@ -169,6 +169,7 @@ interface FakeHost {
 
 interface FakeDialogAnswers {
 	selects?: Array<string | undefined>;
+	select?: (title: string, options: readonly string[]) => Promise<string | undefined>;
 	confirms?: boolean[];
 	inputs?: Array<string | undefined>;
 	editors?: Array<string | undefined>;
@@ -224,7 +225,7 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}, dialogs: Fa
 			notify: (text: string, level: string) => notifies.push({ text, level }),
 			select: async (title: string, options: string[]) => {
 				dialogCalls.push({ kind: "select", title, options });
-				return dialogs.selects?.shift();
+				return dialogs.select ? await dialogs.select(title, options) : dialogs.selects?.shift();
 			},
 			confirm: async (title: string, message: string) => {
 				dialogCalls.push({ kind: "confirm", title, message });
@@ -389,7 +390,7 @@ describe("native Pi Telegram extension", () => {
 			label: "A (小雪)",
 			description: "Telegram bot 小雪",
 		});
-		expect(formatTgHelp()).toBe("usage: /tg config | attach [bot] | compose <bot|off> | more | detach | panel [bot|off] | status [bot] | start | restart | stop | status-daemon");
+		expect(formatTgHelp()).toBe("usage: /tg config | attach [bot] | compose [bot|off] | more | detach | panel [bot|off] | status [bot] | start | restart | stop | status-daemon");
 		for (const root of completeTgArguments("", bots) ?? []) {
 			expect(parseTgArguments(root.value, bots).ok).toBe(true);
 			for (const child of completeTgArguments(`${root.value} `, bots) ?? []) {
@@ -849,10 +850,9 @@ describe("native Pi Telegram extension", () => {
 		expect(host.clients[1]!.disposed).toBe(true);
 	});
 
-	test("explicit compose sends interactive editor text once and keeps it out of Pi", async () => {
+	test("a filtered attach sends editor text directly once and keeps it out of Pi", async () => {
 		const host = makeHost();
 		await host.command("attach A");
-		await host.command("compose A");
 
 		const result = await host.input({ text: "hello" });
 
@@ -864,20 +864,112 @@ describe("native Pi Telegram extension", () => {
 		expect(host.notifies.at(-1)?.text).toContain("#42");
 	});
 
-	test("read-only, compose-off and non-interactive inputs continue to Pi unchanged", async () => {
-		const host = makeHost();
+	test("a global multi-bot feed selects with Pi on every scoped send", async () => {
+		const host = makeHost({}, { selects: ["B (小雨)", "A (小雪)"] });
 		await host.command("attach");
-		expect(await host.input({ text: "normal Pi prompt" })).toEqual({ action: "continue" });
+		expect(host.statusUpdates.at(-1)).toEqual({ key: "telegram-compose", text: "TELEGRAM · CHOOSE BOT ON SEND" });
+
+		expect(await host.input({ text: "from B" })).toEqual({ action: "handled" });
+		expect(await host.input({ text: "from A" })).toEqual({ action: "handled" });
+
+		expect(host.dialogCalls.filter((call) => call.kind === "select")).toEqual([
+			{ kind: "select", title: "Send Telegram message as", options: ["A (小雪)", "B (小雨)"] },
+			{ kind: "select", title: "Send Telegram message as", options: ["A (小雪)", "B (小雨)"] },
+		]);
+		expect(host.clients[0]!.sendCalls).toEqual([
+			{ botId: "B", text: "from B", requestId: "send-1" },
+			{ botId: "A", text: "from A", requestId: "send-2" },
+		]);
+	});
+
+	test("canceling Pi bot selection restores exact text and sends nowhere", async () => {
+		const host = makeHost({}, { selects: [undefined] });
+		await host.command("attach");
+
+		expect(await host.input({ text: "keep exactly" })).toEqual({ action: "handled" });
+
+		expect(host.clients[0]!.sendCalls).toHaveLength(0);
+		expect(host.editorTexts.at(-1)).toBe("keep exactly");
+		expect(host.notifies.at(-1)?.text).toContain("canceled");
+		expect(host.statusUpdates.at(-1)).toEqual({ key: "telegram-compose", text: "TELEGRAM · CHOOSE BOT ON SEND" });
+	});
+
+	test("a Pi selector failure is a definite no-send and restores the editor", async () => {
+		const host = makeHost({}, { select: async () => { throw new Error("dialog unavailable"); } });
+		await host.command("attach");
+
+		expect(await host.input({ text: "safe draft" })).toEqual({ action: "handled" });
+
+		expect(host.clients[0]!.sendCalls).toHaveLength(0);
+		expect(host.editorTexts.at(-1)).toBe("safe draft");
+		expect(host.notifies.at(-1)?.text).toContain("selection failed");
+		expect(host.notifies.at(-1)?.text).not.toContain("unknown");
+	});
+
+	test("a global single-bot feed bypasses selection", async () => {
+		const root = makeOnboardingRoot();
+		try {
+			writeFirstRunDeployment(root, {
+				groupPeerId: "-1001234567890",
+				bot: {
+					id: "friend",
+					name: "Mochi",
+					tokenEnv: "telegram_bot_token",
+					token: ONBOARD_TELEGRAM_SECRET,
+					personaText: readFileSync(join(root, "personas/template.en.md"), "utf8"),
+				},
+			}, { nonce: "single-bot-compose" });
+			const host = makeHost({ rootDir: root });
+			await host.command("attach");
+
+			expect(await host.input({ text: "one identity" })).toEqual({ action: "handled" });
+			expect(host.clients[0]!.sendCalls).toEqual([{ botId: "friend", text: "one identity", requestId: "send-1" }]);
+			expect(host.dialogCalls.filter((call) => call.kind === "select")).toHaveLength(0);
+			expect(host.statusUpdates.some((update) => update.text?.includes("SEND AS friend (Mochi)"))).toBe(true);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("sticky compose, scope compose, compose-off and non-interactive inputs stay distinct", async () => {
+		const host = makeHost({}, { selects: ["B (小雨)"] });
+		await host.command("attach");
 		await host.command("compose nobody");
 		expect(host.notifies.at(-1)?.text).toContain("configured bots");
-		expect(await host.input({ text: "still a Pi prompt" })).toEqual({ action: "continue" });
 
 		await host.command("compose A");
 		expect(await host.input({ text: "rpc prompt", source: "rpc" })).toEqual({ action: "continue" });
 		expect(await host.input({ text: "extension prompt", source: "extension" })).toEqual({ action: "continue" });
+		expect(await host.input({ text: "sticky A" })).toEqual({ action: "handled" });
+		expect(host.dialogCalls.filter((call) => call.kind === "select")).toHaveLength(0);
 		await host.command("compose off");
 		expect(await host.input({ text: "back to Pi" })).toEqual({ action: "continue" });
+		await host.command("compose");
+		expect(await host.input({ text: "scope B" })).toEqual({ action: "handled" });
+		expect(host.clients[0]!.sendCalls.map(({ botId, text }) => ({ botId, text }))).toEqual([
+			{ botId: "A", text: "sticky A" },
+			{ botId: "B", text: "scope B" },
+		]);
+	});
+
+	test("a late selector result after detach is invalidated and duplicate input is suppressed", async () => {
+		let finishSelect: ((value: string | undefined) => void) | undefined;
+		const host = makeHost({}, {
+			select: async () => await new Promise<string | undefined>((resolve) => { finishSelect = resolve; }),
+		});
+		await host.command("attach");
+		const first = host.input({ text: "do not lose" });
+		await Promise.resolve();
+
+		expect(await host.input({ text: "duplicate" })).toEqual({ action: "handled" });
+		expect(host.dialogCalls.filter((call) => call.kind === "select")).toHaveLength(1);
+		await host.command("detach");
+		finishSelect?.("A (小雪)");
+		expect(await first).toEqual({ action: "handled" });
+
 		expect(host.clients[0]!.sendCalls).toHaveLength(0);
+		expect(host.editorTexts).toContain("do not lose");
+		expect(host.notifies.at(-1)?.text).toContain("feed changed");
 	});
 
 	test("compose blocks attachments and restores text after an explicit daemon failure", async () => {

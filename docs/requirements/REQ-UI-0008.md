@@ -30,7 +30,7 @@ extension 只注册一个 `/tg`，handler 手工解析 `args.split()`；descript
 
 - **R1 — 声明式命令树：** 以一个共享表定义 subcommand、description、参数节点与 handler dispatch；补全和 usage/help 从同一表派生，避免三份命令清单漂移。
 - **R2 — 一级补全：** 空/部分 prefix 返回 attach、more、detach、panel、status、start、stop、status-daemon；实现 UI-0005/0007 后追加 compose 等新节点。
-- **R3 — 动态二级：** `attach|status|compose` 返回配置 bot ids（label 含 name）；`panel` 返回 bot ids + off；无参数命令在完整匹配后不建议伪参数。
+- **R3 — 动态二级：** `attach|status|compose`返回配置bot ids（label含name）；`compose|panel`返回bot ids + off。`compose`本身也是合法命令（恢复feed scope），其他无参数叶子不建议伪参数。
 - **R4 — 任意深度：** parser 根据完整 argument prefix 定位当前 tree node，item.value 必须是替换后完整参数串（如 `panel A`），以适配 Pi 的 replace-entire-argument semantics。
 - **R5 — 错误与性能：** config 不可读时 completion 返回安全的静态一级项或 null，不抛错、不显示 secret/path；回调不做网络/DB/LLM I/O。
 - **R6 — 原生兼容：** 只使用 `registerCommand.getArgumentCompletions`；不得替换 editor 或覆盖基础 autocomplete provider。
@@ -39,7 +39,7 @@ extension 只注册一个 `/tg`，handler 手工解析 `args.split()`；descript
 ## 验收标准
 
 - **AC1:** prefix `""`/`"att"`/`"attach "`/`"panel o"` 分别返回正确一级、attach bot 清单与 `panel off`；value 是完整可执行 args。
-- **AC2:** 三 bot fixture A/B/C 自动出现在 attach/status/compose，未知 id 不出现；id/name 不泄露 token env value。
+- **AC2:** 三bot fixture A/B/C自动出现在attach/status/compose，compose同时出现off且bare compose可dispatch；未知id不出现，id/name不泄露token env value。
 - **AC3:** 叶子命令 `more`/`detach`/`start` 不产生无意义次级项。
 - **AC4:** completion 每个建议喂给同一 handler parser都可执行或只因外部 daemon 状态失败，不因语法漂移失败。
 - **AC5:** config error、前后空格、连续空格、partial bot id、future third-level node 有纯函数测试。

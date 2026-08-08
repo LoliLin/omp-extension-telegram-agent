@@ -21,17 +21,19 @@ Telegram feed 是一个 TUI-only Pi custom entry。滚动、resize、选择、�
 
 在 `/tg ` 后使用 Tab 或原生选择菜单。bot 参数由当前已验证配置动态补全。
 
-## 显式发送
+## 直接发送
 
-`attach` 永远只读。要从 Pi editor 发 Telegram：
+`attach` 后 Pi editor 默认直接发 Telegram：单 bot filter 直接使用该 bot；全局 feed 若有多个 bot，每次提交都会打开 Pi 原生选择框；只有一个 bot 时不弹框。
 
 ```text
-/tg compose friend
-# 在 editor 输入纯文本并提交
-/tg compose off
+/tg attach friend       # 直接以 friend 发送
+/tg attach              # 多 bot 时每条消息选择身份
+/tg compose friend      # 可选：固定为 friend，连续发送不再选择
+/tg compose off         # 暂时把 editor 交还 Pi
+/tg compose             # 恢复当前 feed scope
 ```
 
-footer 会持续显示当前发送身份。compose 只拦截 interactive editor；RPC 或 extension 输入仍交给 Pi。附件不会被偷偷降级成只发 caption。
+footer 会显示 `SEND AS ...` 或 `CHOOSE BOT ON SEND`。取消选择会恢复逐字节相同的原文且不发送。compose 只拦截 interactive editor；RPC 或 extension 输入仍交给 Pi。附件不会被偷偷降级成只发 caption。
 
 明确失败会恢复 editor 原文。如果 ACK 丢失或连接在发送中断开，结果是 unknown：
 

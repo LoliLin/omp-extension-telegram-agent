@@ -21,17 +21,19 @@ The Telegram feed is one TUI-only Pi custom entry. Pi owns scrolling, resizing, 
 
 Use Tab or Pi's selection menu after `/tg `. Bot arguments come from the currently validated config.
 
-## Send explicitly
+## Send directly
 
-`attach` is always read-only. To send from the Pi editor:
+After attach, the Pi editor sends to Telegram by default. A filtered feed uses that bot directly. A global feed opens Pi's native selector for every submission when several bots exist, and bypasses it when only one exists.
 
 ```text
-/tg compose friend
-# Enter and submit plain text in the editor
-/tg compose off
+/tg attach friend       # Send directly as friend
+/tg attach              # Choose an identity for each message when needed
+/tg compose friend      # Optional: pin friend for consecutive messages
+/tg compose off         # Temporarily return the editor to Pi
+/tg compose             # Restore the current feed scope
 ```
 
-The footer continuously shows the active send identity. Compose intercepts only interactive editor input; RPC and extension sources continue to Pi. Attachments are blocked instead of silently sending only their caption.
+The footer shows either `SEND AS ...` or `CHOOSE BOT ON SEND`. Canceling the selector restores the exact editor text and sends nothing. Compose intercepts only interactive editor input; RPC and extension sources continue to Pi. Attachments are blocked instead of silently sending only their caption.
 
 An explicit failure restores the editor text. If the acknowledgement is lost or the connection drops during send, the outcome is unknown:
 

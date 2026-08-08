@@ -41,15 +41,15 @@ Enter `/tg ` in Pi to use native command completion:
 | Command | Result |
 | --- | --- |
 | `/tg config` | Set up, validate, edit, or explicitly back up and replace local configuration |
-| `/tg attach [bot]` | Observe the global or one-bot feed without sending |
-| `/tg compose <bot>` | Send interactive editor text explicitly as that bot |
+| `/tg attach [bot]` | Mount the global or one-bot feed and send from the editor |
+| `/tg compose [bot]` | Restore feed scope or pin one bot |
 | `/tg compose off` | Return the editor to the Pi agent |
 | `/tg more` / `/tg detach` | Load older history / disconnect the live feed |
 | `/tg panel [bot\|off]` | Select or restore Pi-native footer telemetry |
 | `/tg status [bot]` | Show lifetime and latest usage details |
 | `/tg start` / `restart` / `stop` / `status-daemon` | Manage the daemon from Pi |
 
-`attach` is always read-only. Only explicit compose mode sends to Telegram. If the outcome is unknown, the extension restores the text and closes compose without retrying. Check the group before sending again to avoid a duplicate.
+After `attach <bot>`, the editor sends directly as that bot. A global attach opens Pi's native selector on every submission when several bots exist, and sends directly when only one exists. `compose <bot>` pins an identity, `compose off` temporarily returns input to Pi, and bare `compose` restores feed scope. An unknown outcome restores the text and closes compose without retrying; inspect the group before sending again.
 
 ## Configuration files
 

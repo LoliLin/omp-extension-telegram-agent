@@ -44,8 +44,9 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 /tg config              # 首配、验证或安全编辑本机配置
 /tg attach              # 全局视角：群消息 + 全部 bot LOCAL 事件
 /tg attach friend       # 单 bot 视角：群消息 + 仅 friend 的 LOCAL/usage
-/tg compose friend      # 显式让原生 editor 以 friend 身份发送纯文本
-/tg compose off         # 关闭发送模式，editor 恢复提交给 Pi agent
+/tg compose friend      # 可选：固定原生 editor 以 friend 身份连续发送
+/tg compose off         # 暂时关闭发送模式，editor 提交给 Pi agent
+/tg compose             # 恢复当前 feed scope 的 Telegram 发送
 /tg more                # 显式加载一页更早历史
 /tg detach              # 断开实时订阅，已显示内容保留
 /tg panel friend        # 将 Pi 原生 footer 切到 friend 的 Telegram usage
@@ -56,13 +57,13 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 ```
 
 - Telegram feed 是 Pi transcript 中一个 TUI-only custom entry；滚动、resize、选择、editor 与图片布局由 Pi fullscreen host 负责。
-- attach 永远是只读操作；只有显式 `/tg compose <bot-id>` 后，interactive editor 提交才会发 Telegram。当前 Pi footer 会持续显示 `TELEGRAM · SEND AS <id/name>`；`compose off` 后输入恢复交给 Pi agent。
+- attach 会自动进入 Telegram scope compose：单 bot filter或全局唯一bot直接发送；全局多bot每次提交复用Pi原生`select`选择身份。footer显示`TELEGRAM · SEND AS <id/name>`或`TELEGRAM · CHOOSE BOT ON SEND`。`compose <bot-id>`固定身份，`compose off`把输入交还Pi，bare `compose`恢复scope。
 - compose 仅支持纯文本。附件会被阻止；明确失败会把原文放回 editor。若 ACK 超时或 daemon 在发送中断线，结果可能未知：先检查群聊，不要直接重发；插件不会自动重试，并会安全关闭 compose。
-- RPC/extension source 不受 compose 影响。attach 切换、detach、daemon 断线或 Pi 退出都会关闭 compose；bot token 始终只在 daemon 内。
+- selector取消会恢复原文且不发送；选择/发送期间拒绝第二次提交。RPC/extension source不受compose影响。attach切换会建立新scope；detach、daemon断线、restart/config变更或Pi退出会关闭compose并让迟到选择失效；bot token始终只在daemon内。
 - photo/sticker 被现有 lazy vision 流程识别后，同一 native media card 会在下方原位出现 `视觉理解 · ...`；无需重新 attach。它不为 UI 主动调用模型，未触发 bot 的媒体仍保持图片/fallback。
 - attach 自动让 Pi 自己的 `FooterComponent` 显示 Telegram `↑/↓/R/W/CH/$/context/model`。token/cost 是当前 SQLite `llm_runs` 首条记录以来的 lifetime 累计，跨 daemon/Pi restart 与 epoch；context 是最新 run 当前占用而非历史求和。`W` 仅在 provider 报告非零 cache write 时由 Pi 显示。
 - `/tg panel` 可单独切换范围，`panel off` 恢复 operator Pi session usage。`/tg status [bot]` 另列 runs/since/epoch、latest cache/output/reasoning/latency/cost 与 lifetime totals/平均 latency。
-- 在 editor 输入 `/tg ` 后按 Tab/选择使用 Pi 原生分级菜单；`attach/status/compose/panel` 的下一层会从配置动态列出 bot id/name，`compose/panel` 另有 `off`。
+- 在editor输入`/tg `后按Tab/选择使用Pi原生分级菜单；`attach/status/compose/panel`的下一层会从配置动态列出bot id/name，`compose/panel`另有`off`，bare `compose`也可直接执行。
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。
 - `/tg restart`先关闭compose并中止旧IPC；在途manual send按unknown outcome处理且绝不自动重发。ready后保留原transcript，自动以原bot/all filter重连并恢复此前的原生footer scope；失败时保留已显示内容与可执行诊断。
 

@@ -41,15 +41,15 @@ Pi 中输入 `/tg ` 后可用原生命令补全：
 | 命令 | 结果 |
 | --- | --- |
 | `/tg config` | 首配、验证、编辑或明确备份替换本机配置 |
-| `/tg attach [bot]` | 只读观察全局或单 bot feed |
-| `/tg compose <bot>` | 让 interactive editor 显式以该 bot 身份发纯文本 |
+| `/tg attach [bot]` | 挂载全局或单 bot feed，并让 editor 直接发 Telegram |
+| `/tg compose [bot]` | 恢复 feed scope，或固定一个 bot 身份 |
 | `/tg compose off` | 把 editor 交还给 Pi agent |
 | `/tg more` / `/tg detach` | 加载更早历史 / 断开 live feed |
 | `/tg panel [bot\|off]` | 切换或恢复 Pi 原生 footer telemetry |
 | `/tg status [bot]` | 查看 lifetime 与 latest usage 明细 |
 | `/tg start` / `restart` / `stop` / `status-daemon` | 在 Pi 内管理 daemon |
 
-`attach` 永远只读。只有显式 `compose` 才会发送 Telegram；若发送结果未知，插件会恢复原文并关闭 compose，但不会自动重试。先检查群里是否已经出现消息，避免重复发送。
+`attach <bot>` 后 editor 直接以该 bot 发送；全局 `attach` 在多 bot 时每次提交都打开 Pi 原生选择框，单 bot 时直接发送。`compose <bot>` 可固定身份，`compose off` 暂时把输入交还 Pi，`compose` 无参数恢复 feed scope。若发送结果未知，插件恢复原文并关闭 compose，但不会自动重试；先检查群里是否已经出现消息。
 
 ## 配置文件
 

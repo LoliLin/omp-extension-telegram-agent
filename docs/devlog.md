@@ -707,3 +707,11 @@
 - 现行Telegram官方契约确认classic `sendMessage`支持entities且offset为UTF-16；TG-0004要求复用Pi公开的Marked lexer，把自然Markdown确定性转换为text/entities。incoming RichMessage normalize/persistence/projection继续保留，agent出站`sendRichMessage`将退役。
 - 原始REQ-LIST文字只替换成未勾选链接，没有提前声明完成；计划拆为docs调查、native editor行为、Markdown transport三个独立签名提交。
 - Cache impact: **NONE（本提交）**——只改REQ/PLAN/handoff/devlog。未来TG-0004行为会INTENTIONAL更新唯一send tool说明并bump schema 6→7；转换器0新增LLM call或dynamic token。
+
+## 2026-08-08 (82) — 让Pi editor随attach直接发送Telegram
+
+- compose状态改为feed scope或sticky bot两种模式。成功attach自动打开scope：filtered feed和全局单bot直接发送；全局多bot每次interactive提交调用Pi原生`ctx.ui.select`，选项按配置顺序显示id/name且不记忆上次选择。
+- selector取消恢复逐字节相同原文并保持`handled`；选择/发送共用in-flight gate。compose generation锁住detach/attach replacement后的迟到选择，旧send ACK也不能关闭新scope。`compose <bot>`继续固定身份，`compose off`交还Pi，bare `compose`恢复scope；RPC/extension与附件/unknown边界不变。
+- command tree把compose参数改为optional，help/parser/completion仍由同一树生成。footer status区分`SEND AS`、`CHOOSE BOT ON SEND`、choosing与sending；没有替换Pi editor或selector，也没有新增TUI component。
+- extension/engine/IPC/manual/cache目标验证100 pass / 1156 assertions，typecheck与cache v6 golden通过；中英README/guide、runbook、架构和相关REQ同步。真实Pi/Telegram交互留T14后才勾选REQ-LIST。
+- Cache impact: **NONE**——只改变operator输入与Pi UI状态；IPC/DB/provider grammar、context epoch、LLM调用和token逐字节不变。

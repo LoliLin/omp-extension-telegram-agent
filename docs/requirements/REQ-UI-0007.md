@@ -38,7 +38,7 @@ REQ-UI-0003 规定最终 renderer 必须是 Pi `FooterComponent`；本需求负�
 
 - **AC1:** production `rg` 无 `TelegramStatsPanel`/`tg-panel`/stats `setWidget`；fake factory 返回 `FooterComponent`。
 - **AC2:** attach A/全局、panel B/off、detach/disconnect/shutdown 的 footer factory、render refresh 和 socket dispose 轨迹精确。
-- **AC3:** compose 开启时原生 FooterComponent 仍显示 `TELEGRAM · SEND AS ...` extension status；stats 更新不覆盖它。
+- **AC3:** compose开启时原生FooterComponent仍显示`TELEGRAM · SEND AS ...`或`TELEGRAM · CHOOSE BOT ON SEND` extension status；stats更新不覆盖它。
 - **AC4:** `/tg status` 完整数值与 native compact mapping 来自同一 `BotStats`，baseline/live 不双计。
 - **AC5:** 窄/宽 terminal 直接调用 Pi FooterComponent render 均不抛错；无项目 truncate/render 代码。
 - **AC6:** 目标测试、全量测试、typecheck、cache golden 与真实 Pi smoke 通过。

@@ -34,7 +34,7 @@ README 成为平台用户的首要入口：读者从“它是什么”一路完�
 
 - **AC1:** 一个不知道小雪/小雨的读者只按 README，可定位并填写全部必需配置、启动 daemon、进入 Pi attach，并安全停止。
 - **AC2:** README 包含脱敏的单 bot 最小 config 与添加 bot 示例；字段名和默认值由 config source/example 验证，无过期 key。
-- **AC3:** README 明确单群 deployment、secret 边界、compose 显式身份与 unknown/no-auto-retry 行为。
+- **AC3:** README明确单群deployment、secret边界、attach直发/多bot原生选择、compose override/off与unknown/no-auto-retry行为。
 - **AC4:** 文档链接检查无失效相对路径；命令与 `package.json` scripts、`docs/runbooks/daemon.md` 一致。
 - **AC5:** `rg` 审计 README 的产品主体不依赖 A/B 或小雪/小雨；若 example 段出现，必须明确标为示例。
 - **AC6:** `bun test` 与 `bun run check` 保持通过；本需求不改变运行时代码。
