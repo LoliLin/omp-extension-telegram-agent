@@ -29,6 +29,7 @@
 - [ ] [REQ-UI-0007](REQ-UI-0007.md) 用 Pi 原生 footer status 呈现 Telegram 统计（P2，已调查/未实现）
 - [ ] [REQ-UI-0008](REQ-UI-0008.md) 为 `/tg` 提供原生分级命令补全（P2，已调查/未实现）
 - [ ] [REQ-CMD-0001](REQ-CMD-0001.md) Telegram 群内 help/status、手动 compact、参数调整与可配置管理员白名单（P1，已调查/未实现）
+- [ ] [REQ-TG-0002](REQ-TG-0002.md) Bot 获得响应机会后持续续约 Telegram 原生输入状态（P1，已核对官方 API/未实现）
 
 
 ## Bug
@@ -59,6 +60,7 @@
 - REQ-UI-0008 使用 Pi `registerCommand.getArgumentCompletions`；命令树需吸收 UI-0005/0007 新增/调整的子命令
 - REQ-UI-0009 固化 UI-0003/0007 的 lifetime 范围，并补齐 Pi 原生 cache-write 与 `/tg status` 详情；不得退回第三行或自绘 footer
 - REQ-UI-0010 复用 Pi AgentSession `message_update` 与宿主 `TUI.requestRender()`；流式帧只存在于 IPC/TUI 内存，不写 DB/Pi session/provider context
+- REQ-TG-0002 在 runtime 接受 response opportunity 时 acquire `typing` lease，每 4 秒续约；send 成功或 flush settle 后停止，不影响 provider/routing
 - REQ-CMD-0001 是 Telegram 群内 deterministic control plane；只读命令公开，compact/set/reset 只认 deployment allowlist，命令不得进入 agent context
 - REQ-STICKER-0002 是 REQ-STICKER-0001 的 per-bot sendability 回归修复，并会触发 cache schema bump
 - REQ-PLAT-0001 复用 REQ-CONF-0001 已完成的 N-bot 核心，不重复重写 daemon composition

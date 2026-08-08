@@ -357,3 +357,10 @@
 - 源码证据确认 runtime 忽略 Pi `message_update`，只在 `message_end` 广播 final；feed 收到 IPC 后修改组件树却未调用 host `requestRender()`。这解释了无流式和依赖无关 UI 事件才刷新的两个现象。
 - 实现边界固定为 additive、有界、非持久 stream snapshot，覆盖 thinking/text/tool args；Pi session entry 仍只有 attach anchor，最终事件继续单次持久化。复用 Pi 官方 TUI handle 与约 16 ms 合帧，不建 timer/render loop。
 - Cache impact: **NONE（docs/research only）**；后续实现也不改 provider-visible bytes、不增加模型调用或 DB partial writes，token/cost 增量 0。
+
+## 2026-08-08 (38) — 调查 Telegram response activity 状态（文档）
+
+- 用户追加的 Telegram “正在输入/正在思考” raw note 已正式化为 `REQ-TG-0002`；官方 `sendChatAction` 核对确认状态最多 5 秒、消息到达即清除，动作表没有 `thinking`，首版采用 `typing`。
+- lifecycle 绑定 accepted runtime response opportunity，而不是所有 ingested message：立即 acquire、4 秒续约、send 成功或 flush settle/shutdown release；probability skip/nobody 不显示，explicit coalesce 不复制 timer。
+- 失败定义为 best-effort side channel：单 bot 单 timer/单 in-flight、failure streak 日志去重，API 失败不改变 routing/provider/send/DB/exposure。沉默结束后因无 cancel API，允许剩余状态在官方 5 秒内自然过期。
+- Cache impact: **NONE（docs/research only）**；未来实现每 active bot 每 4 秒至多一次 Telegram request，LLM 调用与 token/provider-visible bytes 增量 0。

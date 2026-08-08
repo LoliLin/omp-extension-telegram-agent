@@ -285,3 +285,13 @@ custom entry 不进入 LLM context；IPC 与 provider serialization 不变。Cac
 - Pi 的 `setFooter(factory)` 官方 factory 会同步拿到同一个 session `TUI`；attach 本来就挂 native footer，可以保留这个 handle 的 `requestRender` callback 供 feed 生命周期使用。`panel off` 只恢复 footer presentation，不应清掉 session render handle。
 - Pi `TUI.requestRender()` 内部已合并重复请求并限制到约 16 ms 一帧；项目不再加 debounce/render loop。stream update 使用有界完整展示快照，允许 update-before-start 自愈，并覆盖 thinking/text/partial tool args；start/update/end 不落 DB/Pi session/provider context。
 - Cache impact **NONE**，新增 completion/token/DB writes 均为 0。详细边界见 `requirements/REQ-UI-0010.md`。
+
+## REQ-TG-0002 调查：Telegram 原生处理状态需要主动续约（2026-08-08）
+
+**结论：accepted response opportunity 持有一个 per-bot `typing` lease；4 秒续约，send/settle 时 release。**
+
+- Telegram Bot API `sendChatAction` 官方说明状态只保持 5 秒或更短，bot 消息到达会清除；只建议用于明显有等待的响应。动作表有 `typing` 与 `choose_sticker`，没有独立 `thinking`，因此模型尚未决定输出类型时统一使用 `typing`。
+- 启动点不能是每条 ingested message：应在 `dispatchRoutingDecision` 接受 runtime trigger 后，由 runtime 自己覆盖 flush/pending 生命周期。这样 nobody、probability busy/cooldown skip 不会制造虚假反馈，explicit coalesce 也不会创建重复 timer。
+- `send` 成功后 Telegram 消息会清状态，runtime 同时停止续约；无 send、abort/error/沉默则在 flush settle 停止，已有状态按官方剩余 5 秒自然过期。API 没有 cancel action，不能承诺即时清除。
+- side channel 必须 best-effort：每 bot 一个 timer、4 秒至多一次、禁止 overlapping call；错误不影响 route/provider/send，日志按 failure streak 去重。Cache/token impact **NONE**。
+- 官方参考：<https://core.telegram.org/bots/api#sendchataction>；完整验收见 `requirements/REQ-TG-0002.md`。
