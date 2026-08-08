@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：CMD-0001 的admin allowlist与持久effective override基础已完成；下一步实现entity parser、权限与安全manual compact服务。
+2026-08-08：已正式化UI-0013的紧凑sticker尺寸；先完成这个新UI note，再继续CMD-0001 parser/service。
 
 ## 已完成
 
@@ -37,6 +37,7 @@
 19. **已实现 `REQ-SEND-0002`（`bd4be62`）**：Telegram create后canonical SQLite按25/100/250ms仅本地重试；committed/partial/unknown统一固定`no_retry`+terminate，exposure/broadcast/event/typing失败隔离并只记脱敏诊断。真实双连接lock复现`#19614`路径只有一次create，poller echo最终一行；33 targeted / 190 assertions、全量268 / 3949通过，真实组合发送留T14。
 20. **已实现 `REQ-UI-0012`（`49e3067`）**：只服从Pi capability；Kitty路径以公开`convertToPng`异步归一化JPEG/GIF/WebP并继续由`Tui.Image`渲染。path/size/mtime revision共享in-flight，32项/32 MiB LRU、8 MiB单项、32 pending及失败记忆有界；完成只替换相关卡片，detach/restart/shutdown迟到callback失效。targeted 50/469、全量279/4041通过，真实Kitty/Ghostty smoke留T14。
 21. **实施中 `REQ-CMD-0001`**：`telegram_admins`默认空，numeric/规范化username校验；当前ignored deployment唯一`@aac6fef`，tracked example只有numeric placeholder。routing/cooldown override复用`bot_state`并在runtime前恢复，set/reset原子锁Σp≤1；24 targeted / 91 assertions、全量286/4078通过。下一步是T10m2 parser/service。
+22. **已调查 `REQ-UI-0013`**：所有媒体当前共用56×16；512方形sticker实际约32×16，视觉权重过高。只把sticker改为Pi `Image`公开24×12上限，photo保持56×16；不改转换、vision、协议或数据，实施留T10ac。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 

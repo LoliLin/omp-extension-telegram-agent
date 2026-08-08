@@ -495,3 +495,10 @@
 - routing变更按全部effective bot原子锁Σp≤1；cooldown只接受0..3600000安全整数。unknown bot/parameter、NaN/越界/概率溢出不写DB或内存，坏持久值在应用前fail-fast；未改schema。
 - config/control-state targeted 24 tests / 91 assertions、全量286 / 4078、typecheck、cache v5 golden与diff check通过；parser、权限、compact与daemon收发留T10m2–T10m3。
 - Cache impact: **NONE**——控制配置/override不改provider grammar或已存在context bytes；正常聊天新增0 token/call，显式命令将在确定性side channel消费。
+
+## 2026-08-08 (55) — 调查紧凑 sticker 原生展示（文档）
+
+- 用户新增raw note已正式化为`REQ-UI-0013`。生产media尺寸分布显示绝大多数sticker接近512×512；当前与photo共用Pi Image 56×16上限，在常见9×18 cell下实际约32×16，连续贴纸会压过聊天正文层级。
+- Context7与当前Pi源码确认`ImageOptions.maxWidthCells/maxHeightCells`就是公开约束，Pi继续负责比例、窄宽度clamp、Kitty/Ghostty crop、resize与fallback。结合`better-ui`的既有组件/密度约束，实施固定为sticker 24×12、photo维持56×16，不加容器、动画或协议代码。
+- AC将锁forced Kitty方形wire placement、WebP转换后原位尺寸、vision/label、多宽度与photo不回归；真实Kitty/Ghostty视觉smoke并入T14。
+- Cache impact: **NONE（docs/research only）**。未来实现也只改变TUI Image options，不改图片bytes、IPC/DB/provider、vision/LLM调用或context epoch。

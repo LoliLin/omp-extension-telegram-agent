@@ -1,7 +1,7 @@
 # PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
 
 - **Status:** Active
-- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-SEND-0002, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-UI-0011, REQ-UI-0012, REQ-PLAT-0001, REQ-DOC-0001, REQ-ONBOARD-0001
+- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-SEND-0002, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-UI-0011, REQ-UI-0012, REQ-UI-0013, REQ-PLAT-0001, REQ-DOC-0001, REQ-ONBOARD-0001
 - **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
 
 ## 结果
@@ -55,6 +55,9 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10y** — 用T10x真实commit hash记录SEND-0002完成并在REQ-LIST勾选；validates: SEND-0002 traceability；commit: completion record
 - [x] **T10z** — 复用Pi公开`convertToPng`做Kitty异步去重转换、有界LRU与原卡片重绘；validates: UI-0012 AC1–AC7；commit: native media compatibility
 - [x] **T10aa** — 用T10z真实commit hash记录UI-0012完成并在REQ-LIST勾选；validates: UI-0012 traceability；commit: completion record
+- [x] **T10ab** — 调查并正式化sticker与photo的Pi原生Image视觉密度边界；validates: UI-0013 documented scope/AC；commit: docs/research only
+- [ ] **T10ac** — sticker使用24×12原生Image上限并锁Kitty wire、转换/vision与多宽度回归；validates: UI-0013 AC1–AC4；commit: compact sticker presentation
+- [ ] **T10ad** — 用T10ac真实commit hash记录UI-0013完成并在REQ-LIST勾选；validates: UI-0013 traceability；commit: completion record
 - [x] **T10m1** — 校验/规范化Telegram admin allowlist，并用`bot_state`实现routing/cooldown effective override、原子概率校验与重启恢复；validates: CMD-0001 AC2/AC3/AC7；commit: control configuration state
 - [ ] **T10m2** — 实现entity-driven `/tg` parser、权限/输出/串行mutation服务及BotRuntime安全manual compact/consume接口；validates: CMD-0001 AC1/AC2/AC4/AC6；commit: deterministic command service
 - [ ] **T10m3** — 接入poller/daemon、canonical reply/broadcast/exposure与best-effort菜单，锁一次执行和零provider context；validates: CMD-0001 AC5/AC8；commit: Telegram control integration
@@ -108,6 +111,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - T10p: **NONE**；restart不改provider/session协议或epoch，不新增LLM call/token。
 - T10v/T10x: **NONE**；不改send schema/provider grammar；异常路径在Telegram调用后只终止并重试本地幂等副作用，减少重复provider turn/token。
 - T10w/T10z: **NONE**；只在本地TUI按Pi capability异步准备PNG并交给原生Image，不改IPC/DB/provider bytes或vision调用。
+- T10ab–T10ad: **NONE**；只按media kind调整Pi Image公开尺寸上限，不改图片bytes、IPC/DB/provider或调用数。
 - T10m1–T10m4: **NONE**；Telegram control command 与回复均由 deterministic control plane 消费，不进入 provider context；只有显式 compact 使用既有 summary 调用。
 - T11–T13f: 现有 deployment **NONE**；provider/persona choice 是显式配置边界，bootstrap/wizard/docs 不进入 provider context，现有 golden 必须不变。
 
