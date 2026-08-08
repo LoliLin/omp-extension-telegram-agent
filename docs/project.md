@@ -2,7 +2,7 @@
 
 ## 是什么
 
-一个真正“住在 Telegram 群里”的可配置 AI 群友系统：daemon 可按配置运行 1..N 个 Telegram bot，每个 bot 有独立 persona/session/routing；当前示例部署是小雪与小雨两只 bot。它们看得到群聊和彼此发言，自主决定是否插话，能发文字和 sticker、理解图片，必要时搜索/计算。
+一个真正“住在 Telegram 群里”的可配置 AI 群友系统：daemon 可按配置运行 1..N 个 Telegram bot，每个 bot 有独立 persona/session/routing。它们看得到群聊和彼此发言，自主决定是否插话，能发文字和 sticker、理解图片，必要时搜索/计算。
 
 ## 三个世界（严格分离）
 
@@ -46,12 +46,13 @@
 - **canonical message**：Telegram 群消息的本地统一表示，identity = (chat_id, message_id)
 - **LOCAL**：TUI 中标记只有本地可见的 bot 内部行为（区别于 Telegram 真实发言）
 
-## 当前示例部署
+## Persona 与部署隐私
 
-- 小雪（Bot A，token env `teleram_hastuyuki_bot`）：温柔软糯猫娘，暖群夸夸担当，人设全文在 `personas/xiaoxue.md`
-- 小雨（Bot B，token env `telegram_kosamerobot`）：清冷毒舌猫娘，技术担当，人设全文在 `personas/xiaoyu.md`
-- 原始人设文本来自 docs/requirement.md 末尾；persona 只保留人格与回应策略，send 的参数/调用/终止语义以 `src/agent/tools.ts` 为唯一权威
+- 当前 deployment 的 bot 名称、token env、persona 路径与提示词只存在 ignored 本机配置，不是公开项目契约。
+- 仓库只跟踪 `personas/template.zh.md`、`personas/template.en.md` 与说明；其他 `personas/*.md` 默认忽略。
+- persona 只保留人格与回应策略；send 的参数、调用和终止语义以 `src/agent/tools.ts` 为唯一权威。
+- 旧 Git 历史仍可能包含已从当前 HEAD 移除的 deployment persona；未经明确授权不改写历史。
 
 ## Scope
 
-见 docs/requirement.md（4055 行完整需求）。开发流程见 docs/engineering/development-guide.md（LLM 开发指南）：小 vertical slice、每步留痕（docs + devlog + handoff）、原子化签名 git 提交。
+见 docs/requirement.md。开发流程见 docs/engineering/development-guide.md（LLM 开发指南）：小 vertical slice、每步留痕（docs + devlog + handoff）、原子化签名 git 提交。

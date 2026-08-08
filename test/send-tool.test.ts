@@ -98,7 +98,7 @@ describe("send tool contract (REQ-SEND-0001)", () => {
 	});
 
 	test("personas and shared protocol do not duplicate send invocation syntax", () => {
-		for (const path of ["personas/xiaoxue.md", "personas/xiaoyu.md"]) {
+		for (const path of ["personas/template.zh.md", "personas/template.en.md"]) {
 			const persona = readFileSync(path, "utf8");
 			expect(persona).not.toMatch(/send\s*\(/);
 			expect(persona).not.toContain("reply_to");

@@ -33,7 +33,7 @@ DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`
 - `src/agent/tools.ts` 是 provider-facing 工具用法的唯一权威：参数、组合方式、可见 id、错误与终止语义都放 tool/parameter description；persona 与共享 protocol 只保留环境、消息 grammar、人格与何时回应。
 - `send` 是唯一公开 Telegram 通道，`message`/`sticker`/`reply_to` 在一次最终 tool call 内组合。成功 result 是固定 `ok` + `terminate:true`：Pi 仍持久化协议要求的 toolResult，但不再做 follow-up provider request；动态 sent ids 只在 provider 不读取的 details/DB/event。
 - `toolsHash()` 覆盖 provider 实际收到的 name + description + parameters + order；label/execute 是本地字段。per-bot tool filter 使用同一 hash grammar。
-- v4 两个人设文件合计减少 8,859 bytes（小雪 4,472；小雨 4,387），同时删除 shared protocol 的参数示例；tool description 虽增强，稳定 system prefix 仍显著净缩短。每个成功 send 的结果从动态 `ok sent #<id...>` 缩为固定一 token ACK。
+- v4 当时的两份 deployment persona 合计减少 8,859 bytes，同时删除 shared protocol 的参数示例；tool description 虽增强，稳定 system prefix 仍显著净缩短。当前 HEAD 不再跟踪这些私有 persona，cache golden 改用公开中英模板；生产本机 persona bytes 与 schema v5 未因此改变。每个成功 send 的结果从动态 `ok sent #<id...>` 缩为固定一 token ACK。
 - v5 只扩充 send tool/`message` description，参数名、schema形状、工具顺序、system/serialization/summary hash均不变。每次provider请求的稳定prefix增加有界Rich Markdown说明；不新增tool、LLM call或动态tool result token。
 
 ## Sticker 目录分区（REQ-STICKER-0001）

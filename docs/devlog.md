@@ -548,3 +548,10 @@
 - `bun run pi` 现在进入最小 launcher：若 project-local CLI 不存在，只执行一次 `bun install --frozen-lockfile`，确认 CLI 出现后再用当前 Bun 原样启动；已安装路径不触发 install，安装失败 fail-closed 并给出可复现命令。
 - 4 个 deterministic launcher tests 覆盖 fresh/installed/install failure/missing artifact；targeted extension 44 tests 与 typecheck通过。另在无 `.env`、config、persona、`node_modules`、sibling Pi 的隔离目录真实 bootstrap，`bun run pi --version` 输出0.84.1；完整 `/tg config` host smoke等待T13d。
 - Cache impact: **NONE**——只改变依赖获取与operator launcher；Pi/package版本、extension/provider grammar、context epoch与每turn token/call不变。
+
+## 2026-08-08 (62) — 加入 typed config 并收回 deployment persona
+
+- 新首选`telegram.config.ts`通过`defineConfig()`提供完整snake_case字段类型与注释；direct `jiti@2.7.0`让同步生产loader在Bun与Node中执行同一受信本机TS。legacy`bots.config.json`共用原validator/normalizer；两份默认文件并存fail-fast，`bots_config`只接受显式`.ts`/`.json`。
+- tracked typed example与legacy example都改为通用单bot占位；Node+jiti/Bun同fixture、TS/JSON等价、双文件/扩展名、tracked example与typecheck均有回归。`.env`仍只存secret，TS只引用env key。
+- 当前真实persona从Git索引与`docs/requirement.md`当前HEAD移除，但ignored本机文件原字节保留；`personas/*.md`默认忽略，只negate公开README与中英模板。文档明确旧Git历史仍含旧对象，未暗示已净化历史。
+- Cache impact: **NONE**——生产ignored persona、system/tool/message/summary grammar与schema v5未变；cache test仅从不再tracked的deployment文件切到公开模板并记录新fixture hash，不代表provider prefix迁移。每turn新增0 token/call。

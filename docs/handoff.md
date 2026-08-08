@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：ONBOARD-0001 T13a portable Pi launcher 已完成；继续 T13b typed config 与 persona privacy。
+2026-08-08：ONBOARD-0001 T13a/T13b 已完成；继续 T13c atomic onboarding config core。
 
 ## 已完成
 
@@ -26,13 +26,13 @@
 8. **已实现 `REQ-UI-0009`**：DB lifetime 跨 file reopen/daemon rebuild，cache-write 幂等 migration + additive telemetry 完成；Pi 原生 `W/CH` 与详细 status/零 run 共 70 targeted tests 通过，真实 smoke 留 T14。
 9. **已实现 `REQ-SEND-0001`**：唯一 send schema 拥有全部用法，persona/protocol 共去掉 8,859 bytes 重复；显式点名不再被 silence 覆盖；固定 `ok` + terminate 保证一次 provider call；tools hash 含 description，cache schema 3→4。
 10. **已调查 `REQ-DOC-0001`**：README 需从内部索引改为 prerequisites→配置→启动/Pi→扩 bot→排障的用户旅程；等 provider schema 完成后在 T13 写最终示例。
-11. **已实现 `REQ-CMD-0001`**：Telegram `/tg` 由 deterministic control service 消费；help/bots/status 公开，compact/set/reset deny-by-default。allowlist 支持 id/`@username`，当前 ignored deployment只配`@aac6fef`；完整证据见第21项。
+11. **已实现 `REQ-CMD-0001`**：Telegram `/tg` 由 deterministic control service 消费；help/bots/status 公开，compact/set/reset deny-by-default。allowlist 支持 numeric id / `@username`，ignored deployment值不进入文档；完整证据见第21项。
 12. **已实现 `REQ-UI-0010`**：assistant start/update/end 经 bot-filtered ephemeral IPC更新同一原生卡片，thinking/text/tool args均有界；32 active/64 ended tombstone，断线清理且不落库。feed每次变化调用 Pi host render，`panel off` 后仍有效；75 targeted / 592 assertions + typecheck/cache通过，真实连续 partial留T14。
 13. **已实现 `REQ-TG-0002`**：Telegram 确有private draft Thinking但只接受目标私聊；当前supergroup accepted trigger立即`typing`、每4秒续约，单timer/in-flight。组合send成功、flush settle与shutdown幂等停止；failure streak脱敏且不影响主流程，draft调用恒为0。54 targeted / 2640 assertions通过，真实群长run留T14。
 14. **已实现 `REQ-TG-0003`**：T10k统一≤256 KiB source与有界projector；T10l把agent文字接到final `sendRichMessage`，确认parse/method拒绝才单次literal fallback，unknown outcome绝不重发。manual compose仍plain；tool-only说明触发cache 4→5，targeted 61/730通过，真实群留T14。
 15. **已实现 `REQ-REPLY-0001`**：只存嵌入父sender numeric id；canonical+obligation在offset前原子提交。reason/chat/message id穿过dispatch，reply优先占≤40 batch；45 reply按40+5提交，busy/cooldown/stopping/file reopen与A/B隔离已锁。provider成功才清，绝无内容兜底/额外纠错call；targeted 70/2680通过，真实trace留T14。
 16. **已实现 `REQ-OPS-0002`**：共享controller做同仓库PID身份/孤儿枚举、排他control lock、一次SIGTERM、40秒资源释放与真实socket-connect readiness；现场回收`5090+9316→6329`后跨退避窗口无新409。Pi `/tg restart`异步关闭compose，保留transcript并恢复A/all filter与原生footer；真实stopped/running/Pi三路径均通过。
-17. **正在实现 `REQ-ONBOARD-0001`**：T13a 已将四个 Pi package 精确锁定 registry 0.84.1；`bun run pi` 在 project-local CLI 缺失时用 frozen lock 幂等安装，隔离目录从零依赖启动 `Pi 0.84.1` 已通过。下一步是 typed local config/prompt privacy；之后依次 atomic config core、Pi 原生 `/tg config`、双语用户/成本/维护指南与 mdBook Pages，legacy JSON 兼容且不改写 Git 历史。
+17. **正在实现 `REQ-ONBOARD-0001`**：T13a portable launcher完成；T13b新增typed `telegram.config.ts` + legacy JSON同归一化、双文件fail-fast与`.ts/.json` override，Bun/Node fixture等价。真实persona已仅从当前HEAD取消跟踪，本机ignored副本保留；公开中英模板与历史未净化警示已落地。下一步依次是atomic config core、Pi原生`/tg config`、双语指南与mdBook Pages。
 18. **已实现 `REQ-UI-0011`**：message/event/stream复用Pi `HStack/TruncatedText` header；身份leading、metadata trailing，bot id优先。40/60/80/120 columns覆盖CJK/emoji/长username与OSC，普通消息仍两行；真实Pi 80/40 columns和当前/浅色主题通过，production extension精确`+15/-15`净零行。
 19. **已实现 `REQ-SEND-0002`（`bd4be62`）**：Telegram create后canonical SQLite按25/100/250ms仅本地重试；committed/partial/unknown统一固定`no_retry`+terminate，exposure/broadcast/event/typing失败隔离并只记脱敏诊断。真实双连接lock复现`#19614`路径只有一次create，poller echo最终一行；33 targeted / 190 assertions、全量268 / 3949通过，真实组合发送留T14。
 20. **已实现 `REQ-UI-0012`（`49e3067`）**：只服从Pi capability；Kitty路径以公开`convertToPng`异步归一化JPEG/GIF/WebP并继续由`Tui.Image`渲染。path/size/mtime revision共享in-flight，32项/32 MiB LRU、8 MiB单项、32 pending及失败记忆有界；完成只替换相关卡片，detach/restart/shutdown迟到callback失效。targeted 50/469、全量279/4041通过，真实Kitty/Ghostty smoke留T14。

@@ -2,14 +2,14 @@
 
 ## 配置
 
-- `bots.config.json`（项目根，或设 env `bots_config` 指向其他路径）：bot 清单与参数。复制 `bots.config.example.json` 后编辑。
+- `telegram.config.ts`（项目根，首选）：复制 `telegram.config.example.ts` 后编辑，`defineConfig()` 提供类型与逐字段注释。它会作为受信本机代码执行，不要粘贴来源不明的配置。legacy `bots.config.json` 继续支持；两份默认文件同时存在会拒绝启动。env `bots_config` 可显式指向 `.ts` / `.json`。
   - `group_peer_id`：群的裸正数 peer id（`-100...` 形式会被自动归一化）
   - deployment 默认模型：`provider` + `model` + `api_key_env`；缺省为 `deepseek` + `deepseek-v4-flash` + `deepseek_api_key`。`api_key_env`只是指向`.env`的key名，不放secret值。
   - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1），可选覆盖 `provider` / `model` / `api_key_env` / `reasoning_effort` / compaction / cooldown / `tools`（`{send, search, run_js}` 开关）/ `sticker_sets`（Telegram sticker set 名数组）。切换provider时必须同时给model和api_key_env；同provider可只换key。
   - `sampling_cooldown_ms` 默认 2000，可全局设置并由单 bot 覆盖；必须有限且 `>=0`，0 关闭概率冷却。它只影响 probability routing，mention/reply/name 不会被静默吞掉。
   - `telegram_admins`：Telegram群内控制白名单，接受正整数user id或规范化`@username`；推荐固定numeric id。缺省/空数组会拒绝所有`compact/set/reset`，但不影响公开`help/bots/status`。
 - `.env`（`key: value` 冒号格式）：只放 secret——bot tokens、配置引用的provider API keys、`tiny_fish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）
-- 改配置后重启 daemon 生效（无热重载）
+- 改配置后重启 daemon 生效（无热重载）；本机 persona 除公开模板外默认被 Git 忽略。
 - 一份配置/daemon只对应一个`group_peer_id`。同一checkout的`data/`、pid、socket与DB是共享deployment资源，不能只换`bots_config`并行跑第二个群；多群当前必须使用彼此隔离的工作目录与data目录，不能共享DB/session/socket/pid。
 
 ## 启动

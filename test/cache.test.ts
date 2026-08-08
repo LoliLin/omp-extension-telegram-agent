@@ -20,12 +20,12 @@ import { stickerCatalogBlock } from "../src/media/sticker-catalog.ts";
 
 const GOLDEN = {
 	schemaVersion: 5,
-	systemA: "6ad7407d617b",
-	systemB: "4ac8de55e029",
+	systemZhTemplate: "d2429abc25aa",
+	systemEnTemplate: "8a5eb2679620",
 	serialize: "68a17d6e5c05",
 	tools: "631bf05405d1",
 	compactionPrompt: "045a5241fdd7",
-	systemAWithCatalog: "c7014c404819",
+	systemZhTemplateWithCatalog: "319085c72d6b",
 };
 
 test("CACHE_SCHEMA_VERSION unchanged", () => {
@@ -33,10 +33,10 @@ test("CACHE_SCHEMA_VERSION unchanged", () => {
 });
 
 test("system prompts stable (persona + protocol)", () => {
-	const a = buildSystemPrompt(readFileSync("personas/xiaoxue.md", "utf8"));
-	const b = buildSystemPrompt(readFileSync("personas/xiaoyu.md", "utf8"));
-	expect(sha256Short(a)).toBe(GOLDEN.systemA);
-	expect(sha256Short(b)).toBe(GOLDEN.systemB);
+	const a = buildSystemPrompt(readFileSync("personas/template.zh.md", "utf8"));
+	const b = buildSystemPrompt(readFileSync("personas/template.en.md", "utf8"));
+	expect(sha256Short(a)).toBe(GOLDEN.systemZhTemplate);
+	expect(sha256Short(b)).toBe(GOLDEN.systemEnTemplate);
 });
 
 test("message serialization grammar stable", () => {
@@ -76,8 +76,8 @@ test("sticker catalog block is part of the stable prefix grammar (REQ-STICKER-00
 	expect(block).toContain("s1 = 😺 得意的赞同，smug/amused");
 	expect(block).toContain("s2 = 🐱 [未识别]");
 	expect(block).not.toContain("s3");
-	const persona = readFileSync("personas/xiaoxue.md", "utf8");
-	expect(sha256Short(buildSystemPrompt(persona, block))).toBe(GOLDEN.systemAWithCatalog);
+	const persona = readFileSync("personas/template.zh.md", "utf8");
+	expect(sha256Short(buildSystemPrompt(persona, block))).toBe(GOLDEN.systemZhTemplateWithCatalog);
 	// determinism: same DB state -> byte-identical block
 	expect(stickerCatalogBlock(db, "A", ["Mikufufu"])).toBe(block);
 });

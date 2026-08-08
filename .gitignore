@@ -145,5 +145,12 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
-# Local bot config (personal paths); use bots.config.example.json as template
+# Local bot config (personal paths); prefer telegram.config.example.ts as template
+telegram.config.ts
 bots.config.json
+
+# Local persona prompts are private by default. Only explicit public templates are tracked.
+personas/*.md
+!personas/README.md
+!personas/template.zh.md
+!personas/template.en.md

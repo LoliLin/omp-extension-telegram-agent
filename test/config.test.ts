@@ -1,4 +1,4 @@
-// REQ-CONF-0001 + REQ-OPS-0001 regression tests: bots.config.json schema validation,
+// REQ-CONF-0001 + REQ-OPS-0001 regression tests: typed/legacy config validation,
 // arbitrary bot counts, peer id normalization, pid lock exclusivity, example-file sanity.
 // The lock test spawns a fixture process whose cmdline matches our daemon check;
 // no real daemon or network is involved.
@@ -7,7 +7,15 @@ import { describe, expect, test, afterAll } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, parseEnvFile, normalizePeerId, normalizeTelegramAdmin, ConfigError } from "../src/config.ts";
+import { pathToFileURL } from "node:url";
+import {
+	loadConfig,
+	parseEnvFile,
+	normalizePeerId,
+	normalizeTelegramAdmin,
+	defaultConfigPath,
+	ConfigError,
+} from "../src/config.ts";
 import { acquirePidLock, releasePidLock, readPid, pidAlive, isOurDaemon, listOurDaemons } from "../src/daemon/pid.ts";
 import { buildSystemPrompt, sha256Short } from "../src/agent/prompt.ts";
 
@@ -16,7 +24,7 @@ const FIXTURE_LOCK = join(import.meta.dir, "fixtures/daemon/index.ts");
 // Bun auto-loads the project .env into process.env, and loadConfig lets process.env override
 // the parsed file — tests must clear the real keys so the temp .env is authoritative.
 const ENV_KEYS = [
-	"teleram_hastuyuki_bot", "telegram_kosamerobot", "telegram_group_peer_id",
+	"telegram_bot_alpha", "telegram_bot_beta", "telegram_group_peer_id",
 	"deepseek_api_key", "anthropic_api_key", "alternate_deepseek_key", "tiny_fish_api_key", "auxiliary_visual_model", "router_secret",
 	"bots_config",
 ];
@@ -31,15 +39,15 @@ afterAll(() => {
 });
 
 const VALID_BOTS = [
-	{ id: "A", name: "小雪", token_env: "teleram_hastuyuki_bot", persona_path: "personas/xiaoxue.md", routing_p: 0.08 },
-	{ id: "B", name: "小雨", token_env: "telegram_kosamerobot", persona_path: "personas/xiaoyu.md", routing_p: 0.08 },
+	{ id: "A", name: "Alpha", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md", routing_p: 0.08 },
+	{ id: "B", name: "Beta", token_env: "telegram_bot_beta", persona_path: "personas/beta.md", routing_p: 0.08 },
 ];
 
 function makeEnvDir(bots: unknown = VALID_BOTS, extraEnv: Record<string, string> = {}, extraConfig: Record<string, unknown> = {}): string {
 	const dir = mkdtempSync(join(tmpdir(), "conf-test-"));
 	const lines = [
-		"teleram_hastuyuki_bot: 123:AAA",
-		"telegram_kosamerobot: 456:BBB",
+		"telegram_bot_alpha: 123:AAA",
+		"telegram_bot_beta: 456:BBB",
 		"deepseek_api_key: sk-test",
 		"tiny_fish_api_key: tf-test",
 		...Object.entries(extraEnv).map(([k, v]) => `${k}: ${v}`),
@@ -48,26 +56,118 @@ function makeEnvDir(bots: unknown = VALID_BOTS, extraEnv: Record<string, string>
 	writeFileSync(
 		join(dir, "bots.config.json"),
 		JSON.stringify({
-			group_peer_id: 4402809405,
+			group_peer_id: 1234567890,
 			...extraConfig,
 			bots,
 		}),
 	);
 	// persona files referenced by the default VALID_BOTS must exist under the temp dir
 	mkdirSync(join(dir, "personas"), { recursive: true });
-	writeFileSync(join(dir, "personas/xiaoxue.md"), "# 小雪\n\n小雪人设。");
-	writeFileSync(join(dir, "personas/xiaoyu.md"), "# 小雨\n\n小雨人设。");
+	writeFileSync(join(dir, "personas/alpha.md"), "# Alpha\n\nA generic fixture persona.");
+	writeFileSync(join(dir, "personas/beta.md"), "# Beta\n\nA second generic fixture persona.");
 	return dir;
 }
 
-describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
+function convertFixtureToTypedConfig(dir: string, keepLegacy = false): void {
+	const legacyPath = join(dir, "bots.config.json");
+	const config = JSON.parse(readFileSync(legacyPath, "utf8")) as Record<string, unknown>;
+	if (!keepLegacy) rmSync(legacyPath);
+	const helperUrl = pathToFileURL(join(process.cwd(), "src/config-schema.ts")).href;
+	writeFileSync(
+		join(dir, "telegram.config.ts"),
+		`import { defineConfig } from ${JSON.stringify(helperUrl)};\nexport default defineConfig(${JSON.stringify(config, null, 2)});\n`,
+	);
+}
+
+function makeTypedExampleDir(): string {
+	const dir = mkdtempSync(join(tmpdir(), "typed-config-example-"));
+	writeFileSync(join(dir, ".env"), [
+		"telegram_bot_token: 123:EXAMPLE",
+		"llm_api_key: sk-example",
+		"tinyfish_api_key: tf-example",
+		"router_secret: fixture-only",
+	].join("\n"));
+	mkdirSync(join(dir, "personas"));
+	writeFileSync(join(dir, "personas/template.en.md"), readFileSync("personas/template.en.md", "utf8"));
+	const helperUrl = pathToFileURL(join(process.cwd(), "src/config-schema.ts")).href;
+	const source = readFileSync("telegram.config.example.ts", "utf8")
+		.replace('"./src/config-schema.ts"', JSON.stringify(helperUrl));
+	writeFileSync(join(dir, "telegram.config.ts"), source);
+	return dir;
+}
+
+describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
+	test("ONBOARD AC3: typed config and legacy JSON normalize identically", () => {
+		const legacyDir = makeEnvDir();
+		const typedDir = makeEnvDir();
+		convertFixtureToTypedConfig(typedDir);
+		try {
+			const project = (dir: string) => {
+				const config = loadConfig(dir);
+				return {
+					groupPeerId: config.groupPeerId,
+					telegramAdmins: config.telegramAdmins,
+					bots: config.bots.map(({ token: _token, providerApiKey: _key, personaPath, ...bot }) => ({
+						...bot,
+						personaPath: personaPath.slice(personaPath.lastIndexOf("/") + 1),
+					})),
+				};
+			};
+			expect(project(typedDir)).toEqual(project(legacyDir));
+		} finally {
+			rmSync(legacyDir, { recursive: true, force: true });
+			rmSync(typedDir, { recursive: true, force: true });
+		}
+	});
+
+	test("ONBOARD AC3: the same typed fixture loads equivalently under Bun and Node", () => {
+		const dir = makeEnvDir();
+		convertFixtureToTypedConfig(dir);
+		try {
+			const fixture = join(import.meta.dir, "fixtures/load-config-runtime.ts");
+			const bun = Bun.spawnSync(["bun", "run", fixture, dir], { cwd: process.cwd() });
+			const node = Bun.spawnSync(["node", "--import", "jiti/register", fixture, dir], { cwd: process.cwd() });
+			expect(bun.exitCode, bun.stderr.toString()).toBe(0);
+			expect(node.exitCode, node.stderr.toString()).toBe(0);
+			expect(JSON.parse(node.stdout.toString())).toEqual(JSON.parse(bun.stdout.toString()));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("ONBOARD AC3: ambiguous defaults fail fast and override extensions are explicit", () => {
+		const dir = makeEnvDir();
+		convertFixtureToTypedConfig(dir, true);
+		try {
+			expect(() => loadConfig(dir)).toThrow(/telegram\.config\.ts[\s\S]*bots\.config\.json/);
+			expect(defaultConfigPath(dir, "deployment.ts")).toBe(join(dir, "deployment.ts"));
+			expect(defaultConfigPath(dir, "deployment.json")).toBe(join(dir, "deployment.json"));
+			expect(() => defaultConfigPath(dir, "deployment.yaml")).toThrow(/expected \.ts or \.json/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("ONBOARD AC3: tracked typed example loads without a private deployment", () => {
+		const dir = makeTypedExampleDir();
+		try {
+			const config = loadConfig(dir);
+			expect(config.bots.map((bot) => [bot.id, bot.name, bot.apiKeyEnv])).toEqual([
+				["friend", "Mochi", "llm_api_key"],
+			]);
+			expect(config.telegramAdmins).toEqual([123456789]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("AC5: single-bot and three-bot configs load", () => {
 		for (const bots of [
-			[{ id: "solo", token_env: "teleram_hastuyuki_bot", persona_path: "personas/xiaoxue.md", routing_p: 0.5 }],
+			[{ id: "solo", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md", routing_p: 0.5 }],
 			[
-				{ id: "A", token_env: "teleram_hastuyuki_bot", persona_path: "personas/xiaoxue.md", routing_p: 0.1 },
-				{ id: "B", token_env: "telegram_kosamerobot", persona_path: "personas/xiaoyu.md", routing_p: 0.1 },
-				{ id: "C", token_env: "teleram_hastuyuki_bot", persona_path: "personas/xiaoyu.md", routing_p: 0.1 },
+				{ id: "A", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md", routing_p: 0.1 },
+				{ id: "B", token_env: "telegram_bot_beta", persona_path: "personas/beta.md", routing_p: 0.1 },
+				{ id: "C", token_env: "telegram_bot_alpha", persona_path: "personas/beta.md", routing_p: 0.1 },
 			],
 		]) {
 			const dir = makeEnvDir(bots);
@@ -82,8 +182,8 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 
 	test("AC3: duplicate bot ids error naming the offending ids", () => {
 		const dir = makeEnvDir([
-			{ id: "A", token_env: "teleram_hastuyuki_bot", persona_path: "personas/xiaoxue.md" },
-			{ id: "A", token_env: "telegram_kosamerobot", persona_path: "personas/xiaoyu.md" },
+			{ id: "A", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md" },
+			{ id: "A", token_env: "telegram_bot_beta", persona_path: "personas/beta.md" },
 		]);
 		try {
 			expect(() => loadConfig(dir)).toThrow(/duplicate bot id "A"/);
@@ -94,8 +194,8 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 
 	test("AC3: missing token_env errors with the env key name", () => {
 		const dir = makeEnvDir([
-			{ id: "A", token_env: "teleram_hastuyuki_bot", persona_path: "personas/xiaoxue.md" },
-			{ id: "B", token_env: "no_such_token_key", persona_path: "personas/xiaoyu.md" },
+			{ id: "A", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md" },
+			{ id: "B", token_env: "no_such_token_key", persona_path: "personas/beta.md" },
 		]);
 		try {
 			expect(() => loadConfig(dir)).toThrow(/no_such_token_key/);
@@ -106,9 +206,9 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 
 	test("AC3: routing probabilities summing over 1 error; ALL errors listed together", () => {
 		const dir = makeEnvDir([
-			{ id: "A", token_env: "teleram_hastuyuki_bot", persona_path: "personas/xiaoxue.md", routing_p: 0.9 },
-			{ id: "B", token_env: "telegram_kosamerobot", persona_path: "personas/xiaoyu.md", routing_p: 0.9 },
-			{ id: "C", token_env: "teleram_hastuyuki_bot", persona_path: "personas/does-not-exist.md", routing_p: "abc" },
+			{ id: "A", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md", routing_p: 0.9 },
+			{ id: "B", token_env: "telegram_bot_beta", persona_path: "personas/beta.md", routing_p: 0.9 },
+			{ id: "C", token_env: "telegram_bot_alpha", persona_path: "personas/does-not-exist.md", routing_p: "abc" },
 		]);
 		try {
 			let err: ConfigError | null = null;
@@ -129,7 +229,7 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 
 	test("AC3: invalid bot id charset rejected", () => {
 		const dir = makeEnvDir([
-			{ id: "Bad ID!", token_env: "teleram_hastuyuki_bot", persona_path: "personas/xiaoxue.md" },
+			{ id: "Bad ID!", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md" },
 		]);
 		try {
 			expect(() => loadConfig(dir)).toThrow(/\[A-Za-z0-9_-\]/);
@@ -139,14 +239,14 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 	});
 
 	test("AC2: peer id forms normalize identically through config; send chat id stays correct", () => {
-		for (const raw of [4402809405, -4402809405, -1004402809405, "4402809405"]) {
-			expect(normalizePeerId(raw)).toBe(4402809405);
+		for (const raw of [1234567890, -1234567890, -1001234567890, "1234567890"]) {
+			expect(normalizePeerId(raw)).toBe(1234567890);
 		}
-		const dir = makeEnvDir(VALID_BOTS, {}, { group_peer_id: -1004402809405 });
+		const dir = makeEnvDir(VALID_BOTS, {}, { group_peer_id: -1001234567890 });
 		try {
 			const config = loadConfig(dir);
-			expect(config.groupPeerId).toBe(4402809405);
-			expect(Number(`-100${config.groupPeerId}`)).toBe(-1004402809405);
+			expect(config.groupPeerId).toBe(1234567890);
+			expect(Number(`-100${config.groupPeerId}`)).toBe(-1001234567890);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -156,7 +256,7 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 		const extDir = mkdtempSync(join(tmpdir(), "persona-ext-"));
 		writeFileSync(join(extDir, "my-persona.md"), "# 外部人设\n\n仓库外绝对路径。");
 		const dir = makeEnvDir([
-			{ id: "A", token_env: "teleram_hastuyuki_bot", persona_path: join(extDir, "my-persona.md"), routing_p: 1 },
+			{ id: "A", token_env: "telegram_bot_alpha", persona_path: join(extDir, "my-persona.md"), routing_p: 1 },
 		]);
 		try {
 			const config = loadConfig(dir);
@@ -167,7 +267,7 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 			const viaExternal2 = buildSystemPrompt(readFileSync(config.bots[0]!.personaPath, "utf8"));
 			expect(sha256Short(viaExternal)).toBe(sha256Short(viaExternal2));
 			// the external persona is genuinely a different file from the repo persona
-			const viaRepo = buildSystemPrompt(readFileSync("personas/xiaoxue.md", "utf8"));
+			const viaRepo = buildSystemPrompt(readFileSync("personas/template.zh.md", "utf8"));
 			expect(sha256Short(viaExternal)).not.toBe(sha256Short(viaRepo));
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
@@ -178,7 +278,7 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 	test("per-bot overrides and tool toggles apply", () => {
 		const dir = makeEnvDir([
 			{
-				id: "A", token_env: "teleram_hastuyuki_bot", persona_path: "personas/xiaoxue.md",
+				id: "A", token_env: "telegram_bot_alpha", persona_path: "personas/alpha.md",
 				routing_p: 0.3, sampling_cooldown_ms: 0, model: "custom-model", compaction_threshold: 999, tools: { search: false },
 			},
 		]);
@@ -305,44 +405,49 @@ describe("loadConfig / bots.config.json (REQ-CONF-0001)", () => {
 		}
 	});
 
-	test("AC1: the real project config (example replica) loads against the real .env", () => {
-		// project root has bots.config.json + .env + personas/ — the migration replica must
-		// parse cleanly end to end (persona files exist, env keys present)
-		const config = loadConfig(process.cwd());
-		expect(config.bots.length).toBeGreaterThanOrEqual(2);
-		for (const b of config.bots) {
-			expect(existsSync(b.personaPath)).toBe(true);
-			expect(b.token.length).toBeGreaterThan(0);
-		}
-		expect(config.telegramAdmins).toEqual(["@aac6fef"]);
-	});
 });
 
 describe(".env.example (REQ-OPS-0001 R1)", () => {
 	test("example file is colon format and parses to expected keys", () => {
 		const env = parseEnvFile(join(process.cwd(), ".env.example"));
-		expect(env.teleram_hastuyuki_bot).toBe("123456:AAA...");
-		expect(env.deepseek_api_key).toBe("sk-...");
+		expect(env.telegram_bot_token).toBe("123456:AAA...");
+		expect(env.llm_api_key).toBe("sk-...");
 		expect(env.router_secret).toBe("...");
 		expect(Object.keys(env).length).toBeGreaterThanOrEqual(6);
 	});
 });
 
 describe("repo hygiene (REQ-OPS-0001 R3)", () => {
-	test("data/ and bots.config.json are git-ignored", () => {
-		const r = Bun.spawnSync(["git", "check-ignore", "data/agent.db", "data/sessions", "bots.config.json"], { cwd: process.cwd() });
+	test("deployment config, data, and private personas are git-ignored", () => {
+		const r = Bun.spawnSync([
+			"git", "check-ignore",
+			"data/agent.db", "data/sessions", "bots.config.json", "telegram.config.ts", "personas/private-local.md",
+		], { cwd: process.cwd() });
 		expect(r.exitCode).toBe(0);
 		const out = r.stdout.toString();
 		expect(out).toContain("data/agent.db");
 		expect(out).toContain("bots.config.json");
+		expect(out).toContain("telegram.config.ts");
+		expect(out).toContain("personas/private-local.md");
 	});
 
-	test("tracked config example uses only a non-private numeric admin placeholder", () => {
+	test("tracked examples and persona files are public-only", () => {
 		const example = JSON.parse(readFileSync(join(process.cwd(), "bots.config.example.json"), "utf8")) as {
 			telegram_admins?: unknown[];
 		};
 		expect(example.telegram_admins).toEqual([123456789]);
-		expect(readFileSync(join(process.cwd(), "bots.config.example.json"), "utf8")).not.toContain("aac6fef");
+		const tracked = Bun.spawnSync([
+			"git", "ls-files", "--cached", "--others", "--exclude-standard", "personas",
+		], { cwd: process.cwd() });
+		expect(tracked.exitCode).toBe(0);
+		expect(tracked.stdout.toString().trim().split("\n").sort()).toEqual([
+			"personas/README.md",
+			"personas/template.en.md",
+			"personas/template.zh.md",
+		]);
+		for (const path of ["bots.config.example.json", "telegram.config.example.ts"]) {
+			expect(readFileSync(join(process.cwd(), path), "utf8")).not.toMatch(/aac6fef|hastuyuki|kosamere|xiaoxue|xiaoyu/i);
+		}
 	});
 });
 

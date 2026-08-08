@@ -45,7 +45,7 @@
 
 - session 文件路径、context epoch、update offset、exposure 水位线等 KV
 - Telegram control参数只使用`telegram_override:routing_p`与`telegram_override:cooldown_ms`；值是经校验的十进制数。缺key表示使用文件配置，reset删除key；daemon在runtime构造前恢复，routing effective总和仍必须≤1。无需schema migration。
-- bot_id 为 TEXT，任意 bot id 可用（REQ-CONF-0001 泛型化：bot_state / agent_events / llm_runs / raw_updates 的 bot 列均为 TEXT，bot 清单来自 bots.config.json，代码无 A/B 假设）
+- bot_id 为 TEXT，任意 bot id 可用（REQ-CONF-0001 泛型化：bot_state / agent_events / llm_runs / raw_updates 的 bot 列均为 TEXT，bot 清单来自统一 TS/legacy JSON loader，代码无 A/B 假设）
 
 ### reply_obligations — direct reply provider 交付义务
 

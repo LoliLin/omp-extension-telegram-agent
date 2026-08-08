@@ -1,7 +1,8 @@
 // Central configuration loader (REQ-CONF-0001).
 //
-// Two sources:
-//   1. `bots.config.json` (project root, or env `bots_config` path) — declarative bot list:
+// Three sources:
+//   1. `telegram.config.ts` (preferred) or legacy `bots.config.json` (project root, or env
+//      `bots_config` path) — trusted local bot list:
 //      arbitrary number of bots, persona paths (abs / ~ / relative to project root), per-bot
 //      provider/model/auth-env, routing & tool switches. NO secrets here: credentials are
 //      referenced by env key name.
@@ -13,6 +14,15 @@
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { join, resolve, isAbsolute } from "node:path";
 import { homedir } from "node:os";
+import { createJiti } from "jiti";
+
+export { defineConfig } from "./config-schema.ts";
+export type {
+	TelegramAdminInput,
+	TelegramBotConfigInput,
+	TelegramConfigInput,
+	TelegramToolsConfigInput,
+} from "./config-schema.ts";
 
 export interface BotToolsConfig {
 	send: boolean;
@@ -129,23 +139,65 @@ export interface RawConfig {
 	bots?: unknown;
 }
 
-export function defaultConfigPath(rootDir: string): string {
-	return process.env.bots_config ?? join(rootDir, "bots.config.json");
+const TYPESCRIPT_CONFIG = "telegram.config.ts";
+const LEGACY_JSON_CONFIG = "bots.config.json";
+const configJiti = createJiti(import.meta.url, { interopDefault: false, moduleCache: false });
+
+export function defaultConfigPath(rootDir: string, override = process.env.bots_config): string {
+	if (override?.trim()) {
+		const path = isAbsolute(override) ? resolve(override) : resolve(rootDir, override);
+		if (!path.endsWith(".ts") && !path.endsWith(".json")) {
+			throw new ConfigError([`[config] bots_config: unsupported extension for ${path}; expected .ts or .json`]);
+		}
+		return path;
+	}
+	const typedPath = join(rootDir, TYPESCRIPT_CONFIG);
+	const legacyPath = join(rootDir, LEGACY_JSON_CONFIG);
+	if (existsSync(typedPath) && existsSync(legacyPath)) {
+		throw new ConfigError([
+			`[config] multiple configuration files found: ${typedPath}`,
+			`[config] multiple configuration files found: ${legacyPath}`,
+			`[config] keep exactly one, or set bots_config to an explicit .ts/.json path`,
+		]);
+	}
+	if (existsSync(typedPath)) return typedPath;
+	if (existsSync(legacyPath)) return legacyPath;
+	return typedPath;
 }
 
-/** Load + validate the bots.config.json. Errors are collected, not thrown one-by-one. */
+function loadConfigSource(path: string): unknown {
+	if (path.endsWith(".json")) {
+		try {
+			return JSON.parse(readFileSync(path, "utf8"));
+		} catch (error) {
+			throw new ConfigError([`[config] ${path}: invalid JSON: ${error instanceof Error ? error.message : String(error)}`]);
+		}
+	}
+	try {
+		const loaded = configJiti(path) as unknown;
+		return loaded && typeof loaded === "object" && "default" in loaded
+			? (loaded as { default: unknown }).default
+			: loaded;
+	} catch (error) {
+		throw new ConfigError([`[config] ${path}: unable to load trusted TypeScript: ${error instanceof Error ? error.message : String(error)}`]);
+	}
+}
+
+/** Load + validate the preferred TypeScript or legacy JSON config. */
 export function loadBotConfig(rootDir: string, env: Record<string, string>): RawConfig {
 	const errors: string[] = [];
-	const path = defaultConfigPath(rootDir);
+	const path = defaultConfigPath(rootDir, env.bots_config);
 	if (!existsSync(path)) {
-		throw new ConfigError([`[config] ${path}: missing bots.config.json (copy bots.config.example.json and edit it)`]);
+		throw new ConfigError([
+			`[config] missing configuration: ${path}`,
+			`[config] copy telegram.config.example.ts to ${TYPESCRIPT_CONFIG}, use legacy ${LEGACY_JSON_CONFIG}, or run /tg config`,
+		]);
 	}
-	let raw: RawConfig;
-	try {
-		raw = JSON.parse(readFileSync(path, "utf8")) as RawConfig;
-	} catch (err) {
-		throw new ConfigError([`[config] ${path}: invalid JSON: ${err instanceof Error ? err.message : String(err)}`]);
+	const source = loadConfigSource(path);
+	if (source == null || typeof source !== "object" || Array.isArray(source)) {
+		throw new ConfigError([`[config] ${path}: default export must be a configuration object`]);
 	}
+	const raw = source as RawConfig;
 	// bot-level validation needs the env for token_env presence
 	if (!Array.isArray(raw.bots) || raw.bots.length === 0) {
 		errors.push(`[config] bots: must be a non-empty array`);
