@@ -16,7 +16,7 @@ import {
 	defaultConfigPath,
 	ConfigError,
 } from "../src/config.ts";
-import { acquirePidLock, releasePidLock, readPid, pidAlive, isOurDaemon, listOurDaemons } from "../src/daemon/pid.ts";
+import { acquirePidLock, releasePidLock, readPid, pidAlive, isOurDaemon, isDaemonCommand, listOurDaemons } from "../src/daemon/pid.ts";
 import { buildSystemPrompt, sha256Short } from "../src/agent/prompt.ts";
 import { loadPiModelDefaults, PiSettingsConfigurationError } from "../src/agent/model-settings.ts";
 
@@ -571,6 +571,13 @@ describe("repo hygiene (REQ-OPS-0001 R3)", () => {
 });
 
 describe("pid lock (REQ-OPS-0001 R4)", () => {
+	test("foreground and direct daemon commands share one strict ownership identity", () => {
+		expect(isDaemonCommand("bun run src/daemon/index.ts")).toBe(true);
+		expect(isDaemonCommand("bun run src/main.ts start --foreground")).toBe(true);
+		expect(isDaemonCommand("/opt/homebrew/bin/bun src/main.ts start --foreground")).toBe(true);
+		expect(isDaemonCommand("bun run src/main.ts start")).toBe(false);
+		expect(isDaemonCommand("sh -c bun run src/main.ts start --foreground")).toBe(false);
+	});
 	test("acquire/release roundtrip; stale dead pid is taken over", () => {
 		const dir = mkdtempSync(join(tmpdir(), "pidlock-"));
 		try {

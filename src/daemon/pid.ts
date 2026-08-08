@@ -46,10 +46,22 @@ function processCwd(pid: number): string | null {
 function daemonEntry(command: string): string | null {
 	const args = command.trim().split(/\s+/);
 	if (basename(args[0] ?? "") !== "bun") return null;
-	const entry = args[1] === "run" ? args[2] : args[1];
+	const runOffset = args[1] === "run" ? 2 : 1;
+	const entry = args[runOffset];
 	if (!entry) return null;
 	const unquoted = entry.replace(/^["']|["']$/g, "");
-	return /(?:^|\/)daemon\/index(?:\.ts)?$/.test(unquoted) ? unquoted : null;
+	if (/(?:^|\/)daemon\/index(?:\.ts)?$/.test(unquoted)) return unquoted;
+	if (
+		/(?:^|\/)main(?:\.ts)?$/.test(unquoted)
+		&& args[runOffset + 1] === "start"
+		&& args.slice(runOffset + 2).includes("--foreground")
+	) return unquoted;
+	return null;
+}
+
+/** Deterministic command-shape contract used by PID ownership and its regression tests. */
+export function isDaemonCommand(command: string): boolean {
+	return daemonEntry(command) != null;
 }
 
 /** True only for a daemon entry running from this repository; recycled/other-repo pids are refused. */
