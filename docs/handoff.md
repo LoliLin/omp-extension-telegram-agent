@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：Telegram 前端已重做为真正的 Pi native transcript plugin；STICKER-0002 与 ROUTE-0001 已实现并通过目标测试，下一项是 UI-0005 daemon write contract。
+2026-08-08：STICKER-0002、ROUTE-0001 与 UI-0005 daemon write contract 已完成；下一项 T6 是 Pi 原生 editor compose 模式。
 
 ## 已完成
 
@@ -18,7 +18,7 @@
 
 1. **已实现 `REQ-STICKER-0002`**：fixed/dynamic catalog 只暴露当前 bot 有 file_id mapping 的 short id；A `s241–s244` / B `s144` 回归已锁，cache schema 2→3。真实群各 bot 发送 smoke 留到总验收。
 2. **已实现 `REQ-ROUTE-0001`**：probability 命中 busy/cooldown target 时 fast-skip 且不改投；默认 2 秒 monotonic deadline；explicit trigger 保留 pending/bypass。44 个 routing/flush/config/cache 测试通过。
-3. **P1 `REQ-UI-0005`**：显式 compose 模式用 Pi `input` event 拦截原生 editor，daemon 新增 additive send IPC；不替换 editor、不进 LLM。
+3. **进行中 `REQ-UI-0005`**：daemon `send_message`/request-id dedupe/send→DB→broadcast 已完成（62 target pass）；待 Pi `input` event、显式 compose identity、失败/unknown 恢复与 lifecycle cleanup。
 4. **P1 `REQ-UI-0006`**：vision 持久化完成后广播 additive update，更新同一 TUI-only media card；复用 lazy vision，不新增模型调用。
 5. **P2 `REQ-UI-0007`**：删除自定义 stats widget，改用 Pi default footer 的 `setStatus` 原生状态行；完整明细留 `/tg status`。
 6. **P2 `REQ-UI-0008`**：用 `registerCommand.getArgumentCompletions` + 共享命令树实现 `/tg` 任意层原生补全。

@@ -257,3 +257,11 @@
 - mention/reply/name 统一走 explicit path：busy 继续 pending coalesce，cooldown 中仍可立即启动。daemon 维护并打印 triggered/skipped_busy/skipped_cooldown counters，不记录消息正文。
 - 测试：router distribution/reason/no-redistribution、100-message persisted burst、fake clock 1999/2000 ms、失败后冷却、explicit 边界与 config validation；routing/flush/config/cache 44 pass，typecheck 通过。
 - Cache impact: **NONE**——system/tool/message grammar 与 provider bytes 不变；预期减少连续 LLM run、miss tokens 与成本。
+
+## 2026-08-08 (25) — daemon manual-send service 与 additive IPC
+
+- 抽取 `sendTextAndPersist`，agent tool 与 operator path 共享 Telegram success → canonical DB primitive；manual path 在 daemon 内持有 token/API，extension 只会看到 bot id、request id 与结果。
+- `ManualSendService` 校验 request id、配置 bot、非空文本与 4096 字符上限；256-entry 有界 cache 合并并发/已完成重复，same-id different-content 明确 conflict，全 in-flight 时 fast-fail busy。
+- IPC additive 增加 `send_message` / `send_result`；Telegram 成功后 DB 落库、live broadcast、ACK。401/普通失败可恢复，Telegram 已成功但 DB 失败或 socket ACK 丢失走 unknown/no-auto-retry 语义；observer callback 失败不把已发送消息翻成 failure。
+- 测试：manual service + IPC + real Unix observer client + canonical echo + agent send/cache regression 62 pass，含 4096 Unicode code-point 边界；typecheck 通过。
+- Cache impact: **NONE**——manual operator I/O 不调用 LLM、不改 system/tool/message grammar；provider token 增量 0。

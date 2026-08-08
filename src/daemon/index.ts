@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CACHE_SCHEMA_VERSION } from "../agent/prompt.ts";
+import { ManualSendService } from "./manual-send.ts";
 
 const rootDir = process.cwd();
 const config = loadConfig(rootDir);
@@ -37,8 +38,9 @@ if (!config.routerSecret) {
 
 // resolve bot identities (getMe) so we can recognize own messages and mentions
 console.log(`[daemon] bot list: ${config.bots.map((b) => `${b.id} (${b.name}) persona=${b.personaPath} model=${b.model}`).join(", ")}`); // no tokens
+const botApis = new Map(config.bots.map((bot) => [bot.id, new BotApi(bot.token)] as const));
 for (const bot of config.bots) {
-	const me = await new BotApi(bot.token).getMe();
+	const me = await botApis.get(bot.id)!.getMe();
 	setBotState(db, bot.id, "bot_user_id", String(me.id));
 	setBotState(db, bot.id, "bot_username", me.username);
 	console.log(`[daemon] bot ${bot.id} (${bot.name}) = @${me.username} (${me.id})`);
@@ -83,7 +85,23 @@ function recordRouteMetric(metric: string, botId: string, messageId: number): vo
 // IPC server for TUI attach/detach
 const botNames = new Map(config.bots.map((b) => [b.id, b.name] as [string, string]));
 const botUserIds = new Map(identities.map((i) => [i.id, i.userId] as [string, number]));
-const ipc = new IpcServer(db, join(config.dataDir, "daemon.sock"), botNames, botUserIds);
+let ipc!: IpcServer;
+const manualSend = new ManualSendService(
+	db,
+	Number(`-100${config.groupPeerId}`),
+	botApis,
+	({ chatId, messageId }) => {
+		const row = db.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?").get(chatId, messageId) as MessageRow | null;
+		if (row) ipc.broadcast(ipc.msgToItem(row));
+	},
+);
+ipc = new IpcServer(
+	db,
+	join(config.dataDir, "daemon.sock"),
+	botNames,
+	botUserIds,
+	(request) => manualSend.send(request),
+);
 for (const [botId, rt] of runtimes) {
 	rt.eventSink = (kind, payload) => {
 		ipc.broadcast({ kind: "evt", ts: Date.now(), botId, botName: botNames.get(botId) ?? botId, evtKind: kind, payload: JSON.stringify(payload) });

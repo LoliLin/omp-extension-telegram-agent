@@ -44,6 +44,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 
 - Telegram feed 是 Pi transcript 中一个 TUI-only custom entry；滚动、resize、选择、editor 与图片布局由 Pi fullscreen host 负责。
 - 当前普通 editor 提交仍发送给 Pi agent，**不会发送 Telegram**；该能力已调查为 `REQ-UI-0005`，尚未实现。
+- daemon 已有 additive `send_message` IPC 与 request-id 去重，但在 `/tg compose` 完成前没有用户入口；不要手工向 socket 写 JSON。
 - 当前 stats 仍是 Pi component widget；迁移到 default footer `setStatus` 的原生底栏样式见 `REQ-UI-0007`，尚未实现。
 - 当前 `/tg` 子命令没有参数补全；原生分级 completion 方案见 `REQ-UI-0008`，尚未实现。
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。

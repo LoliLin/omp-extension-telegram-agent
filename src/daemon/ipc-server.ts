@@ -11,6 +11,8 @@ import type {
 	TimelineCursor,
 	StatsSnapshot,
 	UsageRun,
+	SendMessageRequest,
+	SendMessageResult,
 } from "../ipc.ts";
 import { encodeFrame, FrameDecoder, FrameOverflowError } from "../ipc.ts";
 import type { MessageRow } from "../agent/serialize.ts";
@@ -30,6 +32,8 @@ interface OutQueue {
 	total: number;
 }
 
+export type ManualSendHandler = (request: SendMessageRequest) => Promise<SendMessageResult>;
+
 export class IpcServer {
 	private db: Database;
 	private sockPath: string;
@@ -43,7 +47,13 @@ export class IpcServer {
 	private encoder = new TextEncoder();
 	private server: ReturnType<typeof Bun.listen> | null = null;
 
-	constructor(db: Database, sockPath: string, botNames: Map<string, string>, botUserIds: Map<string, number>) {
+	constructor(
+		db: Database,
+		sockPath: string,
+		botNames: Map<string, string>,
+		botUserIds: Map<string, number>,
+		private readonly manualSend: ManualSendHandler | null = null,
+	) {
 		this.db = db;
 		this.sockPath = sockPath;
 		this.botNames = botNames;
@@ -209,7 +219,39 @@ export class IpcServer {
 				socket,
 				encodeFrame({ type: "history", items, hasMore: items.length >= limit } satisfies ServerMessage),
 			);
+		} else if (req.type === "send_message") {
+			void this.handleManualSend(socket, req);
 		}
+	}
+
+	private async handleManualSend(socket: SocketLike, request: SendMessageRequest): Promise<void> {
+		let result: SendMessageResult;
+		if (!this.manualSend) {
+			result = {
+				requestId: typeof request.requestId === "string" ? request.requestId : "",
+				botId: typeof request.botId === "string" ? request.botId : "",
+				ok: false,
+				code: "service_unavailable",
+				error: "manual Telegram sending is unavailable",
+			};
+		} else {
+			try {
+				result = await this.manualSend(request);
+			} catch (error) {
+				console.error(`[ipc] manual send handler failed: ${String(error)}`);
+				result = {
+					requestId: typeof request.requestId === "string" ? request.requestId : "",
+					botId: typeof request.botId === "string" ? request.botId : "",
+					ok: false,
+					code: "internal_error",
+					error: "manual Telegram send failed internally",
+				};
+			}
+		}
+		// The request may finish after the client disconnects. Persistence/broadcast remains
+		// valid, but there is no ACK destination and the client must treat that as unknown.
+		if (!this.listeners.has(socket)) return;
+		this.writeFrame(socket, encodeFrame({ type: "send_result", ...result } satisfies ServerMessage));
 	}
 
 	/**

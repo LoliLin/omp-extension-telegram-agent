@@ -2,6 +2,7 @@
 // Protocol:
 //   C->S {type:"hello"}                       S->C {type:"snapshot", items: TimelineItem[]}
 //   C->S {type:"history", before, limit}      S->C {type:"history", items, hasMore}
+//   C->S {type:"send_message", requestId,...} S->C {type:"send_result", requestId, ok,...}
 //   (push)                                    S->C {type:"append", item: TimelineItem}
 //
 // Pagination uses a composite cursor (ts, rank, id): rank 0 = agent event (id = agent_events.id),
@@ -81,15 +82,53 @@ export interface StatsSnapshot {
 	bots: Record<string, BotStats>;
 }
 
+export type SendMessageErrorCode =
+	| "invalid_request"
+	| "unknown_bot"
+	| "too_long"
+	| "request_conflict"
+	| "busy"
+	| "telegram_error"
+	| "unknown_outcome"
+	| "service_unavailable"
+	| "internal_error";
+
+export interface SendMessageSuccess {
+	requestId: string;
+	botId: string;
+	ok: true;
+	chatId: number;
+	messageId: number;
+}
+
+export interface SendMessageFailure {
+	requestId: string;
+	botId: string;
+	ok: false;
+	code: SendMessageErrorCode;
+	error: string;
+}
+
+export type SendMessageResult = SendMessageSuccess | SendMessageFailure;
+
+export interface SendMessageRequest {
+	type: "send_message";
+	requestId: string;
+	botId: string;
+	text: string;
+}
+
 export type ClientRequest =
 	| { type: "hello"; filter?: string } // filter = bot id; absent = global view (REQ-UI-0002)
-	| { type: "history"; beforeTs?: number; before?: TimelineCursor; limit: number };
+	| { type: "history"; beforeTs?: number; before?: TimelineCursor; limit: number }
+	| SendMessageRequest;
 
 export type ServerMessage =
 	| { type: "snapshot"; items: TimelineItem[]; stats?: StatsSnapshot }
 	| { type: "history"; items: TimelineItem[]; hasMore: boolean }
 	| { type: "append"; item: TimelineItem }
-	| { type: "usage"; run: UsageRun };
+	| { type: "usage"; run: UsageRun }
+	| ({ type: "send_result" } & SendMessageResult);
 
 export function encodeFrame(msg: unknown): string {
 	return `${JSON.stringify(msg)}\n`;

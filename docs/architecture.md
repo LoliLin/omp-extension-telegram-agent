@@ -34,7 +34,7 @@
 
 - 每个 bot token 一个 getUpdates long-polling 循环（offset 持久化在 SQLite）
 - 每条 update：原样存 raw_updates（bot identity + update_id 唯一）→ normalize 成 canonical message（chat_id + message_id 唯一，多个 bot 收到的同一条群消息只存一条）→ edit 存 revision
-- Bot 自己 send 成功后，Telegram 返回的 Message 立即落库（发送→DB→TUI 事务链）
+- Bot 自己 send 成功后，Telegram 返回的 Message 立即落库（发送→DB→TUI 事务链）。agent send tool 与 operator manual send 都复用 `src/telegram/send.ts` 的 send→canonical persistence primitive。
 
 ## Routing（Phase 5，REQ-CONF-0001 泛型化）
 
@@ -77,7 +77,8 @@
 - `src/plugin/timeline.ts` 是无展示逻辑的 IPC client，只负责连接、snapshot/live/history、复合游标、去重、stats 合并与有界媒体读取。
 - public extension API 没有 transcript scroll-top 事件，因此更早历史由 `/tg more` 显式加载；`/tg detach` 只断开 live socket，已显示内容保留。session restore 的旧锚点以 detached 状态呈现，不自动重连。
 - stats 用 `ctx.ui.setWidget` component factory 渲染；active feed 可复用同一份 IPC stats，独立 panel 自己拥有并清理订阅。
-- IPC：Unix socket JSONL，daemon 为 server；协议 = hello（可带 bot filter）/ history 分页拉取 / event 订阅 / usage 增量推送（REQ-UI-0003）
+- IPC：Unix socket JSONL，daemon 为 server；协议 = hello（可带 bot filter）/ history 分页拉取 / event 订阅 / usage 增量推送（REQ-UI-0003）/ additive `send_message`→`send_result`（REQ-UI-0005）。
+- **manual send（UI-0005 daemon contract）**：extension 只提交 request id、bot id 与纯文本；daemon 校验身份/空文本/4096 字符上限，在有界 256-entry request cache 中合并并发重复，再调用 Telegram。API 成功后先写 canonical DB、再 broadcast、最后 ACK；ACK 丢失不触发 daemon retry。相同 id 不同内容返回 conflict；API/DB 边界给出 explicit failure/unknown outcome，token 不出 daemon。
 - **传输层**：FrameDecoder 持单个 streaming TextDecoder（多字节字符跨 chunk 不腐蚀）；接收缓冲 4MB 上限，超限断开；socket.write <0 即踢连接，出站队列 1MB 上限，超限断开（TUI 挂起时 daemon 内存有界）
 - **分页**：merged timeline 统一排序键 (ts, rank, id)（rank 0=agent 事件，1=群消息），history 用复合游标，同秒多条消息不丢不重；旧客户端只发 beforeTs 时保持严格 `ts<` 语义（双向兼容，新客户端同时发送两字段）
 - **本机暴露面**：socket 文件 chmod 600；history limit 服务端夹取 [1,500]

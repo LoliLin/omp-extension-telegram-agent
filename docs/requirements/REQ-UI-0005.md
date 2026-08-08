@@ -1,6 +1,6 @@
 # REQ-UI-0005: 用 Pi 底部 editor 直接发送 Telegram 消息
 
-- **Status:** Proposed（2026-08-08 已调查，未实现）
+- **Status:** In progress（2026-08-08 daemon send service/IPC 已实现；Pi compose/editor T6 待实现）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「用底部的输入栏作为 bot 发送消息」
 - **依赖:** REQ-UI-0004、REQ-CONF-0001

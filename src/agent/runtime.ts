@@ -22,6 +22,7 @@ import type { BotConfig, AppConfig } from "../config.ts";
 import { getBotState, setBotState } from "../db/db.ts";
 import { BotApi } from "../telegram/api.ts";
 import { insertSentMessage } from "../telegram/ingest.ts";
+import { sendTextAndPersist } from "../telegram/send.ts";
 import { serializeMessages, type MessageRow } from "./serialize.ts";
 import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT } from "./prompt.ts";
 import { TOOL_DEFS, toolsHash, type SendParams } from "./tools.ts";
@@ -393,11 +394,17 @@ export class BotRuntime {
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		const sentIds: number[] = [];
 		if (params.message) {
-			const m = await this.api.sendMessage(chatId, params.message, params.reply_to);
-			const canonical = insertSentMessage(this.db, this.bot.id, m);
+			const { raw, canonical } = await sendTextAndPersist(
+				this.db,
+				this.api,
+				this.bot.id,
+				chatId,
+				params.message,
+				params.reply_to,
+			);
 			sentIds.push(canonical.message_id);
 			this.markExposed([canonical.message_id]);
-			this.sentMessageSink?.(m);
+			this.sentMessageSink?.(raw);
 		}
 		if (stickerFileId) {
 			const m = await this.api.sendSticker(chatId, stickerFileId, params.reply_to);

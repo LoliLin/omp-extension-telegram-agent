@@ -9,7 +9,7 @@ import { readFileSync, statSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FrameDecoder, FrameOverflowError, encodeFrame } from "../src/ipc.ts";
-import { IpcServer } from "../src/daemon/ipc-server.ts";
+import { IpcServer, type ManualSendHandler } from "../src/daemon/ipc-server.ts";
 import { sanitizeText } from "../src/sanitize.ts";
 
 let db: Database;
@@ -29,8 +29,8 @@ function insertEvt(botId: string, ts: number, kind: string, payload: string): vo
 	db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (?, ?, ?, ?)").run(botId, ts, kind, payload);
 }
 
-function makeServer(): IpcServer {
-	return new IpcServer(db, "/tmp/nonexistent-ipc-test.sock", new Map([["A", "小雪"]]), new Map([["A", 777]]));
+function makeServer(manualSend: ManualSendHandler | null = null): IpcServer {
+	return new IpcServer(db, "/tmp/nonexistent-ipc-test.sock", new Map([["A", "小雪"]]), new Map([["A", 777]]), manualSend);
 }
 
 /** Fake socket capturing frames; write returns `written` bytes per call (0 = stalled). */
@@ -236,6 +236,64 @@ describe("socket hardening (R4)", () => {
 		const resp = frames[0] as { items: unknown[]; hasMore: boolean };
 		expect(resp.items.length).toBeLessThanOrEqual(500);
 		expect(resp.items.length).toBe(50);
+	});
+});
+
+describe("manual send IPC (REQ-UI-0005)", () => {
+	test("send_message forwards request id and returns the handler result", async () => {
+		const requests: unknown[] = [];
+		const server = makeServer(async (request) => {
+			requests.push(request);
+			return { requestId: request.requestId, botId: request.botId, ok: true, chatId: -1001, messageId: 900 };
+		});
+		const frames: unknown[] = [];
+		const socket = fakeSocket(() => 1 << 20, (frame) => frames.push(frame));
+		attach(server, socket);
+		(server as any).handleRequest(socket, { type: "send_message", requestId: "req-1", botId: "A", text: "hello" });
+		await Bun.sleep(0);
+		expect(requests).toEqual([{ type: "send_message", requestId: "req-1", botId: "A", text: "hello" }]);
+		expect(frames).toEqual([
+			{ type: "send_result", requestId: "req-1", botId: "A", ok: true, chatId: -1001, messageId: 900 },
+		]);
+	});
+
+	test("missing or throwing handlers return bounded explicit errors", async () => {
+		for (const server of [makeServer(), makeServer(async () => { throw new Error("secret internal detail"); })]) {
+			const frames: unknown[] = [];
+			const socket = fakeSocket(() => 1 << 20, (frame) => frames.push(frame));
+			attach(server, socket);
+			const originalError = console.error;
+			console.error = () => {};
+			try {
+				(server as any).handleRequest(socket, { type: "send_message", requestId: "req-fail", botId: "A", text: "hello" });
+				await Bun.sleep(0);
+			} finally {
+				console.error = originalError;
+			}
+			expect(frames).toHaveLength(1);
+			const frame = frames[0] as { type: string; ok: boolean; code: string; error: string };
+			expect(frame.type).toBe("send_result");
+			expect(frame.ok).toBe(false);
+			expect(["service_unavailable", "internal_error"]).toContain(frame.code);
+			expect(frame.error).not.toContain("secret internal detail");
+		}
+	});
+
+	test("ACK is dropped when the socket disconnects while send is in flight", async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const server = makeServer(async (request) => {
+			await gate;
+			return { requestId: request.requestId, botId: request.botId, ok: true, chatId: -1001, messageId: 901 };
+		});
+		const frames: unknown[] = [];
+		const socket = fakeSocket(() => 1 << 20, (frame) => frames.push(frame));
+		attach(server, socket);
+		(server as any).handleRequest(socket, { type: "send_message", requestId: "req-lost", botId: "A", text: "hello" });
+		(server as any).listeners.delete(socket);
+		release();
+		await Bun.sleep(0);
+		expect(frames).toEqual([]);
 	});
 });
 
