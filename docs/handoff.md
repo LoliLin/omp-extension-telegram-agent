@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：用户新增的 footer lifetime/more-stats note 已调查并写成 UI-0009；下一项 T10b 补 cache-write、restart 回归与 `/tg status` 详情。
+2026-08-08：UI-0009 lifetime/cache-write/status detail 已实现并通过 targeted tests；提交后先调查 REQ-LIST 最新的 explicit keyword、统一 reply send tool/cost 与 README notes，再继续 T11。
 
 ## 已完成
 
@@ -23,11 +23,11 @@
 5. **已实现 `REQ-UI-0003/0007`**：删除 stats widget；`setFooter` 直接返回 Pi `FooterComponent`，IPC stats 只做内存 read view，完整明细保留 `/tg status`。targeted 53 tests/typecheck/cache golden 通过，真实 TTY footer 留 T14。
 6. **已实现 `REQ-UI-0008`**：递归 command tree 同时驱动 help/parser/dispatch/completion；A/B/C、config error 与 future third-level targeted tests 通过，真实 Pi 菜单留 T14。
 7. **P1 `REQ-PLAT-0001`**：N-bot daemon 已通用；剩余 DeepSeek provider hardcode、e2e `bots[0]`、双 bot 产品文案与第三 bot 全链验证。
-8. **已调查 `REQ-UI-0009`**：当前 totals 已是 DB 首条 run 以来、跨重启/epoch的 lifetime；待 T10b 补 Pi 原生 `W`、幂等 migration、restart 锁定与 reasoning/latency status 详情。
+8. **已实现 `REQ-UI-0009`**：DB lifetime 跨 file reopen/daemon rebuild，cache-write 幂等 migration + additive telemetry 完成；Pi 原生 `W/CH` 与详细 status/零 run 共 70 targeted tests 通过，真实 smoke 留 T14。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 
-建议顺序：UI-0009 telemetry completeness → PLAT-0001 provider/config → 参数化 e2e/composition → 平台文档 → T14 总验收。
+建议顺序：先吸收最新 REQ-LIST notes → PLAT-0001 provider/config → 参数化 e2e/composition → 平台/README 文档 → T14 总验收。
 
 ## 使用方式
 

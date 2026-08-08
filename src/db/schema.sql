@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS llm_runs (
 	epoch INTEGER NOT NULL,
 	context_tokens INTEGER,
 	cache_read INTEGER,
+	cache_write INTEGER NOT NULL DEFAULT 0,
 	cache_miss INTEGER,
 	output_tokens INTEGER,
 	reasoning_tokens INTEGER,

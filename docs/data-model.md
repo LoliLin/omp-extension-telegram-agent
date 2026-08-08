@@ -34,7 +34,8 @@
 
 ### llm_runs / telemetry — provider 遥测
 
-- 见 docs/cache.md 的字段清单；含 system hash / tools hash / message hashes
+- 每条 provider response 记录 context/input(cache miss)/cache read/cache write/output/reasoning/latency/cost、model/epoch 与 system/tools/messages hashes；`cache_write` 在 REQ-UI-0009 加入，旧库幂等 migration 为 `NOT NULL DEFAULT 0`，历史未知值不伪造。
+- footer/status 的 lifetime totals 对当前配置 bot 聚合本表全部保留行，因此跨 daemon/Pi restart 与 compaction/epoch；current context 只取最新 run，不累加历史 occupancy。
 
 ### bot_state — 每 bot 运行状态
 

@@ -504,6 +504,7 @@ describe("native Pi Telegram extension", () => {
 		expect(footer).toBeInstanceOf(FooterComponent);
 		const rendered = footer!.render(180).join("\n");
 		expect(rendered).toContain("↑13k ↓817 R20k CH60.6% $0.002 1.5%/1.0M (auto)");
+		expect(rendered).not.toContain(" W");
 		expect(rendered).toContain("deepseek-v4-flash • medium");
 		expect(host.widgetInputs).toHaveLength(0);
 		expect(host.sessionEntries).toEqual([]);
@@ -513,6 +514,26 @@ describe("native Pi Telegram extension", () => {
 		}
 		await host.command("compose A");
 		expect(host.getFooter()!.render(180).join("\n")).toContain("TELEGRAM · SEND AS A");
+	});
+
+	test("native footer adds lifetime cache-write and lets Pi compute CH with the full prompt denominator", async () => {
+		const host = makeHost();
+		await host.command("attach A");
+		host.clients[0]!.emit({
+			type: "stats",
+			stats: {
+				A: {
+					runs: 2, contextTokens: 1000, cacheRead: 800, cacheWrite: 100, cacheMiss: 100,
+					outputTokens: 50, reasoningTokens: 25, totalLatencyMs: 600, latencySamples: 2,
+					firstRunTs: 1000, cost: 0.004, epoch: 2,
+					last: { id: 2, botId: "A", ts: 2000, model: "deepseek-v4-flash", epoch: 2, contextTokens: 5000, cacheRead: 4000, cacheWrite: 500, cacheMiss: 500, outputTokens: 30, reasoningTokens: 15, latencyMs: 350, cost: 0.003 },
+				},
+			},
+		});
+
+		const rendered = host.getFooter()!.render(180).join("\n");
+		expect(rendered).toContain("↑100 ↓50 R800 W100 CH80.0% $0.004");
+		expect(host.sessionEntries).toEqual([]);
 	});
 
 	test("global footer aggregates bots and uses the latest run model context", async () => {
@@ -568,14 +589,43 @@ describe("native Pi Telegram extension", () => {
 		expect(host.getFooter()).toBeInstanceOf(FooterComponent);
 	});
 
-	test("status reuses active feed telemetry without another socket", async () => {
+	test("status reuses active feed and reports lifetime/latest telemetry details", async () => {
 		const host = makeHost();
 		await host.command("attach A");
-		const stats: BotStats = { runs: 1, contextTokens: 1000, cacheRead: 800, cacheMiss: 200, outputTokens: 10, cost: 0.01, epoch: 2, last: null };
+		const stats: BotStats = {
+			runs: 2, contextTokens: 3000, cacheRead: 2200, cacheWrite: 300, cacheMiss: 500,
+			outputTokens: 30, reasoningTokens: 12, totalLatencyMs: 600, latencySamples: 2,
+			firstRunTs: new Date("2026-08-08T00:00:00+08:00").getTime(), cost: 0.03, epoch: 2,
+			last: { id: 2, botId: "A", ts: 2000, model: "deepseek-v4-flash", epoch: 2, contextTokens: 2000, cacheRead: 1500, cacheWrite: 200, cacheMiss: 300, outputTokens: 20, reasoningTokens: 7, latencyMs: 400, cost: 0.02 },
+		};
 		host.clients[0]!.emit({ type: "stats", stats: { A: stats } });
 		await host.command("status A");
 		expect(host.clients).toHaveLength(1);
-		expect(host.notifies.at(-1)?.text).toContain("hit 80.0%");
+		const text = host.notifies.at(-1)?.text ?? "";
+		expect(text).toContain("A · lifetime · 2 runs since 2026-08-08 00:00:00");
+		expect(text).toContain("last · ep2 · ctx 2.00K · miss 300 · read 1.50K · write 200 · out 20 · reasoning 7 · 400ms · $0.0200");
+		expect(text).toContain("total · prompt 3.00K · ↑500 ↓30 R2.20K W300 · reasoning 12 · $0.0300 · CH73.3% · avg 300ms");
+
+		const empty = makeHost();
+		await empty.command("attach A");
+		empty.clients[0]!.emit({ type: "stats", stats: { A: { runs: 0, contextTokens: 0, cacheRead: 0, cacheMiss: 0, outputTokens: 0, cost: 0, epoch: 0, last: null } } });
+		await empty.command("status A");
+		expect(empty.notifies.at(-1)?.text).toBe("A · lifetime · no runs yet");
+
+		const noLatency = makeHost();
+		await noLatency.command("attach A");
+		noLatency.clients[0]!.emit({
+			type: "stats",
+			stats: { A: {
+				runs: 1, contextTokens: 100, cacheRead: 0, cacheWrite: 0, cacheMiss: 100,
+				outputTokens: 5, reasoningTokens: 0, totalLatencyMs: 0, latencySamples: 0,
+				firstRunTs: 1000, cost: 0, epoch: 1,
+				last: { id: 1, botId: "A", ts: 1000, model: "m", epoch: 1, contextTokens: 100, cacheRead: 0, cacheWrite: 0, cacheMiss: 100, outputTokens: 5, reasoningTokens: 0, latencyMs: null, cost: 0 },
+			} },
+		});
+		await noLatency.command("status A");
+		expect(noLatency.notifies.at(-1)?.text).toContain("latency n/a");
+		expect(noLatency.notifies.at(-1)?.text).toContain("avg n/a");
 	});
 
 	test("invalid bot ids are rejected and session shutdown disposes live resources", async () => {

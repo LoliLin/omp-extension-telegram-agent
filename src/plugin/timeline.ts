@@ -340,17 +340,35 @@ export class TimelineClient implements TimelinePort {
 	private emitStats(): void {
 		const stats: Record<string, BotStats> = {};
 		for (const [botId, baseline] of Object.entries(this.baselineStats)) {
-			const live = [...this.pendingUsage.values()].filter((run) => run.botId === botId && run.id > this.baselineLastId);
-			stats[botId] = {
+			const live = [...this.pendingUsage.values()]
+				.filter((run) => run.botId === botId && run.id > this.baselineLastId)
+				.sort((left, right) => left.id - right.id);
+			const merged: BotStats = {
 				...baseline,
-				runs: baseline.runs + live.length,
-				contextTokens: baseline.contextTokens + live.reduce((sum, run) => sum + run.contextTokens, 0),
-				cacheRead: baseline.cacheRead + live.reduce((sum, run) => sum + run.cacheRead, 0),
-				cacheMiss: baseline.cacheMiss + live.reduce((sum, run) => sum + run.cacheMiss, 0),
-				outputTokens: baseline.outputTokens + live.reduce((sum, run) => sum + run.outputTokens, 0),
-				cost: baseline.cost + live.reduce((sum, run) => sum + run.cost, 0),
-				last: live.at(-1) ?? baseline.last,
+				cacheWrite: baseline.cacheWrite ?? 0,
+				reasoningTokens: baseline.reasoningTokens ?? 0,
+				totalLatencyMs: baseline.totalLatencyMs ?? 0,
+				latencySamples: baseline.latencySamples ?? 0,
+				firstRunTs: baseline.firstRunTs ?? baseline.last?.ts ?? null,
 			};
+			for (const run of live) {
+				merged.runs++;
+				merged.contextTokens += run.contextTokens;
+				merged.cacheRead += run.cacheRead;
+				merged.cacheWrite! += run.cacheWrite ?? 0;
+				merged.cacheMiss += run.cacheMiss;
+				merged.outputTokens += run.outputTokens;
+				merged.reasoningTokens! += run.reasoningTokens ?? 0;
+				if (run.latencyMs != null) {
+					merged.totalLatencyMs! += run.latencyMs;
+					merged.latencySamples!++;
+				}
+				merged.cost += run.cost;
+				merged.epoch = Math.max(merged.epoch, run.epoch);
+				merged.firstRunTs = merged.firstRunTs == null ? run.ts : Math.min(merged.firstRunTs, run.ts);
+				merged.last = run;
+			}
+			stats[botId] = merged;
 		}
 		this.hooks.onEvent({ type: "stats", stats });
 	}

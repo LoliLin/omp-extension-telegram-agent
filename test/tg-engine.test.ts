@@ -2,10 +2,11 @@ process.env.TZ = "Asia/Singapore";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { IpcServer } from "../src/daemon/ipc-server.ts";
+import { openDb } from "../src/db/db.ts";
 import type { SendMessageRequest } from "../src/ipc.ts";
 import { TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
 
@@ -231,6 +232,69 @@ describe("Pi plugin timeline client", () => {
 		const latest = log.events.filter((event): event is Extract<TimelineEvent, { type: "stats" }> => event.type === "stats").at(-1)!;
 		expect(latest.stats.A?.contextTokens).toBe(6000);
 		expect(latest.stats.A?.cacheRead).toBe(4800);
+	});
+
+	test("lifetime telemetry survives daemon restart, merges live detail once, and excludes removed bots", async () => {
+		server.stop();
+		db.close();
+		const dbPath = join(tmpdir(), `tg-lifetime-${process.pid}-${Date.now()}.db`);
+		sockPath = join(tmpdir(), `tg-lifetime-${process.pid}-${Date.now()}.sock`);
+		let client: TimelineClient | null = null;
+		try {
+			db = openDb(dbPath);
+			db.query("INSERT INTO llm_runs (id, bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost) VALUES (1, 'A', 1000, 'm', 1, 1000, 700, 100, 200, 10, 5, 200, 0.01)").run();
+			db.query("INSERT INTO llm_runs (id, bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost) VALUES (2, 'removed', 1500, 'm', 1, 9999, 0, 0, 9999, 99, 99, 999, 9.99)").run();
+			server = new IpcServer(db, sockPath, new Map([["A", "小雪"], ["B", "小雨"]]), new Map([["A", 777], ["B", 888]]));
+			server.start();
+			const first = await connect(null);
+			client = first.client;
+			const beforeRestart = await first.log.waitFor((event) => event.type === "stats") as Extract<TimelineEvent, { type: "stats" }>;
+			expect(beforeRestart.stats.A?.runs).toBe(1);
+			client.dispose();
+			client = null;
+			server.stop();
+			db.close();
+
+			db = openDb(dbPath);
+			server = new IpcServer(db, sockPath, new Map([["A", "小雪"], ["B", "小雨"]]), new Map([["A", 777], ["B", 888]]));
+			server.start();
+			const second = await connect(null);
+			client = second.client;
+			const baseline = await second.log.waitFor((event) => event.type === "stats") as Extract<TimelineEvent, { type: "stats" }>;
+			expect(baseline.stats.A).toMatchObject({ runs: 1, cacheWrite: 100, reasoningTokens: 5, totalLatencyMs: 200, latencySamples: 1, firstRunTs: 1000 });
+			expect(baseline.stats.removed).toBeUndefined();
+
+			db.query("INSERT INTO llm_runs (id, bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost) VALUES (3, 'A', 2000, 'm', 2, 2000, 1500, 200, 300, 20, 7, 400, 0.02)").run();
+			server.broadcastUsage({
+				id: 3, botId: "A", ts: 2000, model: "m", epoch: 2, contextTokens: 2000,
+				cacheRead: 1500, cacheWrite: 200, cacheMiss: 300, outputTokens: 20,
+				reasoningTokens: 7, latencyMs: 400, cost: 0.02,
+			});
+			const merged = await second.log.waitFor((event) => event.type === "stats" && event.stats.A?.runs === 2) as Extract<TimelineEvent, { type: "stats" }>;
+
+			expect(merged.stats.A).toMatchObject({
+				runs: 2,
+				contextTokens: 3000,
+				cacheRead: 2200,
+				cacheWrite: 300,
+				cacheMiss: 500,
+				outputTokens: 30,
+				reasoningTokens: 12,
+				totalLatencyMs: 600,
+				latencySamples: 2,
+				firstRunTs: 1000,
+				epoch: 2,
+				cost: 0.03,
+			});
+			expect(merged.stats.A?.last).toMatchObject({ id: 3, cacheWrite: 200, reasoningTokens: 7, latencyMs: 400 });
+		} finally {
+			client?.dispose();
+			server.stop();
+			db.close();
+			for (const suffix of ["", "-wal", "-shm"]) {
+				try { unlinkSync(`${dbPath}${suffix}`); } catch {}
+			}
+		}
 	});
 
 	test("missing daemon returns false with an actionable event", async () => {

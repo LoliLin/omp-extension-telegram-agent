@@ -317,3 +317,11 @@
 - Pi `FooterComponent` 已消费 `↑/↓/R/CH/$/latest context/model/reasoning`，唯一尚可原生补齐的 token 字段是非零 cache-write `W`。runs/epoch/reasoning total/latency 不属于原生 usage layout，后续进入完整 `/tg status`，不加第三行或自绘。
 - T10b 将做 `cache_write DEFAULT 0` 幂等 migration（历史不伪造）、additive IPC、restart regression 和详情输出；provider request/session/cache grammar 不变。
 - Cache impact: **NONE（docs/research only）**；未来实现也仅记录 provider response telemetry，token/cost 增量 0。
+
+## 2026-08-08 (33) — 补齐 lifetime cache-write 与详细 telemetry
+
+- `llm_runs.cache_write NOT NULL DEFAULT 0` 由 `openDb` 幂等迁移；历史行不伪造，新 provider response 精确持久化并 live push cacheWrite/reasoning/latency。aggregate 另带 first run 与 latency totals/samples。
+- Timeline 对旧 daemon 缺失 additive 字段按 0/null，并按 `lastId` 合并排序后的 live ids；file DB close/reopen + IpcServer rebuild 回归证明 lifetime 跨重启，global 不含已移除 bot。
+- synthetic lifetime entry 现在把 cacheWrite 交给真实 `FooterComponent`，非零时 Pi 自动显示 `W` 并用 miss+read+write 算 CH。`/tg status` 增加 lifetime runs/since、latest 明细、reasoning 与平均 latency；不新增 footer 行/render。
+- DB/runtime/IPC/plugin/cache targeted 70 pass，typecheck 通过；真实 deployment migration/restart/footer/status 留 T14。
+- Cache impact: **NONE**——只记录 provider response telemetry并用于 IPC/TUI；provider request、session、prompt/tool/message/summary grammar 逐字节不变，token 增量 0。

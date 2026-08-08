@@ -107,6 +107,42 @@ function errorEvents(): { stage: string; error?: string }[] {
 }
 
 describe("flush state machine (REQ-AGENT-0001)", () => {
+	test("REQ-UI-0009 persists and pushes complete provider usage telemetry", () => {
+		const rt = makeRuntime();
+		(rt as any).runStartTs = 1000;
+		let pushed: unknown;
+		rt.usageSink = (run) => { pushed = run; };
+		(rt as any).recordUsage({
+			input: 200,
+			output: 30,
+			cacheRead: 700,
+			cacheWrite: 100,
+			reasoning: 40,
+			cost: { total: 0.012 },
+		}, 1450);
+
+		expect(db.query("SELECT context_tokens, cache_read, cache_write, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost FROM llm_runs").get()).toEqual({
+			context_tokens: 1000,
+			cache_read: 700,
+			cache_write: 100,
+			cache_miss: 200,
+			output_tokens: 30,
+			reasoning_tokens: 40,
+			latency_ms: 450,
+			cost: 0.012,
+		});
+		expect(pushed).toMatchObject({
+			contextTokens: 1000,
+			cacheRead: 700,
+			cacheWrite: 100,
+			cacheMiss: 200,
+			outputTokens: 30,
+			reasoningTokens: 40,
+			latencyMs: 450,
+			cost: 0.012,
+		});
+	});
+
 	test("AC1: trigger during slow-vision flush coalesces; each message serialized exactly once, in order", async () => {
 		const rt = makeRuntime();
 		const fake = attachFakeSession(rt);

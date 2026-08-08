@@ -87,7 +87,7 @@
 - **终端注入防护**：渲染前 strip ANSI/OSC/DCS 转义与控制字符（保留 \n/\t），群消息无法清屏/改色/写剪贴板（OSC 52）
 - **竞态去重**：snapshot 与 broadcast 重复条目按 (chatId,messageId)/(evtId) 去重；翻页补日期分隔线
 - **attach 过滤（REQ-UI-0002）**：`/tg attach <bot-id>` 以单 bot 视角观察——daemon 端对 snapshot / history / broadcast / usage 过滤 agent_events（群消息始终全量）；不指定时为全局视角；非法 id 由 extension 根据 daemon hello 信息列出有效清单。
-- **Pi 原生 telemetry footer（REQ-UI-0003/0007）**：累计 `cacheMiss/output/cacheRead/cost` 映射到 Pi 原生 `↑/↓/R/CH/$`，最近 run 提供 context，配置提供 model/reasoning；全局范围聚合 totals 并取最新 run 的 model。snapshot 附全历史聚合基线（`lastId` 防 live 双计），llm_run 经 IPC 增量推送。telemetry view 只存在于内存，委托 `FooterComponent` 处理 theme/width/cwd/git/status；`panel off` 恢复 operator session 的 default footer。
+- **Pi 原生 telemetry footer（REQ-UI-0003/0007/0009）**：SQLite 保留期 lifetime 的 `cacheMiss/output/cacheRead/cacheWrite/cost` 映射到 Pi 原生 `↑/↓/R/W/CH/$`，最近 run 提供 current context，配置提供 model/reasoning；全局只聚合当前配置 bots 并取最新 run 的 model。snapshot 附全历史基线（`lastId` 防 live 双计），llm_run 经 additive IPC 推送 cache/reasoning/latency。telemetry view 只存在于内存，委托 `FooterComponent` 处理 theme/width/cwd/git/status；`panel off` 恢复 operator session default footer，完整 lifetime/latest 明细由 `/tg status` 通知。
 - **媒体内联（REQ-UI-0001）**：Pi `Image` 渲染本地缓存的 PNG/JPEG/WebP/GIF（终端无图像能力时由 Pi 降级）；IPC 只传 `mediaPath`/`mediaDesc`（同 uid 读文件，不扩大暴露面）；不支持格式、无缓存或超过 1 MiB 时显示占位符与已有 vision 描述。
 
 ## Vision（Phase 7）

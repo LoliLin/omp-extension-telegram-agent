@@ -71,7 +71,7 @@ DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`
 
 ## Telemetry（每次 provider 请求记录）
 
-bot、model、provider、timestamp、context epoch、context tokens、cache read、cache miss(=input)、output、latency、cost（可算时）、compaction flag；外加 system hash、tool schema hash、ordered provider-message hashes 用于排查意外 miss。secret 不进 telemetry。
+bot、model、provider、timestamp、context epoch、context tokens、cache read、cache write、cache miss(=input)、output、reasoning、latency、cost（可算时）、compaction flag；外加 system hash、tool schema hash、ordered provider-message hashes 用于排查意外 miss。secret 不进 telemetry。REQ-UI-0009 的 cache-write schema/IPC 只记录 provider response，不改变任何 provider request/cache-visible bytes。
 
 ## 测试结果
 

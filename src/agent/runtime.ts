@@ -73,8 +73,11 @@ export class BotRuntime {
 		epoch: number;
 		contextTokens: number;
 		cacheRead: number;
+		cacheWrite: number;
 		cacheMiss: number;
 		outputTokens: number;
+		reasoningTokens: number;
+		latencyMs: number | null;
 		cost: number;
 	}) => void) | null = null;
 	/** Optional sink for newly persisted media descriptions (REQ-UI-0006). */
@@ -609,10 +612,12 @@ export class BotRuntime {
 		now: number,
 	): void {
 		const contextTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+		const reasoningTokens = usage.reasoning ?? 0;
+		const latencyMs = this.runStartTs ? now - this.runStartTs : null;
 		const res = this.db
 			.query(
-				`INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost, system_hash, tools_hash)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost, system_hash, tools_hash)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				this.bot.id,
@@ -621,10 +626,11 @@ export class BotRuntime {
 				this.epoch,
 				contextTokens,
 				usage.cacheRead,
+				usage.cacheWrite,
 				usage.input,
 				usage.output,
-				usage.reasoning ?? 0,
-				this.runStartTs ? now - this.runStartTs : null,
+				reasoningTokens,
+				latencyMs,
 				usage.cost.total,
 				this.systemHash,
 				this.toolsHash,
@@ -637,8 +643,11 @@ export class BotRuntime {
 			epoch: this.epoch,
 			contextTokens,
 			cacheRead: usage.cacheRead,
+			cacheWrite: usage.cacheWrite,
 			cacheMiss: usage.input,
 			outputTokens: usage.output,
+			reasoningTokens,
+			latencyMs,
 			cost: usage.cost.total,
 		});
 	}

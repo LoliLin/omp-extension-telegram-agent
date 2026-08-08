@@ -23,6 +23,10 @@ function migrate(db: Database): void {
 		db.exec("ALTER TABLE media ADD COLUMN short_id TEXT");
 		db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_media_short_id ON media(short_id)");
 	}
+	const runCols = (db.query("PRAGMA table_info(llm_runs)").all() as { name: string }[]).map((c) => c.name);
+	if (!runCols.includes("cache_write")) {
+		db.exec("ALTER TABLE llm_runs ADD COLUMN cache_write INTEGER NOT NULL DEFAULT 0");
+	}
 }
 
 export function getDaemonState(db: Database, key: string): string | null {

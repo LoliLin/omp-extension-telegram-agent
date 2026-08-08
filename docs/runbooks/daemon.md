@@ -40,7 +40,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 /tg detach              # 断开实时订阅，已显示内容保留
 /tg panel A             # 将 Pi 原生 footer 切到 A 的 Telegram usage
 /tg panel off           # 恢复当前 Pi session 的默认 footer
-/tg status A            # 一次性 usage 通知
+/tg status A            # lifetime + latest usage/latency 详细通知
 /tg status-daemon       # daemon 进程状态
 ```
 
@@ -49,7 +49,8 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - compose 仅支持纯文本。附件会被阻止；明确失败会把原文放回 editor。若 ACK 超时或 daemon 在发送中断线，结果可能未知：先检查群聊，不要直接重发；插件不会自动重试，并会安全关闭 compose。
 - RPC/extension source 不受 compose 影响。attach 切换、detach、daemon 断线或 Pi 退出都会关闭 compose；bot token 始终只在 daemon 内。
 - photo/sticker 被现有 lazy vision 流程识别后，同一 native media card 会在下方原位出现 `视觉理解 · ...`；无需重新 attach。它不为 UI 主动调用模型，未触发 bot 的媒体仍保持图片/fallback。
-- attach 自动让 Pi 自己的 `FooterComponent` 显示对应 Telegram `↑/↓/R/CH/$/context/model`；`/tg panel` 可单独切换范围，`panel off` 恢复 operator Pi session usage。完整 epoch/累计明细仍用 `/tg status [bot]`。
+- attach 自动让 Pi 自己的 `FooterComponent` 显示 Telegram `↑/↓/R/W/CH/$/context/model`。token/cost 是当前 SQLite `llm_runs` 首条记录以来的 lifetime 累计，跨 daemon/Pi restart 与 epoch；context 是最新 run 当前占用而非历史求和。`W` 仅在 provider 报告非零 cache write 时由 Pi 显示。
+- `/tg panel` 可单独切换范围，`panel off` 恢复 operator Pi session usage。`/tg status [bot]` 另列 runs/since/epoch、latest cache/output/reasoning/latency/cost 与 lifetime totals/平均 latency。
 - 在 editor 输入 `/tg ` 后按 Tab/选择使用 Pi 原生分级菜单；`attach/status/compose/panel` 的下一层会从配置动态列出 bot id/name，`compose/panel` 另有 `off`。
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。
 

@@ -62,8 +62,13 @@ export interface UsageRun {
 	epoch: number;
 	contextTokens: number;
 	cacheRead: number;
+	/** Additive in REQ-UI-0009; absent from old daemons. */
+	cacheWrite?: number;
 	cacheMiss: number;
 	outputTokens: number;
+	/** Additive detail fields; absent from old daemons. */
+	reasoningTokens?: number;
+	latencyMs?: number | null;
 	cost: number;
 }
 
@@ -72,8 +77,15 @@ export interface BotStats {
 	runs: number;
 	contextTokens: number;
 	cacheRead: number;
+	/** Lifetime cache-write total; absent from old daemons. */
+	cacheWrite?: number;
 	cacheMiss: number;
 	outputTokens: number;
+	/** Lifetime detail totals; absent from old daemons. */
+	reasoningTokens?: number;
+	totalLatencyMs?: number;
+	latencySamples?: number;
+	firstRunTs?: number | null;
 	cost: number;
 	epoch: number;
 	last: UsageRun | null;

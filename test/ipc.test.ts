@@ -304,8 +304,8 @@ describe("per-bot filter + stats (REQ-UI-0002/0003)", () => {
 		insertMsg(chatId, 100, 1754600000, "a");
 		insertEvt("A", 1754600000 * 1000 + 1, "thinking", "{}");
 		insertEvt("B", 1754600000 * 1000 + 2, "thinking", "{}");
-		db.query("INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, cost) VALUES ('A', 1, 'm', 1, 1000, 800, 200, 50, 0.01)").run();
-		db.query("INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, cost) VALUES ('A', 2, 'm', 1, 2000, 1800, 200, 60, 0.02)").run();
+		db.query("INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost) VALUES ('A', 1, 'm', 1, 1000, 700, 100, 200, 50, 20, 300, 0.01)").run();
+		db.query("INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss, output_tokens, reasoning_tokens, latency_ms, cost) VALUES ('A', 2, 'm', 1, 2000, 1700, 100, 200, 60, 30, 500, 0.02)").run();
 		db.query("INSERT INTO llm_runs (bot_id, ts, model, epoch, context_tokens, cache_read, cache_miss, output_tokens, cost) VALUES ('B', 3, 'm', 2, 5000, 0, 5000, 100, 0.05)").run();
 
 		const frames: unknown[] = [];
@@ -315,7 +315,7 @@ describe("per-bot filter + stats (REQ-UI-0002/0003)", () => {
 		const snap = frames[0] as {
 			type: string;
 			items: { kind: string; botId?: string }[];
-			stats: { lastId: number; bots: Record<string, { runs: number; cost: number; epoch: number; last: { botId: string } | null }> };
+			stats: { lastId: number; bots: Record<string, { runs: number; cacheWrite: number; reasoningTokens: number; totalLatencyMs: number; latencySamples: number; firstRunTs: number | null; cost: number; epoch: number; last: { botId: string; cacheWrite?: number; reasoningTokens?: number; latencyMs?: number | null } | null }> };
 		};
 		expect(snap.type).toBe("snapshot");
 		// events filtered to bot A only; messages always present
@@ -324,8 +324,14 @@ describe("per-bot filter + stats (REQ-UI-0002/0003)", () => {
 		expect(snap.stats.lastId).toBe(3);
 		expect(snap.stats.bots.A.runs).toBe(2);
 		expect(snap.stats.bots.A.cost).toBeCloseTo(0.03);
+		expect(snap.stats.bots.A.cacheWrite).toBe(200);
+		expect(snap.stats.bots.A.reasoningTokens).toBe(50);
+		expect(snap.stats.bots.A.totalLatencyMs).toBe(800);
+		expect(snap.stats.bots.A.latencySamples).toBe(2);
+		expect(snap.stats.bots.A.firstRunTs).toBe(1);
 		expect(snap.stats.bots.A.epoch).toBe(1);
 		expect(snap.stats.bots.A.last?.botId).toBe("A");
+		expect(snap.stats.bots.A.last).toMatchObject({ cacheWrite: 100, reasoningTokens: 30, latencyMs: 500 });
 		expect(snap.stats.bots.B).toBeUndefined();
 
 		// broadcast is filtered too

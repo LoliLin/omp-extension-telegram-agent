@@ -201,13 +201,28 @@ function fmtNum(value: number): string {
 	return String(Math.round(value));
 }
 
+function fmtDuration(value: number): string {
+	if (value < 1000) return `${Math.round(value)}ms`;
+	if (value < 10_000) return `${(value / 1000).toFixed(2)}s`;
+	return `${(value / 1000).toFixed(1)}s`;
+}
+
 function statsText(botId: string, stats: BotStats): string {
-	const denominator = stats.cacheRead + stats.cacheMiss;
+	if (stats.runs === 0) return `${botId} · lifetime · no runs yet`;
+	const cacheWrite = stats.cacheWrite ?? 0;
+	const reasoningTokens = stats.reasoningTokens ?? 0;
+	const denominator = stats.cacheRead + cacheWrite + stats.cacheMiss;
 	const hit = denominator > 0 ? (stats.cacheRead / denominator) * 100 : 0;
-	const last = stats.last
-		? `last ${fmtNum(stats.last.contextTokens)} (read ${fmtNum(stats.last.cacheRead)} / miss ${fmtNum(stats.last.cacheMiss)})`
-		: "no runs yet";
-	return `${botId} · ep${stats.epoch} · ${last} · total ${fmtNum(stats.contextTokens)} in / ${fmtNum(stats.outputTokens)} out · $${stats.cost.toFixed(stats.cost >= 1 ? 2 : 4)} · hit ${hit.toFixed(1)}%`;
+	const since = stats.firstRunTs != null ? `${fmtDay(stats.firstRunTs)} ${fmtClock(stats.firstRunTs)}` : "unknown";
+	const averageLatency = (stats.latencySamples ?? 0) > 0
+		? fmtDuration((stats.totalLatencyMs ?? 0) / (stats.latencySamples ?? 1))
+		: "n/a";
+	const last = stats.last;
+	const lastLine = last
+		? `last · ep${last.epoch} · ctx ${fmtNum(last.contextTokens)} · miss ${fmtNum(last.cacheMiss)} · read ${fmtNum(last.cacheRead)} · write ${fmtNum(last.cacheWrite ?? 0)} · out ${fmtNum(last.outputTokens)} · reasoning ${fmtNum(last.reasoningTokens ?? 0)} · ${last.latencyMs == null ? "latency n/a" : fmtDuration(last.latencyMs)} · $${last.cost.toFixed(last.cost >= 1 ? 2 : 4)}`
+		: `last · ep${stats.epoch} · unavailable`;
+	const totalLine = `total · prompt ${fmtNum(stats.contextTokens)} · ↑${fmtNum(stats.cacheMiss)} ↓${fmtNum(stats.outputTokens)} R${fmtNum(stats.cacheRead)} W${fmtNum(cacheWrite)} · reasoning ${fmtNum(reasoningTokens)} · $${stats.cost.toFixed(stats.cost >= 1 ? 2 : 4)} · CH${hit.toFixed(1)}% · avg ${averageLatency}`;
+	return `${botId} · lifetime · ${stats.runs} runs since ${since}\n${lastLine}\n${totalLine}`;
 }
 
 function eventBody(event: EvtItem): string {
@@ -290,17 +305,18 @@ export class TelegramFooterTelemetry {
 	private scope(): {
 		bot: FooterBot | undefined;
 		latest: NonNullable<BotStats["last"]> | null;
-		totals: Pick<BotStats, "runs" | "cacheMiss" | "cacheRead" | "outputTokens" | "cost">;
+		totals: { runs: number; cacheMiss: number; cacheRead: number; cacheWrite: number; outputTokens: number; cost: number };
 	} {
 		const selectedBots = this.filter ? this.bots.filter((bot) => bot.id === this.filter) : this.bots;
 		let latest: NonNullable<BotStats["last"]> | null = null;
-		const totals = { runs: 0, cacheMiss: 0, cacheRead: 0, outputTokens: 0, cost: 0 };
+		const totals = { runs: 0, cacheMiss: 0, cacheRead: 0, cacheWrite: 0, outputTokens: 0, cost: 0 };
 		for (const bot of selectedBots) {
 			const stats = this.stats[bot.id];
 			if (!stats) continue;
 			totals.runs += stats.runs;
 			totals.cacheMiss += stats.cacheMiss;
 			totals.cacheRead += stats.cacheRead;
+			totals.cacheWrite += stats.cacheWrite ?? 0;
 			totals.outputTokens += stats.outputTokens;
 			totals.cost += stats.cost;
 			if (stats.last && (!latest || stats.last.ts > latest.ts || (stats.last.ts === latest.ts && stats.last.id > latest.id))) latest = stats.last;
@@ -330,7 +346,7 @@ export class TelegramFooterTelemetry {
 		const { bot, totals } = this.scope();
 		if (totals.runs === 0) return [];
 		const model = this.modelFor(bot);
-		const totalTokens = totals.cacheMiss + totals.cacheRead + totals.outputTokens;
+		const totalTokens = totals.cacheMiss + totals.cacheRead + totals.cacheWrite + totals.outputTokens;
 		return [{
 			type: "message",
 			id: "telegram-telemetry",
@@ -346,7 +362,7 @@ export class TelegramFooterTelemetry {
 					input: totals.cacheMiss,
 					output: totals.outputTokens,
 					cacheRead: totals.cacheRead,
-					cacheWrite: 0,
+					cacheWrite: totals.cacheWrite,
 					totalTokens,
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: totals.cost },
 				},
@@ -717,7 +733,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				const filter = resolveFilter(botArg);
 				if (filter === undefined) return;
 				if (active && active.filter === filter && Object.keys(active.stats).length > 0) {
-					ctx.ui.notify(Object.entries(active.stats).map(([id, stats]) => statsText(id, stats)).join("\n"), "info");
+					ctx.ui.notify(Object.entries(active.stats).map(([id, stats]) => statsText(id, stats)).join("\n\n"), "info");
 					return;
 				}
 				await new Promise<void>((resolve) => {
@@ -735,7 +751,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 					client = factory(filter, {
 						onEvent: (event) => {
 							if (event.type === "stats") {
-								const text = Object.entries(event.stats).map(([id, stats]) => statsText(id, stats)).join("\n");
+								const text = Object.entries(event.stats).map(([id, stats]) => statsText(id, stats)).join("\n\n");
 								finish(text || "no telemetry yet", "info");
 							} else if (event.type === "disconnected") finish(event.reason, "error");
 						},
