@@ -47,7 +47,7 @@ function makeConfig(dbPath = ":memory:"): AppConfig {
 		groupPeerId: GROUP,
 		bots: [],
 		tinyfishApiKey: "",
-		auxiliaryVisualModel: "gpt-5.6-luna-low",
+		auxiliaryVisualModel: "openai-codex/gpt-5.6-luna:low",
 		routerSecret: null,
 		telegramAdmins: [],
 	};

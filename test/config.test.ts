@@ -159,8 +159,24 @@ describe("loadConfig typed/legacy sources (REQ-CONF-0001)", () => {
 			]);
 			expect(config.telegramAdmins).toEqual([]);
 			expect(config.bots[0]!.tools.search).toBe(false);
+			expect(config.auxiliaryVisualModel).toBe("openai-codex/gpt-5.6-luna:low");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("VISION R7: auxiliary vision uses a canonical Pi ref and a bounded default", () => {
+		const defaultDir = makeEnvDir();
+		const legacyDir = makeEnvDir(VALID_BOTS, {}, { auxiliary_visual_model: "gpt-5.6-luna-low" });
+		const invalidDir = makeEnvDir(VALID_BOTS, {}, { auxiliary_visual_model: "provider-model-low" });
+		try {
+			expect(loadConfig(defaultDir).auxiliaryVisualModel).toBe("openai-codex/gpt-5.6-luna:low");
+			expect(loadConfig(legacyDir).auxiliaryVisualModel).toBe("openai-codex/gpt-5.6-luna:low");
+			expect(() => loadConfig(invalidDir)).toThrow(/auxiliary_visual_model[\s\S]*provider\/model:effort/);
+		} finally {
+			rmSync(defaultDir, { recursive: true, force: true });
+			rmSync(legacyDir, { recursive: true, force: true });
+			rmSync(invalidDir, { recursive: true, force: true });
 		}
 	});
 

@@ -13,7 +13,8 @@ export interface ConfigurableModelRuntime {
 export type PiModelConfigurationCategory =
 	| "runtime_unavailable"
 	| "unknown_model"
-	| "unauthenticated_provider";
+	| "unauthenticated_provider"
+	| "image_input_unsupported";
 
 export class PiModelConfigurationError extends Error {
 	constructor(

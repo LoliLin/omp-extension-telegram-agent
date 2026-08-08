@@ -45,7 +45,13 @@ import {
 } from "./tools.ts";
 import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
-import { ensureVision, fileIdForBot, type VisionUpdateSink } from "../media/vision.ts";
+import {
+	createPiVisionExecutor,
+	ensureVision,
+	fileIdForBot,
+	type VisionExecutor,
+	type VisionUpdateSink,
+} from "../media/vision.ts";
 import { ensureStickerCatalog, stickerCatalogBlock, preRecognizeCatalogVision } from "../media/sticker-catalog.ts";
 import {
 	createReplyObligation,
@@ -107,6 +113,7 @@ export class BotRuntime {
 	private bot: BotConfig;
 	private config: AppConfig;
 	private modelRuntime: ModelRuntime;
+	private visionExecutor: VisionExecutor | null;
 	private api: BotApi;
 	private session: AgentSession | null = null;
 	private model: ReturnType<ModelRuntime["getModel"]>; // resolved in init(); used by the compaction extension
@@ -167,12 +174,14 @@ export class BotRuntime {
 			monotonicNow?: () => number;
 			activityScheduler?: ActivityScheduler;
 			chatActionSender?: () => Promise<unknown>;
+			visionExecutor?: VisionExecutor;
 		} = {},
 	) {
 		this.db = db;
 		this.bot = bot;
 		this.config = config;
 		this.modelRuntime = modelRuntime;
+		this.visionExecutor = options.visionExecutor ?? null;
 		this.monotonicNow = options.monotonicNow ?? (() => performance.now());
 		this.api = new BotApi(bot.token);
 		const chatId = Number(`-100${config.groupPeerId}`);
@@ -204,9 +213,9 @@ export class BotRuntime {
 
 	async init(): Promise<void> {
 		const persona = readFileSync(this.bot.personaPath, "utf8");
-		// Fixed sticker catalog first: it serializes into the STABLE prefix, so it must be
-		// resolved (sets fetched, short_ids assigned, vision pre-recognized) before the
-		// system prompt is built (REQ-STICKER-0001 R1/R2). Empty for bots without sets.
+		// Resolve fixed catalog membership and short ids before taking the one immutable
+		// system-prompt snapshot. Vision continues in the background and only appears
+		// after a future restart; it never mutates this session's prefix.
 		let stickerCatalog = "";
 		if (this.bot.stickerSets.length > 0) {
 			// fetch + persist + short_ids block startup (seconds); vision pre-recognition runs in
@@ -217,8 +226,9 @@ export class BotRuntime {
 				this.api,
 				this.bot.id,
 				this.bot.stickerSets,
-				this.config.auxiliaryVisualModel,
+				this.getVisionExecutor(),
 				(fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
+				(telemetry) => this.recordEvent("vision", telemetry),
 			);
 			stickerCatalog = stickerCatalogBlock(this.db, this.bot.id, this.bot.stickerSets);
 		}
@@ -965,14 +975,21 @@ export class BotRuntime {
 				| null;
 			if (existing?.vision) continue; // persistent cache hit, shared by both bots
 			try {
-				this.recordEvent("vision", { file_unique_id: media.file_unique_id, kind: media.kind });
-				await ensureVision(this.db, this.api, this.bot.id, this.config.auxiliaryVisualModel, media.file_unique_id, {
+				await ensureVision(this.db, this.api, this.bot.id, media.file_unique_id, this.getVisionExecutor(), {
 					onPersist: (fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
+					onTelemetry: (telemetry) => this.recordEvent("vision", telemetry),
 				});
-			} catch (err) {
-				this.recordEvent("error", { stage: "vision", error: String(err) });
+			} catch {
+				this.recordEvent("error", { stage: "vision", category: "request_failed" });
 			}
 		}
+	}
+
+	private getVisionExecutor(): VisionExecutor {
+		if (!this.visionExecutor) {
+			this.visionExecutor = createPiVisionExecutor(this.modelRuntime, this.config.auxiliaryVisualModel);
+		}
+		return this.visionExecutor;
 	}
 
 	/** Small dynamic sticker candidate list (semantic, short ids). Empty string when catalog is empty.

@@ -36,6 +36,7 @@ export interface TelegramConfigInput {
 	router_secret_env?: string;
 	db_path?: string;
 	tinyfish_key_env?: string;
+	/** Pi task model reference for photo/sticker vision: provider/model:effort. */
 	auxiliary_visual_model?: string;
 	provider?: string;
 	model?: string;

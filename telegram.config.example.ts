@@ -14,7 +14,7 @@ export default defineConfig({
 	db_path: "data/agent.db",
 	router_secret_env: "router_secret",
 	tinyfish_key_env: "tinyfish_api_key",
-	auxiliary_visual_model: "gpt-5.6-luna-low",
+	auxiliary_visual_model: "openai-codex/gpt-5.6-luna:low",
 
 	// Empty means all state-changing Telegram /tg commands are denied.
 	telegram_admins: [],

@@ -3,7 +3,7 @@
 	"group_peer_id": 1234567890,
 	"router_secret_env": "router_secret",
 	"tinyfish_key_env": "tinyfish_api_key",
-	"auxiliary_visual_model": "gpt-5.6-luna-low",
+	"auxiliary_visual_model": "openai-codex/gpt-5.6-luna:low",
 	"db_path": "data/agent.db",
 	"compaction_threshold": 128000,
 	"compaction_keep_recent": 20000,

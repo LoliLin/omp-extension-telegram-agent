@@ -1,13 +1,18 @@
 // Fixed sticker catalog per bot (REQ-STICKER-0001).
 // Each bot can configure Telegram sticker set names; at startup the sets are fetched, media
 // identity + per-bot file_id persisted, short_ids assigned (same s<rowid> namespace as the
-// dynamic candidates), and vision pre-recognized via the shared lazy vision cache.
+// dynamic candidates), and background vision started through the shared lazy cache.
 // The catalog serializes as a STABLE block inside the system prompt (stable prefix), so a
 // catalog change is a cache-visible protocol change: bump CACHE_SCHEMA_VERSION (docs/cache.md).
 
 import type { Database } from "bun:sqlite";
 import type { BotApi } from "../telegram/api.ts";
-import { ensureVision, type VisionUpdateSink } from "./vision.ts";
+import {
+	ensureVision,
+	type VisionExecutor,
+	type VisionTelemetrySink,
+	type VisionUpdateSink,
+} from "./vision.ts";
 
 export const STICKER_CATALOG_MAX = 120; // R5: bounded catalog keeps the prefix cheap
 
@@ -138,8 +143,9 @@ export function preRecognizeCatalogVision(
 	api: BotApi,
 	botId: string,
 	sets: string[],
-	envModel: string,
+	executor: VisionExecutor,
 	onVision?: VisionUpdateSink,
+	onTelemetry?: VisionTelemetrySink,
 ): void {
 	const pending = db
 		.query(
@@ -163,9 +169,12 @@ export function preRecognizeCatalogVision(
 				while (next < pending.length) {
 					const fid = pending[next++]!.file_unique_id;
 					try {
-						await ensureVision(db, api, botId, envModel, fid, { onPersist: onVision });
-					} catch (err) {
-						console.error(`[sticker-catalog] ${botId}: vision failed for ${fid}: ${err}`);
+						await ensureVision(db, api, botId, fid, executor, {
+							onPersist: onVision,
+							onTelemetry,
+						});
+					} catch {
+						console.error(`[sticker-catalog] ${botId}: vision failed (request_failed)`);
 					}
 					doneCount++;
 					if (doneCount % 10 === 0) {

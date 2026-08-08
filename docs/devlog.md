@@ -636,3 +636,11 @@
 - canonical TS/legacy examples与中英README、安装、配置、排障、daemon runbook统一为Pi登录/模型选择→Telegram向导路径。机械审计锁定旧provider-key字段只允许留在`src/config.ts`明确legacy loader及历史REQ/测试，不得回到onboarding、examples或用户步骤。
 - onboarding/config/docs/cache targeted 95 pass / 772 assertions；全量355 pass / 4713 assertions、typecheck、cache v5 golden通过。固定mdBook 0.5.4检查18个Markdown/98 links与生成21个HTML/608 links全部通过。
 - Cache impact: **NONE**——只改本地配置输入/文件与用户文档；system/tool/message/summary bytes、context epoch、provider调用和每turn token均不变。向导preflight只读本地metadata，新增0 LLM call。
+
+## 2026-08-08 (73) — 用共享Pi runtime执行视觉
+
+- 删除`src/media/vision.ts`的`codex exec`子进程、临时输出与stderr拼接；daemon在Telegram前把canonical `openai-codex/gpt-5.6-luna:low`与聊天模型一起交给唯一Pi runtime做catalog/auth/image capability预检，并把同一个executor注入所有bot。历史本机视觉拼写只在loader边界归一化，canonical examples已更新。
+- JPEG/PNG直接作为Pi image content发送，静态WebP/GIF复用Pi公开`convertToPng()`；TGS/WebM/未知格式零provider fallback。每次调用固定256 output tokens、90秒abort、0 provider retry与low reasoning；empty/unknown/text-only/provider错误折叠为固定outcome，上游正文不进入DB、log或telemetry。
+- vision persistence继续按DB+media identity合并in-flight/cache；非空结果才发UI update。新增telemetry只允许kind、bytes bucket、latency、token、cost、outcome，observer错误也不再打印媒体identity。
+- 验证：vision/config/model-runtime/sticker/flush/cache 80 pass / 477 assertions；全量362 / 4756、`bun run check`、cache v5 golden及双mdBook link/build门禁通过；两路动态batch并发和opt-in匿名基准按拆分后的T13k1b/c继续。
+- Cache impact: **NONE**——provider可见的聊天system/tools/message/summary grammar、context epoch与vision调用次数不变；只把既有必要vision从独立CLI认证改到共享Pi runtime，输出上限由执行边界固定。

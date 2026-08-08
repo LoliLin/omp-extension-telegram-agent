@@ -21,6 +21,10 @@ import {
 	loadPiModelDefaults,
 	type PiModelDefaults,
 } from "./agent/model-settings.ts";
+import {
+	DEFAULT_AUXILIARY_VISUAL_MODEL,
+	normalizeAuxiliaryVisualModel,
+} from "./agent/model-ref.ts";
 
 export { defineConfig } from "./config-schema.ts";
 export type {
@@ -212,6 +216,14 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>): Raw
 		if (value !== undefined && (typeof value !== "string" || value.trim() === "")) {
 			errors.push(`[config] ${key}: expected a non-empty string, got ${JSON.stringify(value)}`);
 		}
+	}
+	if (
+		raw.auxiliary_visual_model !== undefined &&
+		(typeof raw.auxiliary_visual_model !== "string" || !normalizeAuxiliaryVisualModel(raw.auxiliary_visual_model))
+	) {
+		errors.push(
+			`[config] auxiliary_visual_model: expected provider/model:effort, got ${JSON.stringify(raw.auxiliary_visual_model)}`,
+		);
 	}
 	if (raw.reasoning_effort !== undefined && !isPiThinkingLevel(raw.reasoning_effort)) {
 		errors.push(`[config] reasoning_effort: expected a Pi thinking level, got ${JSON.stringify(raw.reasoning_effort)}`);
@@ -462,7 +474,9 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 		groupPeerId,
 		bots,
 		tinyfishApiKey,
-		auxiliaryVisualModel: typeof raw.auxiliary_visual_model === "string" ? raw.auxiliary_visual_model : "",
+		auxiliaryVisualModel: typeof raw.auxiliary_visual_model === "string"
+			? normalizeAuxiliaryVisualModel(raw.auxiliary_visual_model)!
+			: DEFAULT_AUXILIARY_VISUAL_MODEL,
 		routerSecret: env[routerSecretEnv] || null,
 		telegramAdmins,
 	};

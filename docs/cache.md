@@ -38,7 +38,7 @@ DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`
 
 ## Sticker 目录分区（REQ-STICKER-0001）
 
-**固定目录（stable prefix）**：每 bot 配置 `sticker_sets`（Telegram set name）；启动时 getStickerSet → media 持久化（file_unique_id 身份 + 每 bot file_id 映射）→ rowid 分配 short_id（`s<N>`，与动态候选同命名空间）→ vision 预识别（复用懒 vision 缓存，重启零重复下载）。序列化为 system prompt 内稳定块：`# Sticker 目录`（配置 set 顺序 + rowid，无 vision 标 `[未识别]`），但只包含当前 bot 在 `media_file_ids` 中确有映射的条目；另一个 bot 的映射不得泄漏。目录内容/可发送性变化 = cache-visible 协议变化 → bump CACHE_SCHEMA_VERSION + 新 epoch。规模上限 120（超限截断 + warn）。
+**固定目录（stable prefix）**：每 bot 配置 `sticker_sets`（Telegram set name）；启动时 getStickerSet → media 持久化（file_unique_id 身份 + 每 bot file_id 映射）→ rowid 分配 short_id（`s<N>`，与动态候选同命名空间）→ 对当前已持久结果构造一次prompt snapshot，同时用shared Pi runtime在后台补缺失vision。后台completion不重建当前session prefix；只会在未来restart的新snapshot中出现。序列化块为`# Sticker 目录`（配置 set 顺序 + rowid，无 vision 标 `[未识别]`），且只包含当前 bot 在 `media_file_ids` 中确有映射的条目；另一个 bot 的映射不得泄漏。目录内容/可发送性变化 = cache-visible 协议变化 → bump CACHE_SCHEMA_VERSION + 新 epoch。规模上限 120（超限截断 + warn）。
 
 **动态候选（动态 suffix 尾部）**：`Available stickers:` 块保留，只列**上下文出现过、set 外且当前 bot 确有 file_id 映射**的 sticker（set 内 sticker 已在 prefix 里，排除防冗余）；位置约束：必须在全部消息序列之后（R6，测试锁定），不并入 prefix。
 

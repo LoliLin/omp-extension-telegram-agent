@@ -1,6 +1,6 @@
 # REQ-VISION-0001: cache-visible 视觉结果在 provider 提交前同步确定
 
-- **Status:** Approved（2026-08-08 调查确认主路径已同步；Pi复用/并发回归未实现）
+- **Status:** Implementing（2026-08-08 shared Pi视觉执行器已实现；两路并发/匿名基准待收口）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「群聊图像与未识别sticker要在bot读上下文前同步；目录sticker保持异步；用Codex 5.6 Luna low并按成本/延迟数据取舍」
 - **依赖:** REQ-AGENT-0001、REQ-STICKER-0001、REQ-UI-0006、REQ-PLAT-0002

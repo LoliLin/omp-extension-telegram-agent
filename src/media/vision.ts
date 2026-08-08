@@ -1,73 +1,287 @@
-// Vision pipeline (lazy, cached, shared by both bots). See docs/requirement.md 三十八-四十一.
-// Uses local Codex CLI auth; model from config (e.g. "gpt-5.6-luna-low" = model gpt-5.6-luna, reasoning low).
+// Lazy, persistent photo/sticker vision shared by every bot in one deployment.
+// Provider execution uses the daemon's shared Pi ModelRuntime; this module never
+// starts another CLI or reads provider credential material.
 
 import type { Database } from "bun:sqlite";
-import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+	convertToPng,
+	type ModelRuntime,
+} from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
 import type { BotApi } from "../telegram/api.ts";
-
-export function parseModelEffort(envModel: string): { model: string; effort: string | null } {
-	const m = envModel.match(/^(.*?)-(minimal|low|medium|high)$/);
-	if (m) return { model: m[1], effort: m[2] };
-	return { model: envModel, effort: null };
-}
+import { parsePiModelReference } from "../agent/model-ref.ts";
+import {
+	classifyPiProviderFailure,
+	PiModelConfigurationError,
+	type PiProviderFailureCategory,
+} from "../agent/model-runtime.ts";
 
 const PHOTO_PROMPT = `你在帮一个群聊 bot 理解图片。简短描述：实际可见内容、重要文字/OCR（尤其是界面和报错）、人物或物体、对聊天可能有用的信息、不确定的地方。2-3 句话以内，用中文，直接给描述不要客套。`;
 
 const STICKER_PROMPT = `你在帮一个群聊 bot 理解一张 sticker（聊天表情贴图）。把它理解为一种聊天表达，输出短描述：communicative intent（想表达什么）、emotion、intensity、gesture/画面要点、可见文字。一两句话，用中文，例如"得意的赞同，smug/amused，中等强度"。直接给描述不要客套。`;
 
-const VISION_TIMEOUT_MS = 90_000;
+export const VISION_TIMEOUT_MS = 90_000;
+export const VISION_MAX_OUTPUT_TOKENS = 256;
+
+export type VisionKind = "photo" | "sticker";
+export type VisionBytesBucket = "unavailable" | "lt_32_kib" | "32_128_kib" | "128_512_kib" | "gte_512_kib";
+export type VisionOutcome =
+	| "ok"
+	| "empty_response"
+	| "unsupported_format"
+	| "conversion_failed"
+	| "file_id_unavailable"
+	| "telegram_file_unavailable"
+	| "telegram_download_failed"
+	| PiProviderFailureCategory;
+
+export interface VisionTelemetry {
+	kind: VisionKind;
+	sourceBytesBucket: VisionBytesBucket;
+	convertedBytesBucket: VisionBytesBucket;
+	latencyMs: number;
+	inputTokens: number;
+	outputTokens: number;
+	reasoningTokens: number;
+	cost: number;
+	outcome: VisionOutcome;
+}
+
+export interface VisionDescriptionResult {
+	text: string | null;
+	telemetry: VisionTelemetry;
+}
+
+export interface VisionDescribeInput {
+	kind: VisionKind;
+	bytes: Uint8Array;
+	mimeType: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+}
+
+export interface VisionExecutor {
+	readonly modelRef: string;
+	readonly provider: string;
+	readonly model: string;
+	readonly readinessFailure: "unknown_model" | "image_input_unsupported" | null;
+	describe(input: VisionDescribeInput): Promise<VisionDescriptionResult>;
+}
 
 export type VisionUpdateSink = (fileUniqueId: string, text: string) => void;
+export type VisionTelemetrySink = (telemetry: VisionTelemetry) => void;
 
 export interface EnsureVisionOptions {
 	/** Called exactly after a new non-empty description is persisted; cache hits do not emit. */
 	onPersist?: VisionUpdateSink;
-	/** Deterministic test seam; production uses describeImage. */
-	describe?: typeof describeImage;
+	/** Receives bounded aggregate fields only; never identity, path, prompt, or response text. */
+	onTelemetry?: VisionTelemetrySink;
 	/** Deterministic test seam; production uses data/media under cwd. */
 	cacheDir?: string;
+	/** Deterministic latency seam. */
+	monotonicNow?: () => number;
 }
 
-export async function describeImage(envModel: string, imagePath: string, kind: "photo" | "sticker"): Promise<string> {
-	const { model, effort } = parseModelEffort(envModel);
-	const dir = mkdtempSync(join(tmpdir(), "vision-"));
-	try {
-		const outPath = join(dir, "out.txt");
-		const args = [
-			"exec",
-			"--skip-git-repo-check",
-			"--ephemeral",
-			"-s",
-			"read-only",
-			"-m",
-			model,
-			...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []),
-			"-i",
-			imagePath,
-			"-o",
-			outPath,
-			kind === "sticker" ? STICKER_PROMPT : PHOTO_PROMPT,
-		];
-		await new Promise<void>((resolve, reject) => {
-			const child = spawn("codex", args, { stdio: ["ignore", "ignore", "pipe"] });
-			let err = "";
-			child.stderr.on("data", (d: Buffer) => { err += d.toString(); });
-			const killer = setTimeout(() => {
-				child.kill("SIGKILL");
-				reject(new Error("vision timeout"));
-			}, VISION_TIMEOUT_MS);
-			child.on("close", (codeNum) => {
-				clearTimeout(killer);
-				if (codeNum === 0 && existsSync(outPath)) resolve();
-				else reject(new Error(`codex vision failed (${codeNum}): ${err.slice(-300)}`));
+interface PiVisionExecutorOptions {
+	convert?: typeof convertToPng;
+	monotonicNow?: () => number;
+	scheduleTimeout?: (callback: () => void, delayMs: number) => unknown;
+	clearScheduledTimeout?: (handle: unknown) => void;
+}
+
+type VisionModelRuntime = Pick<ModelRuntime, "getModel" | "completeSimple">;
+
+function bytesBucket(size: number): VisionBytesBucket {
+	if (size < 32 * 1024) return "lt_32_kib";
+	if (size < 128 * 1024) return "32_128_kib";
+	if (size < 512 * 1024) return "128_512_kib";
+	return "gte_512_kib";
+}
+
+function boundedNumber(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function emptyTelemetry(kind: VisionKind, outcome: VisionOutcome, latencyMs: number): VisionTelemetry {
+	return {
+		kind,
+		sourceBytesBucket: "unavailable",
+		convertedBytesBucket: "unavailable",
+		latencyMs: Math.max(0, Math.round(latencyMs)),
+		inputTokens: 0,
+		outputTokens: 0,
+		reasoningTokens: 0,
+		cost: 0,
+		outcome,
+	};
+}
+
+function usageTelemetry(
+	kind: VisionKind,
+	sourceBytes: number,
+	convertedBytes: number | null,
+	latencyMs: number,
+	outcome: VisionOutcome,
+	message?: AssistantMessage,
+): VisionTelemetry {
+	return {
+		kind,
+		sourceBytesBucket: bytesBucket(sourceBytes),
+		convertedBytesBucket: convertedBytes == null ? "unavailable" : bytesBucket(convertedBytes),
+		latencyMs: Math.max(0, Math.round(latencyMs)),
+		inputTokens: boundedNumber(message?.usage.input),
+		outputTokens: boundedNumber(message?.usage.output),
+		reasoningTokens: boundedNumber(message?.usage.reasoning),
+		cost: boundedNumber(message?.usage.cost.total),
+		outcome,
+	};
+}
+
+function providerOutcome(category: ReturnType<typeof classifyPiProviderFailure>): VisionOutcome {
+	return category;
+}
+
+/** Create a lightweight vision adapter over the already-owned Pi runtime/auth snapshot. */
+export function createPiVisionExecutor(
+	runtime: VisionModelRuntime,
+	modelRef: string,
+	options: PiVisionExecutorOptions = {},
+): VisionExecutor {
+	const selection = parsePiModelReference(modelRef);
+	if (!selection) {
+		throw new Error("invalid auxiliary_visual_model; expected provider/model:effort");
+	}
+	const model = runtime.getModel(selection.provider, selection.model);
+	const readinessFailure = !model
+		? "unknown_model"
+		: !model.input.includes("image")
+			? "image_input_unsupported"
+			: null;
+	const convert = options.convert ?? convertToPng;
+	const monotonicNow = options.monotonicNow ?? (() => performance.now());
+	const scheduleTimeout = options.scheduleTimeout ?? ((callback, delayMs) => setTimeout(callback, delayMs));
+	const clearScheduledTimeout = options.clearScheduledTimeout ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+
+	return {
+		modelRef: selection.canonical,
+		provider: selection.provider,
+		model: selection.model,
+		readinessFailure,
+		async describe(input): Promise<VisionDescriptionResult> {
+			const startedAt = monotonicNow();
+			const sourceBytes = input.bytes.byteLength;
+			if (readinessFailure) {
+				return {
+					text: null,
+					telemetry: usageTelemetry(input.kind, sourceBytes, null, monotonicNow() - startedAt, readinessFailure),
+				};
+			}
+
+			let image: { data: string; mimeType: string } = {
+				data: Buffer.from(input.bytes).toString("base64"),
+				mimeType: input.mimeType,
+			};
+			let convertedBytes: number | null = null;
+			if (input.mimeType === "image/webp" || input.mimeType === "image/gif") {
+				try {
+					const converted = await convert(image.data, input.mimeType);
+					if (!converted) {
+						return {
+							text: null,
+							telemetry: usageTelemetry(input.kind, sourceBytes, null, monotonicNow() - startedAt, "conversion_failed"),
+						};
+					}
+					image = converted;
+					convertedBytes = Buffer.from(converted.data, "base64").byteLength;
+				} catch {
+					return {
+						text: null,
+						telemetry: usageTelemetry(input.kind, sourceBytes, null, monotonicNow() - startedAt, "conversion_failed"),
+					};
+				}
+			}
+
+			const context: Context = {
+				messages: [{
+					role: "user",
+					content: [
+						{ type: "text", text: input.kind === "sticker" ? STICKER_PROMPT : PHOTO_PROMPT },
+						{ type: "image", data: image.data, mimeType: image.mimeType },
+					],
+					timestamp: Date.now(),
+				}],
+			};
+			const controller = new AbortController();
+			const timeoutMarker = Symbol("vision-timeout");
+			let timeoutHandle: unknown;
+			const timeout = new Promise<typeof timeoutMarker>((resolve) => {
+				timeoutHandle = scheduleTimeout(() => {
+					controller.abort(new DOMException("vision request timed out", "TimeoutError"));
+					resolve(timeoutMarker);
+				}, VISION_TIMEOUT_MS);
 			});
-		});
-		return readFileSync(outPath, "utf8").trim();
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
+
+			let message: AssistantMessage;
+			try {
+				const completion = runtime.completeSimple(model!, context, {
+					cacheRetention: "none",
+					maxTokens: VISION_MAX_OUTPUT_TOKENS,
+					maxRetries: 0,
+					reasoning: selection.thinkingLevel,
+					signal: controller.signal,
+					timeoutMs: VISION_TIMEOUT_MS,
+				});
+				const settled = await Promise.race([completion, timeout]);
+				if (settled === timeoutMarker) {
+					return {
+						text: null,
+						telemetry: usageTelemetry(input.kind, sourceBytes, convertedBytes, monotonicNow() - startedAt, "provider_timeout"),
+					};
+				}
+				message = settled;
+			} catch (error) {
+				return {
+					text: null,
+					telemetry: usageTelemetry(
+						input.kind,
+						sourceBytes,
+						convertedBytes,
+						monotonicNow() - startedAt,
+						providerOutcome(classifyPiProviderFailure(error)),
+					),
+				};
+			} finally {
+				if (timeoutHandle !== undefined) clearScheduledTimeout(timeoutHandle);
+			}
+
+			if (message.stopReason === "error" || message.stopReason === "aborted") {
+				const category = message.stopReason === "aborted" && controller.signal.aborted
+					? "provider_timeout"
+					: providerOutcome(classifyPiProviderFailure(new Error(message.errorMessage ?? message.stopReason)));
+				return {
+					text: null,
+					telemetry: usageTelemetry(input.kind, sourceBytes, convertedBytes, monotonicNow() - startedAt, category, message),
+				};
+			}
+
+			const text = message.content
+				.filter((content): content is Extract<(typeof message.content)[number], { type: "text" }> => content.type === "text")
+				.map((content) => content.text)
+				.join("\n")
+				.trim();
+			const outcome: VisionOutcome = text ? "ok" : "empty_response";
+			return {
+				text: text || null,
+				telemetry: usageTelemetry(input.kind, sourceBytes, convertedBytes, monotonicNow() - startedAt, outcome, message),
+			};
+		},
+	};
+}
+
+/** Fail startup with a fixed category before Telegram if the selected task model cannot see images. */
+export function assertPiVisionExecutorReady(executor: VisionExecutor): void {
+	if (executor.readinessFailure) {
+		throw new PiModelConfigurationError(executor.readinessFailure, executor.provider, executor.model);
 	}
 }
 
@@ -79,78 +293,128 @@ export function fileIdForBot(db: Database, botId: string, fileUniqueId: string):
 	return row?.file_id ?? null;
 }
 
-/**
- * Ensure a vision result exists for the media (lazy + persistent cache).
- * Downloads via the given bot's API if needed. Returns the description or null on failure.
- * Concurrent calls for the same media share one in-flight request.
- */
-const inFlight = new Map<string, Promise<string | null>>();
+const inFlightByDb = new WeakMap<Database, Map<string, Promise<string | null>>>();
 
+/** Ensure a terminal vision result exists; same-identity calls share one provider request. */
 export function ensureVision(
 	db: Database,
 	api: BotApi,
 	botId: string,
-	envModel: string,
 	fileUniqueId: string,
+	executor: VisionExecutor,
 	options: EnsureVisionOptions = {},
 ): Promise<string | null> {
+	let inFlight = inFlightByDb.get(db);
+	if (!inFlight) {
+		inFlight = new Map();
+		inFlightByDb.set(db, inFlight);
+	}
 	const existing = inFlight.get(fileUniqueId);
 	if (existing) return existing;
-	const promise = ensureVisionInner(db, api, botId, envModel, fileUniqueId, options).finally(() => {
-		inFlight.delete(fileUniqueId);
+	const promise = ensureVisionInner(db, api, botId, fileUniqueId, executor, options).finally(() => {
+		inFlight!.delete(fileUniqueId);
 	});
 	inFlight.set(fileUniqueId, promise);
 	return promise;
+}
+
+function emitTelemetry(options: EnsureVisionOptions, telemetry: VisionTelemetry): void {
+	try {
+		options.onTelemetry?.(telemetry);
+	} catch {
+		console.error("[vision] telemetry sink failed (observer_failed)");
+	}
+}
+
+function mediaMime(filePath: string): VisionDescribeInput["mimeType"] | null {
+	const extension = filePath.split(".").pop()?.toLowerCase();
+	if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+	if (extension === "png") return "image/png";
+	if (extension === "webp") return "image/webp";
+	if (extension === "gif") return "image/gif";
+	return null;
 }
 
 async function ensureVisionInner(
 	db: Database,
 	api: BotApi,
 	botId: string,
-	envModel: string,
 	fileUniqueId: string,
+	executor: VisionExecutor,
 	options: EnsureVisionOptions,
 ): Promise<string | null> {
+	const monotonicNow = options.monotonicNow ?? (() => performance.now());
+	const startedAt = monotonicNow();
 	const media = db.query("SELECT kind, vision FROM media WHERE file_unique_id = ?").get(fileUniqueId) as
 		| { kind: string; vision: string | null }
 		| null;
-	if (!media) return null;
-	if (media.kind !== "photo" && media.kind !== "sticker") return null;
+	if (!media || (media.kind !== "photo" && media.kind !== "sticker")) return null;
+	const kind = media.kind as VisionKind;
 	if (media.vision) {
-		const cached = JSON.parse(media.vision) as { text: string };
-		return cached.text;
+		const cached = JSON.parse(media.vision) as { text?: string | null };
+		return cached.text?.trim() || null;
 	}
 	const fileId = fileIdForBot(db, botId, fileUniqueId);
-	if (!fileId) return null;
-	const cacheDir = options.cacheDir ?? join(process.cwd(), "data", "media");
-	mkdirSync(cacheDir, { recursive: true });
-	const file = await api.getFile(fileId);
-	if (!file.file_path) return null;
-	const ext = file.file_path.split(".").pop() ?? "bin";
-	if (ext === "tgs" || ext === "webm") {
-		// animated/video stickers: vision model can't read them; mark attempted, use emoji-only semantics
-		db.query("UPDATE media SET vision = ? WHERE file_unique_id = ?").run(
-			JSON.stringify({ model: "none", kind: media.kind, text: null, unsupported: true, at: Date.now() }),
-			fileUniqueId,
-		);
+	if (!fileId) {
+		emitTelemetry(options, emptyTelemetry(kind, "file_id_unavailable", monotonicNow() - startedAt));
 		return null;
 	}
-	const bytes = await api.downloadFile(file.file_path);
-	const localPath = join(cacheDir, `${fileUniqueId}.${ext}`);
-	writeFileSync(localPath, bytes);
-	const text = (await (options.describe ?? describeImage)(envModel, localPath, media.kind as "photo" | "sticker")).trim();
-	db.query("UPDATE media SET vision = ?, local_path = ? WHERE file_unique_id = ?").run(
-		JSON.stringify({ model: envModel, kind: media.kind, text, at: Date.now() }),
+
+	let filePath: string | null = null;
+	try {
+		filePath = (await api.getFile(fileId)).file_path ?? null;
+	} catch {
+		emitTelemetry(options, emptyTelemetry(kind, "telegram_file_unavailable", monotonicNow() - startedAt));
+		return null;
+	}
+	if (!filePath) {
+		emitTelemetry(options, emptyTelemetry(kind, "telegram_file_unavailable", monotonicNow() - startedAt));
+		return null;
+	}
+
+	const mimeType = mediaMime(filePath);
+	if (!mimeType) {
+		db.query("UPDATE media SET vision = ? WHERE file_unique_id = ?").run(
+			JSON.stringify({ model: "none", kind, text: null, unsupported: true, outcome: "unsupported_format", at: Date.now() }),
+			fileUniqueId,
+		);
+		emitTelemetry(options, emptyTelemetry(kind, "unsupported_format", monotonicNow() - startedAt));
+		return null;
+	}
+
+	let bytes: Uint8Array;
+	try {
+		bytes = await api.downloadFile(filePath);
+	} catch {
+		emitTelemetry(options, emptyTelemetry(kind, "telegram_download_failed", monotonicNow() - startedAt));
+		return null;
+	}
+
+	const cacheDir = options.cacheDir ?? join(process.cwd(), "data", "media");
+	const extension = filePath.split(".").pop()?.toLowerCase() ?? "bin";
+	let localPath: string | null = null;
+	try {
+		mkdirSync(cacheDir, { recursive: true });
+		localPath = join(cacheDir, `${fileUniqueId}.${extension}`);
+		writeFileSync(localPath, bytes);
+	} catch {
+		localPath = null;
+	}
+
+	const result = await executor.describe({ kind, bytes, mimeType });
+	const text = result.text?.trim() || null;
+	db.query("UPDATE media SET vision = ?, local_path = COALESCE(?, local_path) WHERE file_unique_id = ?").run(
+		JSON.stringify({ model: executor.modelRef, kind, text, outcome: result.telemetry.outcome, at: Date.now() }),
 		localPath,
 		fileUniqueId,
 	);
-	if (text.trim() && options.onPersist) {
+	emitTelemetry(options, result.telemetry);
+	if (text && options.onPersist) {
 		try {
 			options.onPersist(fileUniqueId, text);
-		} catch (error) {
-			// Persistence is authoritative; an observer failure must not turn a completed
-			// vision request into a provider/agent failure or trigger another model call.
-			console.error(`[vision] update sink failed media=${fileUniqueId}: ${String(error)}`);
+		} catch {
+			// Persistence is authoritative; observer failures cannot retry provider work.
+			console.error("[vision] update sink failed (observer_failed)");
 		}
 	}
 	return text;
