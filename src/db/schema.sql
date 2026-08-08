@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	text TEXT,
 	caption TEXT,
 	entities TEXT, -- JSON array, raw telegram entities
+	rich_message TEXT, -- bounded JSON source; text contains deterministic plain projection
 	reply_to_message_id INTEGER,
 	quote TEXT, -- JSON, selected quote if any
 	forward_origin TEXT, -- JSON
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS message_revisions (
 	text TEXT,
 	caption TEXT,
 	entities TEXT,
+	rich_message TEXT,
 	PRIMARY KEY (chat_id, message_id, edit_date)
 );
 

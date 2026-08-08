@@ -89,5 +89,6 @@ bot、model、provider、timestamp、context epoch、context tokens、cache read
 - 2026-08-08 REQ-SEND-0001：CACHE_SCHEMA_VERSION 3→4；send 调用知识从 persona/protocol 收口到 tool schema、显式点名不再被 persona silence 覆盖、成功 result 固定最小 ACK、tools hash 补 description。daemon 下次受控重启为所有 bot 开新 epoch。
 - 2026-08-08 REQ-UI-0010：**NONE**；只消费 Pi 已产生的 assistant partial并推送到 TUI-only ephemeral IPC/card，不写 session/DB、不改 provider request、tool/system/message/summary grammar。cache schema仍为 4，golden逐字节不变，LLM call/token增量 0。
 - 2026-08-08 REQ-TG-0002：**NONE**；群内 `sendChatAction typing` 是 runtime side channel，每active bot每4秒至多一次，不进入DB/session/IPC/provider payload，不改system/tool/message/summary grammar或LLM调用数。cache schema仍为4。
+- 2026-08-08 REQ-TG-0003 T10k：**NONE**；新增canonical rich source只留SQLite，既有动态消息位置消费≤32768 code points确定性plain projection；不改system/tool/serialization grammar、消息entry数或LLM调用数，raw JSON不进Pi/provider。cache schema仍为4，golden逐字节不变。T10l的tool description变更再单独bump。
 - cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=4、systemA/B hash、serialize hash、**tools hash（含 description/schema/order）、compaction summary prompt hash** 与 per-bot catalog filter 全部锁定；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
 - 分析脚本（REQ-TEST-0001 R5）：llm_runs 的 epoch/compaction 列与 >30% context 回落都被视为真实 compaction 并同步模拟 context；60 runs 回放识别 3 次真实 compaction（e2e 遗留 epoch 1→4），幻影触发 0

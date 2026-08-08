@@ -14,12 +14,13 @@
 ### messages — canonical 群消息
 
 - `(chat_id, message_id)` 唯一 —— 多个 bot 收到同一条群消息只存一条
-- 元数据：send_time、thread_id、sender_id、display_name、username、sender_tag、sender_chat、is_bot、text、caption、entities(JSON)、reply_to_message_id、quote(JSON)、forward_origin(JSON)、edit_time、media 引用
-- edit：messages 表永远是最新版，旧版进 message_revisions
+- 元数据：send_time、thread_id、sender_id、display_name、username、sender_tag、sender_chat、is_bot、text、caption、entities(JSON)、`rich_message`(JSON)、reply_to_message_id、quote(JSON)、forward_origin(JSON)、edit_time、media 引用
+- Rich Message：`rich_message`保存原始Telegram structure，UTF-8 JSON上限256 KiB；超限/不可序列化时只存 `{truncated,reason,raw_bytes?}` 有界诊断。`text`保存无LLM projector的纯文本结果（16层、500 blocks、4096 nodes、32768 Unicode code points），保持heading/list/table/details/caption阅读顺序；URL、file id与未知metadata不进projection。IPC/Pi/provider只读`text`，不传source。
+- edit：messages 表永远是最新版，旧版进 message_revisions；rich edit同时保存旧/新projection与source
 
 ### message_revisions — 编辑历史
 
-- `(chat_id, message_id, edit_time)` 唯一；存该版本完整 text/entities
+- `(chat_id, message_id, edit_time)` 唯一；存该版本完整 text/entities/rich_message source
 - revision 行的 key 是**被取代版本自己的时间**：原始版本用消息 `date`，编辑过的版本用它当时的 `edit_date`（REQ-TG-0001；此前用旧 edit_date 会在第二次编辑撞主键静默丢中间版本）
 
 ### media — 媒体身份与本地缓存（Phase 7）
@@ -51,7 +52,7 @@
 - update 唯一性：`(bot_id, update_id)`；重复 update 直接跳过
 - 消息唯一性：`(chat_id, message_id)`；多个 bot 各收到一次 → 后续副本视为 duplicate
 - restart：offset 从 bot_state 恢复，Telegram 重发的旧 update 被 raw_updates 去重
-- bot 自发消息：send 返回即落库；随后 poller 也会收到同一条 → 按 (chat_id, message_id) 去重，不重复
+- bot 自发消息：plain/rich send返回都经同一normalize立即落库；随后poller也会收到同一条 → 按 (chat_id, message_id)去重，不重复
 
 ## 序列化
 

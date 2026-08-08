@@ -1,6 +1,8 @@
 // Normalize a Telegram message object into our canonical message row.
 // See docs/data-model.md. Grammar for LLM serialization lives elsewhere (Phase 3).
 
+import { normalizeRichMessage, RICH_MESSAGE_UNAVAILABLE } from "./rich-message.ts";
+
 export interface CanonicalMessage {
 	chat_id: number;
 	message_id: number;
@@ -15,6 +17,9 @@ export interface CanonicalMessage {
 	text: string | null;
 	caption: string | null;
 	entities: unknown[] | null;
+	rich_message: string | null;
+	/** Ephemeral normalization diagnostic; never persisted or serialized. */
+	rich_truncated: boolean;
 	reply_to_message_id: number | null;
 	quote: unknown | null;
 	forward_origin: unknown | null;
@@ -38,6 +43,7 @@ export function normalizeMessage(msg: any, editDate: number | null = null): Cano
 	const from = msg.from ?? null;
 	const senderChat = msg.sender_chat ?? null;
 	const media = extractMedia(msg);
+	const rich = msg.rich_message == null ? null : normalizeRichMessage(msg.rich_message);
 	return {
 		chat_id: msg.chat.id,
 		message_id: msg.message_id,
@@ -49,9 +55,11 @@ export function normalizeMessage(msg: any, editDate: number | null = null): Cano
 		sender_tag: null, // group admin custom title; not present on messages, enriched separately if needed
 		sender_chat: senderChat ? JSON.stringify(senderChat) : null,
 		is_bot: Boolean(from?.is_bot),
-		text: msg.text ?? null,
+		text: rich?.text && rich.text !== RICH_MESSAGE_UNAVAILABLE ? rich.text : (msg.text ?? rich?.text ?? null),
 		caption: msg.caption ?? null,
 		entities: msg.entities ?? msg.caption_entities ?? null,
+		rich_message: rich?.source ?? null,
+		rich_truncated: Boolean(rich?.truncated || rich?.rawTruncated),
 		reply_to_message_id: msg.reply_to_message?.message_id ?? null,
 		quote: msg.quote ?? null,
 		forward_origin: msg.forward_origin ?? null,

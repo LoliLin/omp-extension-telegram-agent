@@ -398,3 +398,12 @@
 - reply实现将只持久化父sender id与per-bot message-id obligation，provider成功接收包含原`#id`的既有动态suffix后才清除；busy合并、overflow分批、file DB reopen恢复均需可观察回归，消息grammar/stable prefix不变。
 - 进程调查确认所有配置bot共享一个daemon/ModelRuntime/SQLite/IPC。首版“一键重启”因此定义为Pi `/tg restart`触发deployment-wide受控重启：foreign PID拒绝、graceful stop、旧pid/socket释放、复用start readiness、并发control lock及原filter feed恢复；不做危险的单runtime热重建。
 - Cache impact: **NONE（docs/research only）**。未来reply data plane不改grammar、无fallback LLM；restart是进程/Pi UI控制。二者均不改provider稳定bytes或正常turn token成本。
+
+## 2026-08-08 (43) — 增加 Rich Message canonical data plane
+
+- `messages`与`message_revisions`新增nullable `rich_message` source，`openDb`对旧库分别幂等`ALTER`；rich edit把旧projection/source进revision，新消息、edit、agent immediate insert及second-bot echo全部复用`normalizeMessage`。
+- `src/telegram/rich-message.ts`按Telegram 10.2边界做无LLM projector：16层、500 blocks、4096总nodes、32768 code points与惰性遍历；heading/inline/list/quote/table/details/media caption/unknown text carriers保持阅读顺序，URL/file id/style metadata不输出。
+- canonical source以UTF-8 256 KiB为硬上限，超限/不可序列化只存小型valid-JSON诊断；projection超限只追加一个truncation marker。首次insert/edit输出一次只含bot/message id的`rich_parse_truncated`告警，duplicate echo不重复。
+- DB保存projection到既有`text`；IPC `MsgItem`、Pi native Text与provider serialization继续只读该列，raw rich JSON不离开数据层，plain旧行/grammar/entry数保持。
+- rich/ingest/agent/IPC/timeline/cache targeted 79 tests、361 assertions；全量224 tests、3659 assertions、typecheck与cache v4 golden通过。outbound `sendRichMessage`与cache schema bump留T10l。
+- Cache impact: **NONE**——schema/source只在SQLite，动态suffix仍用原grammar的有界plain text；stable prefix、tool protocol、golden与LLM调用数不变，cache schema保持v4。

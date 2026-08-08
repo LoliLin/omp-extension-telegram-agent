@@ -33,7 +33,7 @@
 ## Telegram ingestion
 
 - 每个 bot token 一个 getUpdates long-polling 循环（offset 持久化在 SQLite）
-- 每条 update：原样存 raw_updates（bot identity + update_id 唯一）→ normalize 成 canonical message（chat_id + message_id 唯一，多个 bot 收到的同一条群消息只存一条）→ edit 存 revision
+- 每条 update：原样存 raw_updates（bot identity + update_id 唯一）→ normalize 成 canonical message（chat_id + message_id 唯一，多个 bot 收到的同一条群消息只存一条）→ edit 存 revision。`rich_message` 也走同一 normalize：canonical列只保存≤256 KiB source（超限为有界JSON诊断），`text`保存确定性plain projection；projector上限为16层、500 blocks、4096 nodes、32768 code points，未知metadata不泄露URL/file id。revision保留旧source/projection，IPC/Pi/provider只读取projection。
 - Bot 自己 send 成功后，Telegram 返回的 Message 立即落库（发送→DB→TUI 事务链）。agent send tool 与 operator manual send 都复用 `src/telegram/send.ts` 的 send→canonical persistence primitive。
 
 ## Routing（Phase 5，REQ-CONF-0001 泛型化）

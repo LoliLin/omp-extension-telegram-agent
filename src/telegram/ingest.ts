@@ -32,10 +32,11 @@ export function ingestUpdate(db: Database, botId: string, update: any, groupPeer
 	const canonical = normalizeMessage(msg, payload.edited ? (msg.edit_date ?? Math.floor(Date.now() / 1000)) : null);
 	recordMedia(db, botId, canonical); // media identity/file_id tracked even for duplicate messages
 
-	if (payload.edited) {
-		return editMessage(db, canonical);
+	const result = payload.edited ? editMessage(db, canonical) : insertMessage(db, botId, canonical);
+	if (canonical.rich_truncated && (result.kind === "inserted" || result.kind === "edited")) {
+		console.warn(`[rich-message] rich_parse_truncated bot=${botId} msg=#${canonical.message_id}`);
 	}
-	return insertMessage(db, botId, canonical);
+	return result;
 }
 
 /** Persist media identity (shared file_unique_id) and this bot's file_id mapping. */
@@ -57,9 +58,9 @@ function insertMessage(db: Database, botId: string, m: CanonicalMessage): Ingest
 		.query(
 			`INSERT OR IGNORE INTO messages (
 				chat_id, message_id, date, thread_id, sender_id, display_name, username,
-				sender_tag, sender_chat, is_bot, text, caption, entities, reply_to_message_id,
-				quote, forward_origin, edit_date, media, first_seen_by
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				sender_tag, sender_chat, is_bot, text, caption, entities, rich_message,
+				reply_to_message_id, quote, forward_origin, edit_date, media, first_seen_by
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.run(
 			m.chat_id,
@@ -75,6 +76,7 @@ function insertMessage(db: Database, botId: string, m: CanonicalMessage): Ingest
 			m.text,
 			m.caption,
 			m.entities ? JSON.stringify(m.entities) : null,
+			m.rich_message,
 			m.reply_to_message_id,
 			m.quote ? JSON.stringify(m.quote) : null,
 			m.forward_origin ? JSON.stringify(m.forward_origin) : null,
@@ -88,8 +90,15 @@ function insertMessage(db: Database, botId: string, m: CanonicalMessage): Ingest
 
 function editMessage(db: Database, m: CanonicalMessage): IngestResult {
 	const existing = db
-		.query("SELECT text, caption, entities, date, edit_date FROM messages WHERE chat_id = ? AND message_id = ?")
-		.get(m.chat_id, m.message_id) as { text: string | null; caption: string | null; entities: string | null; date: number; edit_date: number | null } | null;
+		.query("SELECT text, caption, entities, rich_message, date, edit_date FROM messages WHERE chat_id = ? AND message_id = ?")
+		.get(m.chat_id, m.message_id) as {
+			text: string | null;
+			caption: string | null;
+			entities: string | null;
+			rich_message: string | null;
+			date: number;
+			edit_date: number | null;
+		} | null;
 	if (!existing) {
 		// edit arrived for a message we never saw (started mid-history): store as new
 		return insertMessage(db, EDIT_UNKNOWN_BOT_ID, m);
@@ -101,12 +110,21 @@ function editMessage(db: Database, m: CanonicalMessage): IngestResult {
 	// NOTE: the media column is not updated on edit (editMessageMedia is not handled);
 	// media identity/file_id mappings from edits are still tracked via recordMedia in ingestUpdate.
 	db.query(
-		"INSERT OR IGNORE INTO message_revisions (chat_id, message_id, edit_date, text, caption, entities) VALUES (?, ?, ?, ?, ?, ?)",
-	).run(m.chat_id, m.message_id, existing.edit_date ?? existing.date, existing.text, existing.caption, existing.entities);
-	db.query("UPDATE messages SET text = ?, caption = ?, entities = ?, edit_date = ? WHERE chat_id = ? AND message_id = ?").run(
+		"INSERT OR IGNORE INTO message_revisions (chat_id, message_id, edit_date, text, caption, entities, rich_message) VALUES (?, ?, ?, ?, ?, ?, ?)",
+	).run(
+		m.chat_id,
+		m.message_id,
+		existing.edit_date ?? existing.date,
+		existing.text,
+		existing.caption,
+		existing.entities,
+		existing.rich_message,
+	);
+	db.query("UPDATE messages SET text = ?, caption = ?, entities = ?, rich_message = ?, edit_date = ? WHERE chat_id = ? AND message_id = ?").run(
 		m.text,
 		m.caption,
 		m.entities ? JSON.stringify(m.entities) : null,
+		m.rich_message,
 		m.edit_date,
 		m.chat_id,
 		m.message_id,
@@ -119,5 +137,8 @@ export function insertSentMessage(db: Database, botId: string, rawMsg: unknown):
 	const canonical = normalizeMessage(rawMsg);
 	recordMedia(db, botId, canonical); // don't rely on the poller echo to fill file_id mappings
 	insertMessage(db, botId, canonical);
+	if (canonical.rich_truncated) {
+		console.warn(`[rich-message] rich_parse_truncated bot=${botId} msg=#${canonical.message_id}`);
+	}
 	return canonical;
 }

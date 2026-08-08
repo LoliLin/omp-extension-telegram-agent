@@ -18,6 +18,14 @@ export function openDb(dbPath: string): Database {
 
 /** Idempotent column migrations for existing dev databases. */
 function migrate(db: Database): void {
+	const messageCols = (db.query("PRAGMA table_info(messages)").all() as { name: string }[]).map((c) => c.name);
+	if (!messageCols.includes("rich_message")) {
+		db.exec("ALTER TABLE messages ADD COLUMN rich_message TEXT");
+	}
+	const revisionCols = (db.query("PRAGMA table_info(message_revisions)").all() as { name: string }[]).map((c) => c.name);
+	if (!revisionCols.includes("rich_message")) {
+		db.exec("ALTER TABLE message_revisions ADD COLUMN rich_message TEXT");
+	}
 	const mediaCols = (db.query("PRAGMA table_info(media)").all() as { name: string }[]).map((c) => c.name);
 	if (!mediaCols.includes("short_id")) {
 		db.exec("ALTER TABLE media ADD COLUMN short_id TEXT");
