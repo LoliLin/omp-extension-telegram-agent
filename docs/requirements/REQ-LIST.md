@@ -31,6 +31,8 @@
 - [ ] [REQ-CMD-0001](REQ-CMD-0001.md) Telegram 群内 help/status、手动 compact、参数调整与可配置管理员白名单（P1，已调查/未实现）
 - [ ] [REQ-TG-0002](REQ-TG-0002.md) Bot 获得响应机会后显示 Telegram 原生处理状态（P1，群内 typing 已实现/待真实群总验收）
 - [ ] [REQ-TG-0003](REQ-TG-0003.md) 支持 Telegram Rich Messages 的收发与持久化（P1，已核对 Bot API 10.1/10.2/未实现）
+- [ ] [REQ-REPLY-0001](REQ-REPLY-0001.md) 直接回复 bot 的消息保证进入对应模型上下文（P1，已按澄清调查/未实现）
+- [ ] [REQ-OPS-0002](REQ-OPS-0002.md) 从 Pi 一键受控重启全部 bot 服务（P1，已调查/未实现）
 
 
 ## Bug
@@ -63,6 +65,8 @@
 - REQ-UI-0010 复用 Pi AgentSession `message_update` 与宿主 `TUI.requestRender()`；流式帧只存在于 IPC/TUI 内存，不写 DB/Pi session/provider context
 - REQ-TG-0002 承认 private draft 原生 Thinking；当前 supergroup 使用 `typing` lease 每 4 秒续约，绝不误发 trigger sender 私聊；send 成功或 flush settle 后停止
 - REQ-TG-0003 用现有 `send.message` 承载 Rich Markdown，incoming/outgoing rich structure持久化后只把有界纯文本投影交给 Pi/provider；group 不调用 private draft
+- REQ-REPLY-0001 保证 direct reply 的原始消息进入对应 bot provider suffix，不提供 runtime 内容兜底；嵌套父 sender、busy/catch-up 与 restart 都不得丢 obligation
+- REQ-OPS-0002 按当前共享进程架构做 deployment-wide graceful restart；Pi `/tg restart` 复用 PID 身份/ready 检查并恢复原 feed，不在进程内热重建单个 bot
 - REQ-CMD-0001 是 Telegram 群内 deterministic control plane；只读命令公开，compact/set/reset 只认 deployment allowlist，命令不得进入 agent context
 - REQ-STICKER-0002 是 REQ-STICKER-0001 的 per-bot sendability 回归修复，并会触发 cache schema bump
 - REQ-PLAT-0001 复用 REQ-CONF-0001 已完成的 N-bot 核心，不重复重写 daemon composition

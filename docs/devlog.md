@@ -390,3 +390,11 @@
 - action错误不进入agent event或provider轨迹；每段连续failure只输出一次`[chat-action] bot=<id> ... (category)`，不拼error message/URL/token，成功后可重新告警。timeout/429/throw不改变routing、exposure或最终send。
 - fake clock锁定0/4/8/12秒、hung request、failure recovery、A/B独立lease、text/sticker/组合send、pending reacquire与draft=0；54 targeted tests / 2640 assertions、全量215 / 3609、typecheck与cache v4 golden通过，真实群>5秒run留T14。
 - Cache impact: **NONE**——纯Telegram side channel，不改DB/IPC/session/system/tool/message/summary grammar，不新增LLM call或token；每active bot每4秒至多一次API调用。
+
+## 2026-08-08 (42) — 调查 direct reply 交付与一键 restart（文档）
+
+- 用户新增两条raw note已转为 `REQ-REPLY-0001` 与 `REQ-OPS-0002`，REQ-LIST不再以无链接自然语言承载；active PLAN新增独立docs/behavior task和验收矩阵。
+- 用户实时澄清“百分百回复”不是runtime替模型发兜底，而是保证模型看到。调查确认当前reply通常能explicit route，但嵌套父消息未落库、dispatch压扁reason/message id、40条catch-up裁剪和重启不恢复都会破坏这个保证；正式边界是durable provider-delivery obligation，禁止fixed fallback/Assistant text偷发/额外纠错LLM。
+- reply实现将只持久化父sender id与per-bot message-id obligation，provider成功接收包含原`#id`的既有动态suffix后才清除；busy合并、overflow分批、file DB reopen恢复均需可观察回归，消息grammar/stable prefix不变。
+- 进程调查确认所有配置bot共享一个daemon/ModelRuntime/SQLite/IPC。首版“一键重启”因此定义为Pi `/tg restart`触发deployment-wide受控重启：foreign PID拒绝、graceful stop、旧pid/socket释放、复用start readiness、并发control lock及原filter feed恢复；不做危险的单runtime热重建。
+- Cache impact: **NONE（docs/research only）**。未来reply data plane不改grammar、无fallback LLM；restart是进程/Pi UI控制。二者均不改provider稳定bytes或正常turn token成本。
