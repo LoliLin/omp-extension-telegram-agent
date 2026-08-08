@@ -737,3 +737,13 @@
 - `REQ-LIST.md`全部勾选，18篇待总验收REQ改为Done；计划移入completed，testing/handoff同步。第三bot真实token、fresh credential向导和首次Pages main deploy按各AC明确记录为外部opt-in，不伪造成功也不阻塞已有确定性验收。
 - 离线全量424 pass / 0 fail / 5059 assertions、typecheck、cache v7 golden与mdBook 18 Markdown/98 links、21 HTML/620 links通过。全局test preload继续只允许loopback；T14没有调用provider/TinyFish，tracked tests中没有真实TinyFish脚手架。
 - Cache impact: **NONE**——本条只收口验证与追溯；不改system/tool/message/summary grammar、context epoch、provider调用或每turn token。
+
+## 2026-08-09 (86) — 完成长群聊context与成本边界重构
+
+- 用`message_events.ingest_seq`与`(chat_id,ingest_seq)`索引取代全历史扫描，message/edit/metadata/media completion都追加immutable delta；per-bot cursor、visible refs、reply obligations与routing claims分离。旧canonical history只backfill一次且cursor初始化到high-water，compaction永不重放已消费历史。
+- 每轮最多读取256条recent与64条obligation event，按当前context和输出/reasoning/tool reserve打包；默认suffix 12k、单event 4096。完整sticker catalog退出system prefix，每轮本地top-K≤8；TinyFish provider输出、vision deployment budget与90/30/365天安全retention都有硬上限。
+- 在restore前计算包含Pi/provider/model/cache policy/protocol/persona/serializer/compaction/catalog/extensions/tools的fingerprint；固定`tg-context → tg-compaction → tg-cache-observer → tg-assistant-persistence`顺序。structured details负责cursor/visibility reconcile，未发布assistant prose以`[no_send]`留在session，payload observer只保存HMAC与首个divergence位置。
+- config默认reasoning/search/run_js/vision关闭、cache short、compaction Luna low；`/tg config`把预检过的Pi provider/model固定进新配置并写出全部成本边界。CI用Bun 1.3.14 frozen install独立执行cache golden、全量测试和typecheck。双语用户文档、architecture/cache/data-model/runbook/testing/handoff同步，计划与review状态收口。
+- 签名原子提交：`8c23c92`、`dbdc438`、`15c82cc`、`f50f10d`、`ea066c0`、`b7477b6`、`6977b02`，completion文档commit另以PLAN T6 trailer追溯。
+- 验证：`bun test` 442 pass / 0 fail / 5118 assertions（42 files，外网guard生效），`bun run check`，cache v8 golden 7/7，mdBook 0.5.4 18 Markdown/98 links与21 HTML/620 links，`git diff --check`全部通过。百万event索引fixture约2.1秒。未运行真实provider/Telegram/TinyFish smoke。
+- Cache impact: **INTENTIONAL**——`CACHE_SCHEMA_VERSION` 7→8；共享protocol/persona顺序、structured Telegram context/delta、assistant silence与sticker suffix改变provider bytes。完整fingerprint在restore前建立新session/epoch并保留旧文件；稳定prefix缩短、每turn suffix有界，不新增固定provider call。历史50-run 90% hit仅保留为历史样本，不外推为当前成本承诺。

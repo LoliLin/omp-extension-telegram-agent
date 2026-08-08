@@ -1,104 +1,113 @@
 # Cache 工程
 
+本文是 provider context、cache identity 与 compaction 的当前权威说明。历史版本变更见 `docs/devlog.md`。
+
 ## Invariants
 
-1. 稳定 prefix 区域（变化频率极低）：system prompt（persona + 群聊行为规则 + 消息 grammar 说明 + 格式化规则）、tool name/description/parameter schema 与顺序
-2. 动态内容只以新 suffix 追加，永不改写已存在的 prefix
-3. 历史消息序列化 grammar 固定；已序列化过的消息内容永不变化
-4. compaction 是唯一的 cache boundary（新 Context Epoch）
-5. UI/TUI 功能不得影响 provider payload（UI-only 改动若改变 provider prefix = 边界设计 bug）
+1. 稳定 prefix 的首字节始终来自共享群聊协议，之后才是 persona；固定顺序的 tool name、description 与 parameter schema 属于同一 cache cohort。
+2. Telegram 动态内容只能以新的结构化 session entry 追加，不得改写已持久 entry 的 provider projection。
+3. `messages` 是 UI/canonical 最新读模型；provider 只消费不可变 `message_events`。edit、metadata enrichment 与 vision completion 都追加 delta。
+4. 已消费位置与当前可见性分离：`bot_cursors.consumed_seq` 只单调前进，`bot_visible_messages` 可在成功 compaction 或 session 轮换时替换。
+5. 只有完整 context fingerprint 相同且 manifest 指向的 session 文件存在时才恢复 session。cache-visible 身份改变必须在 restore 前创建新 session/context epoch。
+6. UI、IPC、日志、operator command 与本地媒体准备不得改变 provider payload。
+7. provider 输入和工具输出必须有界；不能把 raw update、Rich Message JSON、完整 sticker 目录或无界历史塞入 context。
 
 ## CACHE_SCHEMA_VERSION
 
-当前：**7**（v7：`send.message`改为有界自然Markdown说明并由本地转换为Telegram entities，REQ-TG-0004）
+当前：**8**。
 
-cache-visible protocol：system prompt shape、persona serialization、tool name/description/parameter schema/order、消息序列化 grammar、compaction summary grammar、**固定 sticker 目录块**。
+v8 合并以下有意的 provider-visible 变化：共享 protocol 置于 persona 前、`telegram_context_v2` 结构化消息、immutable edit/metadata/media delta、动态 sticker top-K，以及 unpublished assistant prose 的 `[no_send]` 持久化策略。
 
-修改任一 → bump version → 新 context epoch（daemon 启动时检测 daemon_state.cache_schema_version 不匹配即全员 epoch+1，一次性的 cache reset，而非每轮莫名 miss）。
+cache-visible protocol 包括：
 
-## Provider payload 结构（DeepSeek via openai-completions）
+- shared protocol 与 persona 的内容及顺序；
+- tool name、description、parameter schema 与顺序；
+- Telegram serializer 与 custom-message details 版本；
+- compaction prompt、details 与所选 compaction model；
+- extension 顺序和 assistant persistence policy；
+- provider/api/model/reasoning/cache retention；
+- Pi 版本及当前 bot 的 sticker catalog identity snapshot。
 
+`CACHE_SCHEMA_VERSION` 是 fingerprint 中的强制失效字段，不是恢复 session 后再补记的一项 telemetry。任何上述内容变化都必须先 bump version、更新本文件与 golden；runtime 在打开旧 session **之前**计算 fingerprint，不匹配时保留旧文件、创建新 session 并推进 epoch。
+
+## Provider payload 结构
+
+```text
+system: SHARED_PROTOCOL + separator + persona
+messages: structured Telegram projection + assistant/tool/summary entries
+tools: [{ name, description, parameters }] in fixed order
 ```
-system: persona prompt + 固定 sticker 目录块（有 set 时，单字符串）
-messages: user/assistant/tool 序列
-  assistant.content = 纯字符串
-  assistant.reasoning_content = thinking 回传（DeepSeek 协议要求，由 Pi 处理）
-tools: [{type:"function", function:{name, description, parameters}}] 固定顺序
-```
 
-DeepSeek context caching 服务端全自动，前缀字节级一致才命中（`prompt_cache_hit_tokens`）。
+- `src/agent/prompt.ts` 拥有 shared protocol/persona 组装。
+- `src/agent/tools.ts` 是 provider-facing 工具参数、调用、错误和终止语义的唯一权威；persona 不复制工具参数表。
+- `src/agent/extensions/context.ts` 从 `telegram_context_v2.details.providerText` 投影 provider 内容；恢复 cursor/visible ids 只读 structured details，绝不解析渲染文本。
+- `send` 成功后 provider 只看到有界 ACK 与 sent message ids；本地发送详情继续写 SQLite/event。
+- 未通过 `send` 发布的 assistant prose 写入本地 `agent_events`，session 中用固定 `[no_send]` 代替；thinking/tool protocol entry 保留。
 
-## Tool 提示词归属（REQ-SEND-0001）
+## Telegram 消息 grammar（serializer v2）
 
-- `src/agent/tools.ts` 是 provider-facing 工具用法的唯一权威：参数、组合方式、可见 id、错误与终止语义都放 tool/parameter description；persona 与共享 protocol 只保留环境、消息 grammar、人格与何时回应。
-- `send` 是唯一公开 Telegram 通道，`message`/`sticker`/`reply_to` 在一次最终 tool call 内组合。成功 result 是固定 `ok` + `terminate:true`：Pi 仍持久化协议要求的 toolResult，但不再做 follow-up provider request；动态 sent ids 只在 provider 不读取的 details/DB/event。
-- `toolsHash()` 覆盖 provider 实际收到的 name + description + parameters + order；label/execute 是本地字段。per-bot tool filter 使用同一 hash grammar。
-- v4 当时的两份 deployment persona 合计减少 8,859 bytes，同时删除 shared protocol 的参数示例；tool description 虽增强，稳定 system prefix 仍显著净缩短。当前 HEAD 不再跟踪这些私有 persona，cache golden 改用公开中英模板；生产本机 persona bytes 与 schema v5 未因此改变。每个成功 send 的结果从动态 `ok sent #<id...>` 缩为固定一 token ACK。
-- v5 只扩充 send tool/`message` description，参数名、schema形状、工具顺序、system/serialization/summary hash均不变。每次provider请求的稳定prefix增加有界Rich Markdown说明；不新增tool、LLM call或动态tool result token。
-- v6 保持`send, search, run_js`三项与顺序，只给`search`增加可选`url`及二选一说明。稳定schema增量有界；query结果仍≤5条，url结果只有模型显式调用才进入动态tool suffix且正文≤8,000字符。没有eager fetch或每turn固定token/call；daemon在下次启动检测5→6后只开一个新epoch。
-- v7 仍保持三项tool、顺序和`send(message,sticker,reply_to)`参数名；只把旧RichMessage说明替换为自然Markdown固定子集、4096上限与“普通正文不默认整段粗体”。转换是本地确定性代码，0新增tool/LLM call/dynamic token；daemon下次启动检测6→7后只开一个新epoch。
-
-## Sticker 目录分区（REQ-STICKER-0001）
-
-**固定目录（stable prefix）**：每 bot 配置 `sticker_sets`（Telegram set name）；启动时 getStickerSet → media 持久化（file_unique_id 身份 + 每 bot file_id 映射）→ rowid 分配 short_id（`s<N>`，与动态候选同命名空间）→ 对当前已持久结果构造一次prompt snapshot，同时用shared Pi runtime在后台补缺失vision。后台completion不重建当前session prefix；只会在未来restart的新snapshot中出现。序列化块为`# Sticker 目录`（配置 set 顺序 + rowid，无 vision 标 `[未识别]`），且只包含当前 bot 在 `media_file_ids` 中确有映射的条目；另一个 bot 的映射不得泄漏。目录内容/可发送性变化 = cache-visible 协议变化 → bump CACHE_SCHEMA_VERSION + 新 epoch。规模上限 120（超限截断 + warn）。
-
-**动态候选（动态 suffix 尾部）**：`Available stickers:` 块保留，只列**上下文出现过、set 外且当前 bot 确有 file_id 映射**的 sticker（set 内 sticker 已在 prefix 里，排除防冗余）；位置约束：必须在全部消息序列之后（R6，测试锁定），不并入 prefix。
-
-**动态媒体 gate**：photo/sticker按identity命中持久cache或以最多2个worker完成一次terminal vision；全部settle后才序列化当前batch。成功描述或确定性fallback都只进入这次新suffix，已exposed entry不重发。photo precache只提前准备≤1 MiB本地显示文件，并与vision共享同一次Telegram download；`media_ready`、`vision_update`、本地转换和catalog后台completion不写Pi session。cache v5 golden因此逐字节不变，新增LLM/vision call与provider token均为0。
-
-**send**：两种来源的 short_id 共用 media 表解析 + 每 bot file_id；无效 id 在发送前结构化报错（REQ-AGENT-0001 R7 协同）。
-
-## 消息序列化 grammar（v1，Phase 3 实现后以此为准）
-
-```
---- 2026-08-07 ---                                  # 日期变化时插入
+```text
+--- 2026-08-07 ---
 [17:31:42] #18452 Alice (@alice · tag:admin): 文本
 [17:31:55] #18453 Bob (u17) ↪ #18452: 文本
-[17:32:19] #18455 Alice (@alice) ↪ #18454 quote="...": @BotA 文本
+[message_edit #18453] 修改后的文本
+[message_metadata #18453] ↪ #18452
+[media_update #18453] [图片: 新的视觉描述]
 ```
 
-- 时间 HH:mm:ss；日期分隔 `--- YYYY-MM-DD ---`
-- `#<telegram message_id>`；无 username 用户分配稳定短 alias `u<N>`
-- sender tag / quote / forward / edit 等 optional metadata 只在存在且有信息价值时输出
-- reply 父消息不在上下文时带短 reference：`↪ #18452 @alice "片段"`
+- message event 保留原有日期、时间、sender、reply、quote、forward 与媒体占位符语义。
+- message/event bytes 一旦写入 session 就不重算；后续变化使用 `edit`、`metadata`、`media_update` delta。
+- `telegram_context_v2.details` 同时保存 `consumedSeq`、本 entry 的 event refs、`visibleMessageIds` 与固定 provider projection。
+- session 写入成功或启动 reconcile 能从 structured details 证明写入后，SQLite cursor 才前进。provider 失败不会靠文本猜测状态。
 
-## Context epoch 与 threshold
+## 有界 suffix 与 sticker 候选
 
-- 初始 threshold：**128K tokens**（provisional，依据：compaction 后基础 ≈10K + summary ≈6K，平均每 bot turn 新增 2K–8K）
-- compaction 后新 epoch：summary（ persona 导向、倾向"状态"）+ 保留近期消息
-- 架构不得硬编码 128K；threshold 在 model config（`compaction_threshold` / `compaction_keep_recent` env）
+- runtime 每轮最多索引读取 256 条近期 event，并额外读取最多 64 条 direct-reply obligation event；不扫描整张 `messages` 表。
+- reply obligation 优先打包；普通 event 从最新端选择后恢复时间顺序。默认 suffix 上限 12,000 tokens，单 event 上限 4,096 tokens，并为输出、reasoning 与 tool follow-up 预留空间。
+- 普通溢出 event 可以被 cursor 消费但不标 visible；reply obligation 只有在结构化 commit marker 证明交付后才删除。
+- sticker catalog 永不进入 system prompt。每轮从本地可发送 mapping 中按当前 suffix 检索，最多追加 8 个候选；不命中或预算不足时不追加。
+- page fetch 先受 8,000 字符本地护栏约束，再受 2,048 provider tokens 上限约束；query 与工具失败输出同样有界。
 
-## Compaction 实现（Phase 8，runtime.ts；REQ-AGENT-0001 修正）
+## Vision 与 provider boundary
 
-- Pi 自动 compaction 开启：`reserveTokens = max(16384, contextWindow - threshold)`，DeepSeek 1M window 下触发点即 threshold
-- 自定义 `session_before_compact` extension：用 `serializeConversation(messagesToSummarize)` + chat-oriented 中文摘要 prompt（状态导向，≤800 字，保留人物关系/未决事项/#id 引用），有 previousSummary 时合并；`completeSimple(model, …, {cacheRetention:"none", maxTokens:4096})`
-- 空摘要防护：extension 得到空 summary 时返回 `{cancel: true}`（SDK 会吞掉 handler 异常并回退默认摘要，cancel 是唯一到达失败路径的机制）→ `compaction_end {aborted:true}`，不持久化空摘要
-- `compaction_end` → `onCompactionEnd(event)`：**仅成功**（`result` 存在且未 aborted）才 epoch+1 持久化、清 exposure、写 agent_events `compaction`；失败/中止只写 agent_events `error`（stage=compaction），epoch 与 exposure 不动
-- exposure 重置与 kept tail 严格对齐：从 `sessionManager.buildContextEntries()`（compaction 后 provider 实际可见的 entry 集合）中的 user message 文本解析锚定行 `^[HH:MM:SS] #<id> ` 得到幸存消息集合；替代旧的「最近 40 条」启发式（kept tail 按 token 保留，条数启发式两个方向都错）。已知限制：群消息文本伪造换行+锚定行可误标个别 id（assistant/tool/custom entry 不解析，模型无法注入）
-- keepRecentTokens = `compaction_keep_recent`（默认 20000）
+Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确提供 `auxiliary_visual_model` 的兼容路径，才会执行。
 
-## Threshold 分析脚本
+- foreground 每轮默认最多 2 个 media、并发 2；deployment scheduler 默认每群每小时 24 次、每日 200 次。
+- persistent media identity cache 在 bots 间复用。新的非空结果只追加 `media_update` event，不改写旧 message entry。
+- photo precache、`media_ready`、TUI card 与 `vision_update` IPC 都是 provider 外 side channel。
+- compaction 单独使用配置的廉价模型与 `cacheRetention: "none"`；vision/compaction 不继承主模型的 reasoning 默认。
 
-`bun run scripts/analyze-context-window.ts [db]`：重放 llm_runs 遥测，模拟 64K/96K/128K/160K/192K/256K 候选 threshold 的 compaction 次数、miss/turn、read/turn、$/turn。估算工具，不是 runtime 组件。
+## Compaction 与 context epoch
 
-## Telemetry（每次 provider 请求记录）
+- Pi 达到配置阈值时，`tg-compaction` 用状态导向 prompt 生成不超过 800 字的摘要，并保留配置的 recent tail。
+- 空摘要、provider failure 或 abort 会 cancel；cursor、visible refs 与 epoch 均不伪造变化。
+- 成功结果的 structured details 保存当前 `consumedSeq` 与 retained `visibleMessageIds`。runtime 用这些 details 替换 visibility、推进 epoch；`consumedSeq` 永不回退。
+- 手工 `/tg compact` 复用同一边界，不向模型注入 operator 指令。
 
-bot、model、provider、timestamp、context epoch、context tokens、cache read、cache write、cache miss(=input)、output、reasoning、latency、cost（可算时）、compaction flag；外加 system hash、tool schema hash、ordered provider-message hashes 用于排查意外 miss。secret 不进 telemetry。REQ-UI-0009 的 cache-write schema/IPC 只记录 provider response，不改变任何 provider request/cache-visible bytes。
+## Payload 诊断与 telemetry
 
-## 测试结果
+`tg-cache-observer` 在 `before_provider_request` 对 canonical payload 计算 deployment-local HMAC：system、tools、每条 message 与完整 payload 分段记录 hash，并记录相对上次请求的首个 divergence segment/index/byte offset。SQLite 不保存 plaintext payload、prompt、secret 或 HMAC key。
 
-- 2026-08-07（50 runs，bots A/B，DeepSeek deepseek-v4-flash）：cache read 734,208 / miss 81,659，**hit ratio 90.0%**；典型 turn read≈14.7K miss≈1.6K，估算 $0.00038/turn
-- 2026-08-07 e2e-compaction：`compaction_threshold=1500` 强制两轮触发，compaction → epoch 2→3→4 持久化、exposure 重置、摘要调用成功；重启后 epoch=4 恢复
-- 2026-08-07 REQ-STICKER-0001：CACHE_SCHEMA_VERSION 1→2，固定 sticker 目录进入 system prompt（systemA/B 无目录 hash 不变、带目录新 golden 锁定）；daemon 启动检测 schema 版本变化全员开新 epoch；sticker 相关 cache 对比方法：llm_runs 里 system_hash 变化即目录变更，`analyze-context-window.ts` 按 epoch 同步模拟
-- 2026-08-08 REQ-STICKER-0002：CACHE_SCHEMA_VERSION 2→3；stable catalog 与 dynamic candidates 都按当前 bot 的 file_id mapping 过滤。合法目录的 hash 不变，已有跨 bot 泄漏行会从 prefix 消失；daemon 下次启动自动为所有 bot 开新 epoch。
-- 2026-08-08 REQ-SEND-0001：CACHE_SCHEMA_VERSION 3→4；send 调用知识从 persona/protocol 收口到 tool schema、显式点名不再被 persona silence 覆盖、成功 result 固定最小 ACK、tools hash 补 description。daemon 下次受控重启为所有 bot 开新 epoch。
-- 2026-08-08 REQ-UI-0010：**NONE**；只消费 Pi 已产生的 assistant partial并推送到 TUI-only ephemeral IPC/card，不写 session/DB、不改 provider request、tool/system/message/summary grammar。cache schema仍为 4，golden逐字节不变，LLM call/token增量 0。
-- 2026-08-08 REQ-TG-0002：**NONE**；群内 `sendChatAction typing` 是 runtime side channel，每active bot每4秒至多一次，不进入DB/session/IPC/provider payload，不改system/tool/message/summary grammar或LLM调用数。cache schema仍为4。
-- 2026-08-08 REQ-TG-0003 T10k：**NONE**；新增canonical rich source只留SQLite，既有动态消息位置消费≤32768 code points确定性plain projection；不改system/tool/serialization grammar、消息entry数或LLM调用数，raw JSON不进Pi/provider。cache schema仍为4，golden逐字节不变。T10l的tool description变更再单独bump。
-- 2026-08-08 REQ-TG-0003 T10l：**INTENTIONAL**；agent文字改为Rich Markdown并只在send tool schema说明能力，CACHE_SCHEMA_VERSION 4→5、tools hash `631bf05405d1`。systemA/B、serialize、compaction与catalog hash不变；daemon下次启动只开一个新epoch。参数/工具/LLM调用数不变，具体rich source仍不进入provider。
-- 2026-08-08 REQ-REPLY-0001 T10o：**NONE**；reply sender/obligation只改变动态消息选择，原`#id`行仍用既有serialization。system/tool/message/summary grammar、schema v5 golden与正常burst调用数不变；只有真实pending reply超过40条时按有界normal batch产生必要的额外call。
-- 2026-08-08 REQ-UI-0014 T13l：**NONE**；photo precache、`media.local_path`与additive `media_ready`只存在于Telegram/local SQLite/owner socket/Pi TUI side channel。与vision共享下载但不调用模型；system/tools/messages/summary grammar、context epoch、vision次数与每turn token逐字节不变，schema仍v5。
-- 2026-08-08 REQ-SEARCH-0001 T13m：**INTENTIONAL**；`search`增加互斥`url`参数及不可信网页说明，CACHE_SCHEMA_VERSION 5→6、tools hash `09d2e154259d`。systemA/B、serialize、compaction与catalog hash逐字节不变；工具项与顺序、query兼容、每turn固定调用数不变。
-- 2026-08-08 REQ-TG-0004 T13p：**INTENTIONAL**；`send.message`从RichMessage说明改为本地Markdown→entities契约，CACHE_SCHEMA_VERSION 6→7、tools hash `280868a5b3a9`。systemA/B、serialize、compaction与catalog hash逐字节不变；tool项/顺序和LLM调用数不变，转换器不进入provider payload。
-- cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=7、systemA/B hash、serialize hash、**tools hash（含 description/schema/order）、compaction summary prompt hash** 与 per-bot catalog filter 全部锁定；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
-- 分析脚本（REQ-TEST-0001 R5）：llm_runs 的 epoch/compaction 列与 >30% context 回落都被视为真实 compaction 并同步模拟 context；60 runs 回放识别 3 次真实 compaction（e2e 遗留 epoch 1→4），幻影触发 0
+每次 provider response 还记录 provider/api/model/session hash/cache retention、epoch、context/input/cache read/cache write/output/reasoning/latency/cost、trigger、public send、vision/tool rounds，以及 input event/token estimate/rows scanned。保留期默认 90 天，因此 UI 的 lifetime 表示**当前 SQLite 保留窗口**，不是永久累计。
+
+`bun run scripts/analyze-context-window.ts [db]` 可离线比较 threshold；它是估算工具，不是在线 optimizer。
+
+2026-08-07 的 50-run DeepSeek 数据曾测得 90.0% cache hit。该数字仅是历史 deployment 样本，不代表当前 schema v8、其他模型或未来负载。
+
+## Golden
+
+`test/cache.test.ts` 当前锁定：
+
+| 项目 | 值 |
+| --- | --- |
+| schema | `8` |
+| zh system | `71aa33e82b4d` |
+| en system | `57e3746bcf4d` |
+| legacy message serializer | `68a17d6e5c05` |
+| immutable event serializer | `4a57de738bf9` |
+| tools | `280868a5b3a9` |
+| compaction prompt | `045a5241fdd7` |
+| extension order | `e04f7032d531` |
+| context protocol | `a9ca6974ac5f` |
+
+测试必须 pin `TZ=Asia/Singapore`；`bun test` 自身强制 UTC。若 hash 有意变化，先解释 cache impact，再更新 version 与 golden；不要只改 expected value。

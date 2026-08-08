@@ -7,12 +7,12 @@
 - **手工路径**：复制 `telegram.config.example.ts`、`.env.example` 与一个 public persona template，再按下列字段编辑。legacy JSON 只用于兼容。
 - `telegram.config.ts`（项目根，首选）：复制 `telegram.config.example.ts` 后编辑，`defineConfig()` 提供类型与逐字段注释。它会作为受信本机代码执行，不要粘贴来源不明的配置。legacy `bots.config.json` 继续支持；两份默认文件同时存在会拒绝启动。env `bots_config` 可显式指向 `.ts` / `.json`。
   - `group_peer_id`：群的裸正数 peer id（`-100...` 形式会被自动归一化）
-  - deployment 默认模型：省略模型字段时继承Pi合并后的provider/model/thinking；高级配置可用`provider` + `model` + 可选`reasoning_effort`选择另一个已认证Pi catalog entry。切换provider必须同时给model；认证始终来自Pi。
-  - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1），可选覆盖 `provider` / `model` / `reasoning_effort` / compaction / cooldown / `tools`（`{send, search, run_js}` 开关）/ `sticker_sets`（Telegram sticker set 名数组）。模型覆盖只是选择，不承载credential。
+  - deployment 默认模型：canonical example显式选择`openai-codex/gpt-5.6-luna`、reasoning `off`与short cache retention。旧配置省略provider/model时仍继承Pi合并后的选择，但省略reasoning始终是`off`；切换provider必须同时给model，认证始终来自Pi。
+  - 每 bot：`id`（`[A-Za-z0-9_-]+`，唯一）、`name`、`token_env`（指向 `.env` 里的 token key）、`persona_path`（绝对路径 / `~` / 相对项目根，可放仓库外）、`routing_p`（Σ≤1），可选覆盖 provider/model/reasoning/cache retention、compaction、12k suffix/4096 message预算、cooldown、`tools`与`sticker_sets`。顶层另有vision scheduler和90/30/365天telemetry/raw/event retention。模型覆盖只是选择，不承载credential。
   - `sampling_cooldown_ms` 默认 2000，可全局设置并由单 bot 覆盖；必须有限且 `>=0`，0 关闭概率冷却。它只影响 probability routing，mention/reply/name 不会被静默吞掉。
   - `telegram_admins`：Telegram群内控制白名单，接受正整数user id或规范化`@username`；推荐固定numeric id。缺省/空数组会拒绝所有`compact/set/reset`，但不影响公开`help/bots/status`。
 - `.env`（`key: value` 冒号格式）：只放项目拥有的secret——bot tokens、`tinyfish_api_key`、`router_secret`、`gpg_key_passphrase`（仅签名用）。LLM credential由Pi auth store独占。只有至少一个bot启用`tools.search`时才强制要求对应TinyFish key；首配默认关闭search，可在补key后编辑配置开启。
-- 改配置后重启 daemon 生效（无热重载）；本机 persona 除公开模板外默认被 Git 忽略。
+- 改配置后重启daemon生效（无热重载）；本机persona除公开模板外默认被Git忽略。model/persona/cache policy/tools等cache-visible字段变化会在restore前生成新fingerprint/session/epoch，旧session文件保留但不会错误恢复。
 - 一份配置/daemon只对应一个`group_peer_id`。同一checkout的`data/`、pid、socket与DB是共享deployment资源，不能只换`bots_config`并行跑第二个群；多群当前必须使用彼此隔离的工作目录与data目录，不能共享DB/session/socket/pid。
 
 ## 启动
@@ -25,7 +25,7 @@ bun run status                     # 状态（pid 校验：cmdline 必须是本�
 bun run stop                       # SIGTERM 优雅停止
 ```
 
-- 配置了 sticker sets 时，首次下载与vision预识别可能延长启动；以后复用本地catalog。`start` 会在60秒内等socket；超时但child仍存活时只报告starting，并提示用`status` / `daemon.log`确认。
+- 配置了sticker sets时，首次Telegram catalog拉取可能延长启动；以后复用本地DB。vision默认关闭，只有显式启用（或legacy配置明确写辅助视觉模型）才会产生视觉工作。`start`会在60秒内等socket；超时但child仍存活时只报告starting，并提示用`status` / `daemon.log`确认。
 - 每 bot 启动日志的 `sticker-catalog` 行会报告 `catalog/sendable/missing_file_id`；`missing_file_id>0` 的条目不会暴露给该 bot。检查 set 名/token 权限或 Telegram `getStickerSet` 失败，不要复制另一个 bot 的 file_id。
 - 配置错误会在启动期逐条列出（stderr / daemon.log），不会静默跑坏配置。
 - 双 start 竞态由排他pid锁挡住；并发restart由`data/daemon.control.lock`串行，第二个立即报`restart already in progress`。
@@ -60,8 +60,8 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - attach 会自动进入 Telegram scope compose：单 bot filter或全局唯一bot直接发送；全局多bot每次提交复用Pi原生`select`选择身份。footer显示`TELEGRAM · SEND AS <id/name>`或`TELEGRAM · CHOOSE BOT ON SEND`。`compose <bot-id>`固定身份，`compose off`把输入交还Pi，bare `compose`恢复scope。
 - compose 仅支持纯文本。附件会被阻止；明确失败会把原文放回 editor。若 ACK 超时或 daemon 在发送中断线，结果可能未知：先检查群聊，不要直接重发；插件不会自动重试，并会安全关闭 compose。
 - selector取消会恢复原文且不发送；选择/发送期间拒绝第二次提交。RPC/extension source不受compose影响。attach切换会建立新scope；detach、daemon断线、restart/config变更或Pi退出会关闭compose并让迟到选择失效；bot token始终只在daemon内。
-- photo/sticker 被现有 lazy vision 流程识别后，同一 native media card 会在下方原位出现 `视觉理解 · ...`；无需重新 attach。它不为 UI 主动调用模型，未触发 bot 的媒体仍保持图片/fallback。
-- attach 自动让 Pi 自己的 `FooterComponent` 显示 Telegram `↑/↓/R/W/CH/$/context/model`。token/cost 是当前 SQLite `llm_runs` 首条记录以来的 lifetime 累计，跨 daemon/Pi restart 与 epoch；context 是最新 run 当前占用而非历史求和。`W` 仅在 provider 报告非零 cache write 时由 Pi 显示。
+- 显式启用vision后，photo/sticker被有界lazy流程识别时，同一native media card会在下方原位出现`视觉理解 · ...`；无需重新attach。UI本身不调用模型；vision关闭、未选中或超预算时仍保留图片/fallback。
+- attach自动让Pi自己的`FooterComponent`显示Telegram `↑/↓/R/W/CH/$/context/model`。token/cost是当前SQLite retention窗口中`llm_runs`首条保留记录以来的lifetime累计，跨daemon/Pi restart与epoch但会受默认90天清理影响；context是最新run当前占用而非历史求和。`W`仅在provider报告非零cache write时显示。
 - `/tg panel` 可单独切换范围，`panel off` 恢复 operator Pi session usage。`/tg status [bot]` 另列 runs/since/epoch、latest cache/output/reasoning/latency/cost 与 lifetime totals/平均 latency。
 - 在editor输入`/tg `后按Tab/选择使用Pi原生分级菜单；`attach/status/compose/panel`的下一层会从配置动态列出bot id/name，`compose/panel`另有`off`，bare `compose`也可直接执行。
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。
@@ -91,7 +91,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 1. `.env` 加一行 token：`my_bot_token: REPLACE_WITH_BOTFATHER_TOKEN`
 2. `telegram.config.ts` 的 `bots` 数组加一项（id 唯一、`token_env` 指向新 key、persona 文件存在）
 3. 重启 daemon → 启动日志会列出新 bot；Pi 中 `/tg attach <id>` 可单独观察
-4. 需要固定 sticker 目录就加 `sticker_sets`；不需要就不写（无目录 bot 的 system prompt 与 v1 逐字节一致）
+4. 需要 sticker 候选就加`sticker_sets`；完整目录只留在本地，每轮最多把8个相关且当前bot可发送的候选追加到动态suffix，不进入system prompt
 
 ## Opt-in 第三个 bot 真实 smoke
 

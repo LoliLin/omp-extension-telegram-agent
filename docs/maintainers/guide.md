@@ -16,7 +16,7 @@
 每个任务必须明确：
 
 - **NONE**：不改变任何provider-visible byte；在devlog说明为什么。
-- **INTENTIONAL**：system/persona/tool order或schema、消息/摘要grammar等cache-visible协议改变；必须升级`CACHE_SCHEMA_VERSION`、建立新epoch、更新[cache](../cache.md)并验证golden。
+- **INTENTIONAL**：system/persona/tool order或schema、消息/摘要grammar等cache-visible协议改变；必须升级`CACHE_SCHEMA_VERSION`，让完整fingerprint在restore前建立新session/epoch，更新[cache](../cache.md)并验证golden。
 
 UI、operator command、日志和telemetry属于side channel。若纯UI任务改变provider payload，这是边界错误，不是可忽略的小变化。任何每turn新增内容必须有界；确定性代码能完成的工作不花LLM token。
 

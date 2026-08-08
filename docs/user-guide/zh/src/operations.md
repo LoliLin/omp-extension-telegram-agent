@@ -70,7 +70,7 @@ bun run scripts/e2e-compaction-manual.ts --bot friend
 
 当前一个工作目录只支持一个群 deployment。这不是临时的UI限制：以下资源都由工作目录拥有，并没有deployment namespace：
 
-- 单一`group_peer_id`和SQLite canonical history，包括每只bot的exposure与reply obligation；
+- 单一`group_peer_id`和SQLite canonical history，包括每只bot的consumed cursor、visible refs与reply obligation；
 - agent session与context epoch；
 - 每只poller的Telegram update offset，以及共享router secret；
 - daemon PID、control lock与Unix socket。

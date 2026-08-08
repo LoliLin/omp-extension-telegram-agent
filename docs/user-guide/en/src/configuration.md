@@ -6,7 +6,7 @@
 
 | File | Contents | Commit it? |
 | --- | --- | --- |
-| `telegram.config.ts` | Group, bots, optional Pi model selection, routing, tools | No |
+| `telegram.config.ts` | Group, bots, Pi model selection, routing, cost bounds, tools | No |
 | `.env` | Telegram/TinyFish tokens and router secret | No |
 | `personas/*.local.md` | Real deployment personas | No |
 | `telegram.config.example.ts` | Public typed schema example | Yes |
@@ -19,13 +19,30 @@ telegram_bot_token: 123456:REPLACE_WITH_BOTFATHER_TOKEN
 router_secret: REPLACE_WITH_RANDOM_LOCAL_SECRET
 ```
 
-## Minimal one-bot configuration
+## Cost-first one-bot configuration
 
 ```ts
 import { defineConfig } from "./src/config-schema.ts";
 
 export default defineConfig({
   group_peer_id: 1234567890,
+  provider: "openai-codex",
+  model: "gpt-5.6-luna",
+  reasoning_effort: "off",
+  cache_retention: "short",
+  compaction_model: "openai-codex/gpt-5.6-luna:low",
+  max_suffix_tokens: 12_000,
+  max_message_tokens: 4_096,
+  vision: {
+    enabled: false,
+    foreground_media_limit: 2,
+    concurrency: 2,
+    per_chat_hourly_limit: 24,
+    daily_limit: 200,
+  },
+  telemetry_retention_days: 90,
+  raw_update_retention_days: 30,
+  message_event_retention_days: 365,
   bots: [{
     id: "friend",
     name: "Mochi",
@@ -33,7 +50,7 @@ export default defineConfig({
     persona_path: "personas/friend.local.md",
     routing_p: 0.1,
     sticker_sets: [],
-    tools: { send: true, search: false, run_js: true },
+    tools: { send: true, search: false, run_js: false },
   }],
 });
 ```
@@ -54,7 +71,7 @@ See the repository's `telegram.config.example.ts` for annotated advanced default
   token_env: "helper_bot_token",
   persona_path: "personas/helper.local.md",
   routing_p: 0,
-  tools: { send: true, search: false, run_js: true },
+  tools: { send: true, search: false, run_js: false },
 }
 ```
 
@@ -64,15 +81,24 @@ Each bot has an isolated Telegram poller, agent session, model selection, state,
 
 ## Pi model and tool overrides
 
-When top-level model fields are omitted, every bot inherits Pi's merged default provider, model, and thinking level. Advanced deployments may set top-level or per-bot `provider` and `model` to select another catalog entry; switching provider requires both fields. `reasoning_effort` is also an optional selection override. Authentication always comes from Pi, never this configuration or `.env`. After changing Pi login/default-model settings, perform a controlled restart.
+The public example pins an explicit cost-first profile: Luna, reasoning off, short cache retention, and Luna low for compaction. The wizard pins the provider/model that it already preflighted through Pi, so a later Pi default change cannot silently change this deployment. Existing hand-written configuration may still omit those two fields for compatibility and inherit Pi's merged defaults, but omitted `reasoning_effort` means `off` rather than inheriting Pi's thinking level. A per-bot override may select another catalog entry; switching provider requires both provider and model. Authentication always comes from Pi, never this configuration or `.env`.
+
+These controls are bounded by default:
+
+- `max_suffix_tokens: 12000` and `max_message_tokens: 4096` cap new provider-visible Telegram context;
+- `cache_retention: "short"` controls the main chat request, while compaction always uses its configured cheap task model with provider cache retention disabled;
+- `vision.enabled` is false by default. When enabled, foreground media, concurrency, hourly per-chat calls, and deployment daily calls each have an explicit limit;
+- telemetry, raw updates, and immutable message events default to 90, 30, and 365 days. Old message events are pruned only after every known bot cursor consumed them and no direct-reply obligation references them.
+
+Changing model, reasoning, cache policy, persona, tools, serializer, or another cache-visible field produces a new context fingerprint. The next controlled restart preserves the old session file but starts a new session before restoration, so stale context is never resumed under a new identity.
 
 `tools` controls:
 
 - `send`: Markdown text converted locally to Telegram message entities, plus sticker delivery; ordinary prose keeps ordinary weight;
 - `search`: enables bounded TinyFish search and single-page retrieval through one tool; it requires the TinyFish key selected by `tinyfish_key_env` in `.env`;
-- `run_js`: constrained deterministic computation.
+- `run_js`: constrained deterministic computation; it is off by default because model-provided JavaScript still has a residual sandbox risk.
 
-The first-run wizard disables search. Before enabling it, add the TinyFish credential to `.env` (the default key name is `tiny_fish_api_key`); it is unrelated to Pi model authentication. Once enabled, the agent can search explicitly or read one public HTTP(S) page when an answer needs its contents. It never eagerly fetches every group link and does not support authenticated, private, or local targets.
+Search and `run_js` are both off by default. Before enabling search, add the TinyFish credential to `.env` (the default key name is `tiny_fish_api_key`); it is unrelated to Pi model authentication. Once enabled, the agent can search explicitly or read one public HTTP(S) page when an answer needs its contents. It never eagerly fetches every group link and does not support authenticated, private, or local targets.
 
 ## Routing and administrative commands
 

@@ -58,7 +58,7 @@
 - [x] [REQ-DOC-0001](REQ-DOC-0001.md) README 从用户视角解释平台、配置、使用与边界（P1，commit `37499d0`）
 - [x] [REQ-ONBOARD-0001](REQ-ONBOARD-0001.md) clone → `bun run pi` → `/tg config`、TypeScript 本机配置、提示词隐私与双语 mdBook 用户文档（P1，commits `77a7d34`、`88e75d1`、`5dbf199`、`a0736f8`、`37499d0`、`27aca5a`）
 - [x] [REQ-DOC-0002](REQ-DOC-0002.md) 明确单目录单群与极简省 token 的项目哲学（P1，commit `dfc23b5`）
-- [ ] 重构：[review-260808](review-260808.md)
+- [x] 重构：[review-260808](review-260808.md)（commits `8c23c92`、`dbdc438`、`15c82cc`、`f50f10d`、`ea066c0`、`b7477b6`、`6977b02`）
 
 ## 顺序与依赖
 
@@ -88,6 +88,7 @@
 - REQ-SEARCH-0001 保持既有 `search` tool 名称与顺序，但扩展 schema 会触发下一次 cache schema bump
 - REQ-ROUTE-0002 只增加确定性审计与口径文档，当前生产重放不授权修改 HMAC 概率算法
 - REQ-DOC-0002 是现状 deployment/invariant 的权威说明，不扩展为同目录多群架构
+- review-260808 取代旧`exposed_ids`运行模型：immutable event cursor、current visibility与reply obligation是三套独立状态；cache-visible identity由restore前fingerprint隔离
 - REQ-PLAT-0001 复用 REQ-CONF-0001 已完成的 N-bot 核心，不重复重写 daemon composition
 - REQ-DOC-0001 等待 PLAT-0001 的 provider/config schema 稳定后再写最终 README，避免文档抢跑
 - REQ-ONBOARD-0001 依赖 PLAT-0001 的 provider schema、DOC-0001 的用户旅程与 OPS-0002 的受控 readiness；新默认是 ignored `telegram.config.ts`，legacy JSON 保持兼容；真实 persona 只从后续 HEAD 退出，不偷偷改写 Git 历史

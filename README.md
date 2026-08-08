@@ -81,9 +81,9 @@ cp personas/template.zh.md personas/friend.local.md
 
 ## 为什么更省调用与 token
 
-项目优先用确定性代码做 routing、去重、状态与 UI，把稳定 provider prefix 保持不变；动态群消息只追加有界 suffix，媒体视觉按需执行，context 超阈值才 compaction。设计没有承诺固定节省百分比，效果以本机 lifetime telemetry 为准。
+项目优先用确定性代码做 routing、去重、状态与 UI，把稳定 provider prefix 保持不变；动态群消息只追加有界 suffix，媒体视觉默认关闭且启用后按预算执行，context 超阈值才 compaction。设计没有承诺固定节省百分比，效果以本机 telemetry 保留窗口为准。
 
-阅读[成本设计概览](docs/user-guide/zh/src/design-cost.md)了解六个机制和权威实现文档。
+阅读[成本设计概览](docs/user-guide/zh/src/design-cost.md)了解七个机制和权威实现文档。
 
 ## 开发与维护
 

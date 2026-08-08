@@ -28,6 +28,9 @@ export default defineConfig({
 		per_chat_hourly_limit: 24,
 		daily_limit: 200,
 	},
+	telemetry_retention_days: 90,
+	raw_update_retention_days: 30,
+	message_event_retention_days: 365,
 
 	// Empty means all state-changing Telegram /tg commands are denied.
 	telegram_admins: [],

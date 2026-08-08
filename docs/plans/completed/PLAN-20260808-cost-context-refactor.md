@@ -1,6 +1,6 @@
 # PLAN-20260808-cost-context-refactor: 重构长期群聊上下文与成本边界
 
-- **Status:** Active
+- **Status:** Complete
 - **Requirements:** `docs/requirements/review-260808.md`（`REQ-LIST.md` 的“重构”工作项）
 
 ## 结果
@@ -24,13 +24,13 @@ Session 初始化先计算内容寻址 fingerprint，再决定打开 manifest �
 
 ## 任务
 
-- [x] **T0** — 收录 review、建立 active PLAN，并把“大任务默认拆成多个小原子提交”写入根 agent 指南；validates: 可执行提交边界与追溯入口；预期涉及: `AGENTS.md`, `docs/requirements/`, `docs/plans/active/`
+- [x] **T0** — 收录 review、建立 active PLAN，并把“大任务默认拆成多个小原子提交”写入根 agent 指南；validates: 可执行提交边界与追溯入口；commit: `8c23c92`
 - [x] **T1** — 建立 durable context state：immutable message event log、per-bot cursor/visible refs/session manifest、routing claims、migration/backfill 与索引；edit/enrichment/vision 只能追加 delta；validates: P0-1、P0-2、P2-1、P2-2；commit: `dbdc438`
-- [x] **T2** — 建立有界成本原语：token packer、deployment-wide vision scheduler/budget、retention helper、搜索输出上限、sticker top-K、本地配置与相关单测；validates: P0-3、P1-2、P1-3、P1-4、P1-5、P1-6、P2-3；commit: `15c82cc`
+- [x] **T2** — 建立有界成本原语：token packer、deployment-wide vision scheduler/budget、retention helper、搜索输出上限、sticker top-K、本地配置与相关单测；completion审阅时补齐向导固定预检model与关闭run_js；validates: P0-3、P1-2、P1-3、P1-4、P1-5、P1-6、P2-3；commits: `15c82cc`、`6977b02`
 - [x] **T3** — 定义固定顺序 Pi extension、结构化 Telegram context projection、完整 fingerprint、payload HMAC observer 与 assistant persistence policy，并用纯协议测试锁定；validates: 2.2 A–D、P0-4、P1-7；commit: `f50f10d`
 - [x] **T4** — 集成 runtime/daemon context generation：cursor commit/reconcile、compaction visibility、session 轮换、公共协议顺序、cache schema v8、routing claim、vision/retention maintenance 与真实 telemetry；validates: 2.2 A–E、P0-4、P1-1、P1-2、P1-3、P1-7；commit: `ea066c0`
-- [x] **T5** — 加入固定 Bun/Pi 的核心 CI，独立执行 cache golden、全量离线测试与 TypeScript check；validates: review 第一阶段、P2-4；预期涉及: `.github/workflows/ci.yml`
-- [ ] **T6** — 同步 architecture/cache/data-model/testing/config/user docs、devlog/handoff/REQ 状态，执行全量验证并审阅 diff；validates: 全部评审不变量与完成定义；预期涉及: `docs/`, `README*`, examples
+- [x] **T5** — 加入固定 Bun/Pi 的核心 CI，独立执行 cache golden、全量离线测试与 TypeScript check；validates: review 第一阶段、P2-4；commit: `b7477b6`
+- [x] **T6** — 同步 architecture/cache/data-model/testing/config/user docs、devlog/handoff/REQ 状态，执行全量验证并审阅 diff；validates: 全部评审不变量与完成定义；commit: 本计划的completion commit
 
 ## 验证计划
 
@@ -65,12 +65,12 @@ Session 初始化先计算内容寻址 fingerprint，再决定打开 manifest �
 
 ## 文档更新
 
-- [ ] `docs/architecture.md`、`docs/cache.md`、`docs/data-model.md`、`docs/testing.md`
-- [ ] 配置 example、双语 README/user guide/runbook
-- [ ] `docs/devlog.md`、`docs/handoff.md`、`docs/requirements/REQ-LIST.md`
+- [x] `docs/architecture.md`、`docs/cache.md`、`docs/data-model.md`、`docs/testing.md`
+- [x] 配置 example、双语 README/user guide/runbook
+- [x] `docs/devlog.md`、`docs/handoff.md`、`docs/requirements/REQ-LIST.md`
 
 ## 完成记录
 
-- 验证证据: 待完成
-- 需求状态已更新: no
-- 后续工作项: 待最终验证后填写
+- 验证证据: 2026-08-09 `bun test` 442 pass / 0 fail / 5118 assertions（42 files，外网guard生效）；`bun run check`通过；cache v8 golden 7/7；mdBook 0.5.4检查18个Markdown/98 links与21个HTML/620 links；`git diff --check`通过。百万event fixture通过`(chat_id,ingest_seq)`索引在约2.1秒完成。
+- 需求状态已更新: yes
+- 后续工作项: 无实施遗留。真实provider/Telegram session rotation、长期成本/延迟与新vision budget属于明确opt-in运营观察，本轮未调用外部服务，也不把旧90%样本解释为当前生产结论。

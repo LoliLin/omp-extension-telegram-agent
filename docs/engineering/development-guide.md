@@ -60,13 +60,13 @@
 
 1. **会不会改变任何 provider 可见字节？**
    - `NONE` — 不触 provider payload，devlog 里写明。
-   - `INTENTIONAL` — 触了 cache-visible 协议：bump `CACHE_SCHEMA_VERSION`、开新 context epoch、更新 `docs/cache.md`、跑 `test/cache.test.ts` golden 确认新 hash 是预期的。
+   - `INTENTIONAL` — 触了 cache-visible 协议：bump `CACHE_SCHEMA_VERSION`，确保完整 fingerprint 在 restore 前轮换 session/context epoch，更新 `docs/cache.md`，跑 `test/cache.test.ts` golden 确认新 hash 是预期的。
    - 意外变化 = golden test 失败，这是设计上的报警，不要随手更新 golden 让它过。
 2. **对 hit 率和成本的影响是正还是负？** 负影响必须有明确理由写进 REQ/PLAN；正影响（提高 hit 率、降低每 turn 成本）用遥测验证，不靠感觉。
 
 设计取向（SHOULD）：
 
-- 确定性、变化频率低的内容放**稳定 prefix**；动态内容只以 append-only suffix 追加。
+- 确定性、跨 bot 共享且变化频率低的内容优先放**稳定 prefix**；persona 随后，动态内容只以 append-only、有界 suffix 追加。大型本地目录即使稳定，也应先考虑按本轮相关性检索而不是扩大 prefix。
 - 能用确定性代码（router / SQL / 规则）解决的判断，不花 LLM token。
 - 每 bot turn 的新增 provider-visible token 必须有界；无界增长的设计一票否决。
 - UI-only 改动若改变了 provider payload，是边界设计 bug，不是 cache 变化。

@@ -33,7 +33,7 @@
 5. 昂贵工作按真实需求惰性执行并按 identity 复用；队列、并发、历史页、工具结果和错误都必须有界。
 6. 新功能先问能否少一个抽象、tool、模型调用或动态字段。没有明确需求，不把单群 deployment 扩成多群、多租户、热加载或通用平台。
 
-这六条的用户侧成本机制见双语 cost guide；cache 与 provider byte 的技术权威仍是 `docs/cache.md`，日常方案检查见 `docs/engineering/development-guide.md`。
+这些原则的用户侧成本机制见双语 cost guide；cache 与 provider byte 的技术权威仍是 `docs/cache.md`，日常方案检查见 `docs/engineering/development-guide.md`。
 
 ## 用户体验
 
@@ -51,13 +51,15 @@
 - 当前 compaction threshold = 128K tokens（provisional default，靠 telemetry 验证，不做在线 optimizer）
 - Telegram 不承担历史恢复职责，SQLite 是事实来源
 - Bot-to-Bot：彼此消息进共同 transcript 可被看到，但**不互相触发**（trigger 只来自满足 routing 条件的 human 消息）
-- Bot 可以保持沉默：assistant local text 存 agent events + TUI 可见，不进群
+- Bot 可以保持沉默：assistant local text 存 agent events + TUI 可见，不进群；provider session 只保留固定 silence marker
 
 ## 术语
 
-- **Context Epoch**：一段 append-only 的 provider history；compaction = epoch boundary（Epoch N → summary → Epoch N+1）
-- **CACHE_SCHEMA_VERSION**：system prompt shape / persona serialization / tool schema / tool order / 消息序列化 grammar / summary grammar 任一变化时 bump + 新 epoch
-- **Exposure tracking**：每个 bot 记录哪些 Telegram message 已进入过它的 provider context，不重复序列化
+- **Context Epoch**：一代 provider context；成功 compaction 或 fingerprint 失配后的新 session 都会进入下一 epoch
+- **Context fingerprint**：Pi/provider/model、cache policy、protocol/persona、serializer/compaction/extensions/tools 等全部 cache-visible identity 的内容寻址摘要；restore 前必须精确匹配
+- **CACHE_SCHEMA_VERSION**：fingerprint 中的强制失效字段；cache-visible protocol 任一变化时 bump，并在 restore 前建立新 session/epoch
+- **Consumed cursor**：每个 bot 已处理到的 immutable event high-water，只单调前进
+- **Visible refs**：当前 context generation 真正包含完整内容的 Telegram message ids；compaction/session rotation 可替换，不等同于消费状态
 - **canonical message**：Telegram 群消息的本地统一表示，identity = (chat_id, message_id)
 - **LOCAL**：TUI 中标记只有本地可见的 bot 内部行为（区别于 Telegram 真实发言）
 
@@ -72,7 +74,7 @@
 
 - 一份 deployment 对应一个 Telegram supergroup 与 1..N bots。
 - 每个 bot 的 token、persona、可选provider/model选择、routing与tools来自配置；provider认证只来自Pi。生产代码不依赖固定id或名字。
-- 一个工作目录只有一个`group_peer_id`，而SQLite history/exposure、agent sessions、poller offsets/router secret、PID/control lock/Unix socket都没有第二层deployment namespace。
+- 一个工作目录只有一个`group_peer_id`，而SQLite history/cursors/visibility/obligations、agent sessions、poller offsets/router secret、PID/control lock/Unix socket都没有第二层deployment namespace。
 - 因此在同一目录并行切换`bots_config`可能混入跨群history/context、推进错误offset或争抢同一进程资源。配置文件不同不构成隔离。
 - 第二个群必须使用独立checkout/worktree，并隔离`.env`、config/persona、Telegram bot tokens、data/DB、sessions、PID/lock/socket。当前不支持同目录多群。
 

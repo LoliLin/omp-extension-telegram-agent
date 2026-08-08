@@ -81,9 +81,9 @@ Read [Troubleshooting](docs/user-guide/en/src/troubleshooting.md) and the [daemo
 
 ## Why it avoids unnecessary calls and tokens
 
-Deterministic code owns routing, deduplication, state, and UI. The provider-visible prefix stays stable, dynamic group content enters only a bounded suffix, media vision runs lazily, and compaction occurs only at a context boundary. The project promises no fixed savings percentage; use local lifetime telemetry to measure your deployment.
+Deterministic code owns routing, deduplication, state, and UI. The provider-visible prefix stays stable, dynamic group content enters only a bounded suffix, media vision is off by default and budgeted when enabled, and compaction occurs only at a context boundary. The project promises no fixed savings percentage; use the local telemetry retention window to measure your deployment.
 
-Read the [cost design overview](docs/user-guide/en/src/design-cost.md) for the six mechanisms and their authoritative implementation documents.
+Read the [cost design overview](docs/user-guide/en/src/design-cost.md) for the seven mechanisms and their authoritative implementation documents.
 
 ## Development and maintenance
 

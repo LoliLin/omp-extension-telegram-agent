@@ -2,69 +2,110 @@
 
 > 描述当前 schema 真正表达的内容。schema 变化时同步更新。
 
-存储：SQLite（WAL），单文件 `data/agent.db`（路径可配）。直接 SQL，无 ORM。
+存储：SQLite（WAL），默认单文件 `data/agent.db`。`messages` 是最新读模型；`message_events` 是 provider-facing 的不可变消费源。
 
-## 表概览（Phase 1 skeleton 起逐步落地）
+## Telegram source 与读模型
 
-### raw_updates — 原始 Telegram update
+### raw_updates
 
-- `(bot_id, update_id)` 唯一（bot identity + update_id 去重）
-- 存完整原始 JSON：debug / replay / 未来字段升级 / 修 normalization bug
+- `(bot_id, update_id)` 主键，保存完整 Telegram update JSON，用于去重、诊断和 replay。
+- retention 默认 30 天；poller offset 只有 durable transaction 成功后才推进。
 
-### messages — canonical 群消息
+### messages
 
-- `(chat_id, message_id)` 唯一 —— 多个 bot 收到同一条群消息只存一条
-- 元数据：send_time、thread_id、sender_id、display_name、username、sender_tag、sender_chat、is_bot、text、caption、entities(JSON)、`rich_message`(JSON)、reply_to_message_id、`reply_to_sender_id`、quote(JSON)、forward_origin(JSON)、edit_time、media 引用
-- `reply_to_sender_id`只保存Telegram嵌入的`reply_to_message.from.id`/`sender_chat.id` numeric snapshot；不复制父消息正文或完整对象。snapshot缺失时router仍查询canonical父行；second-bot duplicate可幂等补齐null snapshot，edit保持/补齐该identity。
-- Rich Message：`rich_message`保存原始Telegram structure，UTF-8 JSON上限256 KiB；超限/不可序列化时只存 `{truncated,reason,raw_bytes?}` 有界诊断。`text`保存无LLM projector的纯文本结果（16层、500 blocks、4096 nodes、32768 Unicode code points），保持heading/list/table/details/caption阅读顺序；URL、file id与未知metadata不进projection。IPC/Pi/provider只读`text`，不传source。
-- edit：messages 表永远是最新版，旧版进 message_revisions；rich edit同时保存旧/新projection与source
+- `(chat_id, message_id)` 主键；多个 bot 看到同一群消息只保留一条 canonical 最新投影。
+- 保存 sender、reply/quote/forward、text/caption/entities、bounded Rich Message source、edit time 与 media identity。
+- `reply_to_sender_id` 是 Telegram 嵌入父消息 sender 的有界 snapshot；缺失时 router 可查询 canonical parent。
+- Rich Message source 上限 256 KiB；`text` 是确定性、最多 32,768 code points 的 plain projection。IPC/Pi/provider 不接收 raw source。
 
-### message_revisions — 编辑历史
+### message_revisions
 
-- `(chat_id, message_id, edit_time)` 唯一；存该版本完整 text/entities/rich_message source
-- revision 行的 key 是**被取代版本自己的时间**：原始版本用消息 `date`，编辑过的版本用它当时的 `edit_date`（REQ-TG-0001；此前用旧 edit_date 会在第二次编辑撞主键静默丢中间版本）
+- `(chat_id, message_id, edit_date)` 主键，保存被替换版本的 text/caption/entities/rich source。
+- revision key 使用被替换版本自己的时间：原始版本用 `date`，后续版本用当时的 `edit_date`。
 
-### media — 媒体身份与本地缓存（Phase 7）
+### message_events
 
-- `file_unique_id` 为主身份；`media_file_ids`另存per-bot `file_id`，`media`存mime、尺寸与本地路径
-- `local_path`只在完整静态文件以0600临时文件+同目录rename安装成功后更新；新photo由durable ingest后的两路后台queue补齐，启动最多回填最新100条missing行。缓存文件名是identity hash，不把Telegram identity写进path；图片bytes不进SQLite。
-- vision 结果按 file_unique_id 缓存，所有配置 bot 共享
+- `ingest_seq INTEGER PRIMARY KEY AUTOINCREMENT` 是全局单调位置；`event_key` 唯一保证 replay 幂等。
+- `(chat_id, ingest_seq)` 索引是 agent 增量读取主路径；另有 message/时间索引用于 obligation 与 retention。
+- kind 为 `message | edit | metadata | media_update`。payload 是该事件发生时的 bounded snapshot；旧 event 不因 canonical row、vision 或 edit 改写。
+- message insert、edit 和 reply metadata enrichment 由事务内 trigger 追加；非空 vision completion 追加独立 `media_update`。
+- 旧库 migration 从 canonical `messages` backfill baseline event，并把已知 bot cursor 初始化到 backfill high-water，避免把历史当 fresh context 重放。
 
-### agent_events — bot 内部行为
+## 每 bot context 与 routing 状态
 
-- 每条：bot、时间、kind（assistant_text / thinking / tool_call / tool_result / vision / usage / compaction / error / send_degraded / telegram_control_*）、payload(JSON)
-- `send_degraded` 是发送commit boundary后的有界诊断：只存overall outcome、已知message ids与至多8个component/outcome/stage/category，不存正文、token、请求URL或完整异常。
-- Telegram control用`telegram_control_claim`按`(chat_id,message_id)`提供crash-safe at-most-once claim，用`telegram_control_reply`标记canonical回复；两者只存numeric identity并被所有runtime flush当作跨epoch永久消费证据。`telegram_control`审计仅存command/target、canonical sender id/规范化username、authorized/outcome/duration，不存命令正文、token、path、persona或异常stack。
-- TUI 的 `Bot X · LOCAL` 区域数据源
+### bot_cursors
 
-### llm_runs / telemetry — provider 遥测
+- `(bot_id, chat_id) → consumed_seq`，表示业务消费到的 `message_events` high-water。
+- cursor 只单调前进；compaction、visibility replacement 与 epoch 轮换不得回退它。
 
-- 每条 provider response 记录 context/input(cache miss)/cache read/cache write/output/reasoning/latency/cost、model/epoch 与 system/tools/messages hashes；`cache_write` 在 REQ-UI-0009 加入，旧库幂等 migration 为 `NOT NULL DEFAULT 0`，历史未知值不伪造。
-- footer/status 的 lifetime totals 对当前配置 bot 聚合本表全部保留行，因此跨 daemon/Pi restart 与 compaction/epoch；current context 只取最新 run，不累加历史 occupancy。
+### bot_visible_messages
 
-### bot_state — 每 bot 运行状态
+- `(bot_id, chat_id, message_id)` 主键，并记录 `context_epoch`。
+- 只表示完整消息内容当前真实存在于 Pi context；delta 或被预算跳过的 event 不会伪造 full-message visibility。
+- 成功 send 返回的本 bot message id 可加入 visibility。成功 compaction 按 structured retained details 替换整组；新 session 清空旧 epoch visibility。
 
-- session 文件路径、context epoch、update offset、exposure 水位线等 KV
-- Telegram control参数只使用`telegram_override:routing_p`与`telegram_override:cooldown_ms`；值是经校验的十进制数。缺key表示使用文件配置，reset删除key；daemon在runtime构造前恢复，routing effective总和仍必须≤1。无需schema migration。
-- bot_id 为 TEXT，任意 bot id 可用（REQ-CONF-0001 泛型化：bot_state / agent_events / llm_runs / raw_updates 的 bot 列均为 TEXT，bot 清单来自统一 TS/legacy JSON loader，代码无 A/B 假设）
+### bot_session_manifest
 
-### reply_obligations — direct reply provider 交付义务
+- 每 bot 保存 `session_id`、`session_file`、完整 `context_fingerprint` 与创建时间。
+- runtime 在 restore 前计算 fingerprint；只有 fingerprint 相同且文件存在才 resume。mismatch 保留旧 session 文件并原子指向新 session。
 
-- `(bot_id, chat_id, message_id)`唯一；只保存目标bot、canonical消息id与创建时间，不保存正文。
-- direct human reply的canonical insert/enrichment与obligation在同一个SQLite transaction提交，发生在poller offset前；bot sender不创建。
-- `session.sendUserMessage`成功接收含原`#message_id`的既有suffix后删除；provider失败/shutdown保留。daemon完成session/IPC初始化后按bot/Telegram顺序恢复；已在`exposed_ids`中的崩溃边界行只清理、不重复提交。
+### reply_obligations
 
-### aliases — 无 username 用户的稳定短 alias
+- `(bot_id, chat_id, message_id)` 主键，只保存必须交给目标 bot 的 direct human reply identity，不保存正文。
+- canonical ingest/enrichment 与 obligation 在同一 transaction 提交。
+- runtime 每次有界读取最多 64 条；只有 session 中的结构化 context commit marker 证明 delivery 后才删除。crash/restart reconcile 幂等。
 
-- `(chat_id, user_id) → u<N>`，单调分配，永久稳定
+### routing_claims
 
-## ID / dedupe 规则
+- `(chat_id, message_id, bot_id, route_version)` 主键，记录 reason、status 和 timestamps。
+- insert/enrichment/replay 都通过 durable claim 防止同一 bot 重复启动。pending/nonaccepted claim 可重取；accepted started/coalesced 是永久抑制证据。
 
-- update 唯一性：`(bot_id, update_id)`；raw/canonical/reply obligation在一个transaction内，失败整体回滚，重复 update 直接跳过
-- 消息唯一性：`(chat_id, message_id)`；多个 bot 各收到一次 → 后续副本视为 duplicate
-- restart：offset 从 bot_state 恢复，Telegram 重发的旧 update 被 raw_updates 去重
-- bot 自发消息：plain/rich send返回都经同一normalize立即落库；随后poller也会收到同一条 → 按 (chat_id, message_id)去重，不重复
+### bot_state / daemon_state
 
-## 序列化
+- `bot_state` 保存 per-bot epoch、Telegram update offset 与 deterministic control overrides；legacy `exposed_ids` migration 后删除，不再承担 context 状态。
+- `daemon_state` 保存 deployment-wide router secret、schema/cache version 等 singleton metadata。
+- bot id 均为 `TEXT`，配置定义实际 bot 集合，代码不假设 A/B。
 
-LLM 看到的序列化 grammar 见 docs/cache.md；数据库保存完整机器可处理时间（unix seconds），序列化时才格式化 HH:mm:ss。
+## 媒体、agent 与 telemetry
+
+### media / media_file_ids
+
+- `media.file_unique_id` 是共享身份；`media_file_ids(bot_id,file_id,file_unique_id)` 是 bot-specific 可发送能力。
+- short id 由 rowid 单调分配；不能用 `COUNT+1`。
+- vision 按 identity 持久化并跨 bot 复用。完整静态文件先写 0600 临时文件，再同目录 rename；图片 bytes 不进 SQLite，path 不含 Telegram identity。
+
+### agent_events
+
+- append-only 本地行为流：assistant/tool/vision/usage/compaction/error/send/control/context commit 等。
+- unpublished assistant prose 可以留在本地审计，但 provider session 仅保留 `[no_send]`。
+- error/send/vision telemetry 使用固定 category 与 bounded fields，不保存 token、正文、prompt、response、完整 URL、path 或 stack。
+
+### llm_runs
+
+- 每次 provider response 记录 usage/cost/latency/epoch，以及 provider/api、session id hash、cache retention、system/tools/messages/full payload HMAC 与首次 divergence 位置。
+- 同时记录 trigger message、public send count、vision calls、tool follow-up rounds、input event 数、保守 token estimate 与 rows scanned。
+- footer/status 的 lifetime totals 聚合**当前保留行**；current context 只取最新 run，不累计 occupancy。
+
+## 其他表
+
+- `aliases`：`(chat_id,user_id) → u<N>`，为无 username sender 提供稳定别名。
+- Telegram control 的 durable claim/reply evidence 存在 `agent_events`；control message 永久排除在 provider context 之外。
+
+## Retention 与安全删除
+
+daemon 启动时执行一次、之后每 24 小时执行 maintenance，并做 passive WAL checkpoint/optimize。默认：
+
+- `agent_events` 与 `llm_runs`：90 天；
+- `raw_updates`：30 天；
+- `message_events`：365 天。
+
+旧 `message_events` 只有在 `ingest_seq <=` 该 chat 所有已知 bot cursor 的最小值，且没有 reply obligation 引用该 message 时才删除。canonical `messages`/revisions/media/session 文件不由这条自动 retention 清理。
+
+## ID / dedupe 边界
+
+- update：`(bot_id, update_id)`；raw/canonical/event/obligation 在同一 transaction 内提交，失败整体回滚。
+- canonical message：`(chat_id, message_id)`；second-bot duplicate 只允许幂等 enrichment。
+- provider event：唯一 `event_key` + 单调 `ingest_seq`；edit/media completion 追加 delta。
+- bot 自发消息：Telegram send result 立即 normalize/insert，随后 poller 副本按 canonical/event key 去重。
+
+LLM 序列化 grammar 与 fingerprint 边界见 `docs/cache.md`。

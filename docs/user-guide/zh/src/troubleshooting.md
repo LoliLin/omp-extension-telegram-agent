@@ -36,7 +36,9 @@ bun run pi --version
 
 ## `daemon starting` 很久
 
-配置了sticker sets时首次catalog/vision准备可能较慢。运行`bun run status`并观察脱敏日志。如果child仍alive，controller不会把60秒等待上限误报成ready；只有socket真实可连接才算ready。
+配置了sticker sets时首次Telegram catalog拉取可能较慢。vision只有显式开启后才工作，不属于默认启动路径。运行`bun run status`并观察脱敏日志。如果child仍alive，controller不会把60秒等待上限误报成ready；只有socket真实可连接才算ready。
+
+修改model、persona、cache policy、tools等cache-visible字段后，日志出现`session ready (new)`是预期行为。context fingerprint会阻止用新identity恢复旧session；旧文件仍保留用于恢复或审计。
 
 ## Telegram 401 或没有群消息
 

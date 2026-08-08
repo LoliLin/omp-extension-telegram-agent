@@ -70,7 +70,7 @@ These commands may incur cost or post group messages. Read the [daemon runbook](
 
 One working directory currently hosts one group deployment. This is not merely a UI limitation: the following resources belong to the working directory and have no deployment namespace:
 
-- the single `group_peer_id` and canonical SQLite history, including each bot's exposure and reply obligations;
+- the single `group_peer_id` and canonical SQLite history, including each bot's consumed cursor, visible references, and reply obligations;
 - agent sessions and context epochs;
 - each poller's Telegram update offset and the shared router secret;
 - the daemon PID, control lock, and Unix socket.

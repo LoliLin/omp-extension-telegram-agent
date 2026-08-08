@@ -12,31 +12,31 @@ This avoids an entire unnecessary call instead of shaving a few tokens after sta
 
 ## 2. A stable provider prefix reuses cache
 
-Persona, fixed protocol, and fixed-order tool schemas form the stable prefix. New messages append only to the suffix; dynamic information never rewrites an existing prefix.
+The shared protocol comes first, followed by the persona and fixed-order tool schemas. This maximizes the byte-identical prefix shared by bots. New messages append only to the suffix; the full sticker catalog never expands the system prompt.
 
-A cache-visible grammar change must increment the schema and open a new context epoch. UI, telemetry, and operator commands may not alter provider bytes. See [Cache engineering](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md).
+A fingerprint covers the Pi/provider/model/cache policy, protocol, persona, serializer, compaction, extensions, and tools. A cache-visible change increments the schema and creates a new session/epoch before restoration; an old session file is retained but never resumed under a different identity. UI, telemetry, and operator commands may not alter provider bytes. See [Cache engineering](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md).
 
 ## 3. Bounded context carries only necessary facts
 
-SQLite retains canonical Telegram history, while a model receives only bounded unexposed messages, required replies, and deterministic projections. Logs, raw rich JSON, UI state, and unbounded tool output never enter provider context.
+SQLite retains canonical Telegram history and an immutable event stream. Each bot consumes that stream with a monotonic cursor, while separate visible references describe only full messages still present in the current context. The model receives a token-bounded event batch with direct replies first; logs, raw rich JSON, UI state, and unbounded tool output never enter provider context.
 
-This separates the complete local source of truth from the context necessary for one run. See [Architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md) and the [data model](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/data-model.md).
+The default new-suffix cap is 12,000 tokens and the per-event cap is 4,096. Sticker inventory is retrieved locally per turn and contributes at most eight relevant, sendable candidates. This separates the complete local source of truth from the context necessary for one run. See [Architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md) and the [data model](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/data-model.md).
 
 ## 4. Compaction changes epochs at an explicit boundary
 
-At the configured context threshold, Pi produces a summary, retains the recent tail, and starts a new epoch. Failed or empty summaries do not fabricate an epoch, and exposure follows the actual retained tail.
+At the configured context threshold, Pi produces a summary, retains the recent tail, and starts a new epoch. Failed or empty summaries do not fabricate an epoch. Structured details replace visible references, while the business-consumption cursor never moves backward or replays compacted history.
 
-Compaction itself uses an auxiliary model, so it is not an every-turn online optimizer. Configuration controls the threshold and retained amount; telemetry validates the result. See [Cache engineering](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md) and [test status](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/testing.md).
+Compaction uses a configured cheap task model with provider cache retention disabled, so it is not an every-turn online optimizer. Configuration controls the threshold and retained amount; telemetry validates the result. See [Cache engineering](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md) and [test status](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/testing.md).
 
 ## 5. Media vision runs lazily and reuses results
 
-Photos and stickers enter canonical SQLite first. Vision runs only when a real bot turn needs media context. The result is persisted by media identity and reused across bots. UI updates consume that result without adding a model call.
+Photos and stickers enter canonical SQLite first. Vision is disabled by default. When explicitly enabled, a deployment scheduler bounds foreground media, concurrency, per-chat hourly calls, and daily calls. Results are persisted by media identity, reused across bots, and appended as immutable media-update events instead of rewriting old context. UI updates consume cached results without adding a model call.
 
 See the [Vision architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md).
 
 ## 6. Pages are retrieved only on demand and stay bounded
 
-Search and page reading share one tool instead of adding a fourth stable schema entry. A query returns at most five compact results. A URL creates one request only when the model explicitly needs it, and page text is capped at 8,000 characters. Turns that do not use the feature add no retrieval request or dynamic page tokens.
+Search and page reading share one tool instead of adding a fourth stable schema entry. A query returns at most five compact results. A URL creates one request only when the model explicitly needs it; page text has an 8,000-character local guard and a 2,048-token provider-output cap. Turns that do not use the feature add no retrieval request or dynamic page tokens.
 
 Deterministic code handles the untrusted-content boundary, URL safety, and log redaction without another model call. A fetch still consumes one TinyFish request and adds bounded text to the current dynamic context, so actual cost depends on call frequency and page length.
 
@@ -48,8 +48,9 @@ Opening Pi, scrolling history, changing a panel, or viewing usage therefore does
 
 ## Evaluate your deployment
 
-1. Record runs, prompt miss/read/write, output, reasoning, latency, and cost with `/tg status [bot]`.
+1. Record runs, useful public sends, prompt miss/read/write, output, reasoning, latency, and cost with `/tg status [bot]`; “lifetime” means the configured SQLite retention window.
 2. Compare similar activity periods; do not mix providers, personas, or group sizes in one conclusion.
 3. Replay threshold candidates with `scripts/analyze-context-window.ts`; do not tune compaction by intuition.
 4. Before changing prompts, tools, or serialization, follow the cache process in the [development guide](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/engineering/development-guide.md).
-5. Before adding a capability, try to remove one layer, tool, model call, or dynamic field. Do not expand a one-group deployment into a multi-tenant system without an explicit requirement.
+5. Compare cost per useful public reply as well as cost per run; a silent or failed run is still a provider cost.
+6. Before adding a capability, try to remove one layer, tool, model call, or dynamic field. Do not expand a one-group deployment into a multi-tenant system without an explicit requirement.

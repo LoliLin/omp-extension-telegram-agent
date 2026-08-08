@@ -28,7 +28,7 @@ bun run pi
 在项目 Pi 会话中：
 
 1. 运行 `/login`，完成 Pi 原生 provider 登录。
-2. 运行 `/model`，选择默认聊天模型与 reasoning level。
+2. 运行 `/model`，选择默认provider与聊天模型。即使交互式Pi会话使用其他thinking level，Telegram runtime仍默认reasoning `off`，除非在`telegram.config.ts`显式覆盖。
 
 Telegram 项目读取 Pi 合并后的 global/project 模型设置与 Pi auth store，不把模型 credential 复制进本仓库。首次向导默认 `tools.search: false`，所以不需要先申请 TinyFish key。
 
@@ -48,7 +48,7 @@ Pi 当前原生 `input` dialog 没有密码遮罩。BotFather token 输入时可
 按 Esc 取消任一步都不会留下半份配置。确认后会原子写入：
 
 - `.env`：Telegram token，mode 0600，Git ignored；
-- `telegram.config.ts`：Telegram deployment 字段，模型设置继承 Pi，mode 0600，Git ignored；
+- `telegram.config.ts`：Telegram deployment字段；向导固定刚刚通过预检的Pi provider/model，并显式关闭reasoning/search/`run_js`/vision、写入有界context/cache/retention默认，mode 0600，Git ignored；
 - `personas/<bot-id>.local.md`：本机 persona，mode 0600，Git ignored。
 
 ## 5. 确认 ready

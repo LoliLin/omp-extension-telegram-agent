@@ -36,7 +36,9 @@ Then inspect `data/daemon.log`. Typical causes include an invalid Telegram token
 
 ## `daemon starting` persists
 
-Configured sticker sets may make first catalog/vision preparation slower. Run `bun run status` and inspect redacted logs. A live child after the 60-second wait is reported only as starting; readiness requires a real socket connection.
+Configured sticker sets may make the first Telegram catalog fetch slower. Vision work occurs only when explicitly enabled; it is not part of the default startup path. Run `bun run status` and inspect redacted logs. A live child after the 60-second wait is reported only as starting; readiness requires a real socket connection.
+
+After changing a model, persona, cache policy, tools, or another cache-visible field, a `session ready (new)` line is expected. The context fingerprint deliberately prevents restoring the old session under the new identity; the old file is retained for recovery/audit.
 
 ## Telegram 401 or no group messages
 
