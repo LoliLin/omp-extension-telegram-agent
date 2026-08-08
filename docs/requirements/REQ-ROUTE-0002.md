@@ -1,6 +1,6 @@
 # REQ-ROUTE-0002: 验证概率桶频率并区分回应机会与公开发言
 
-- **Status:** Approved（2026-08-08 调查未复现采样bug；诊断工具/文档未实现）
+- **Status:** Done（2026-08-08；implementation `a1321f1`）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「概率采样似乎出问题；两者互斥0.66/0.34，但看起来频率完全不同，检查」
 - **依赖:** REQ-ROUTE-0001、REQ-SEND-0001
@@ -74,7 +74,14 @@
 
 无。当前证据不授权改变采样算法；若用户未来要求“强制公开发言比例”，必须另开与persona/send契约冲突评估的REQ。
 
+## 实现证据
+
+- `a1321f1`：production loader + readonly SQLite审计、16 MiB有界partial log、匿名formatter、双语口径与完整fixture/property回归。
+- 验收快照：2,046个current-effective probability样本为1,372/674（67.06/32.94%）；daemon partial started为580/289（66.74/33.26%）；public为406/374（52.05/47.95%）。相对调查基线增加的是新消息/新run，分桶结论不变。
+- 验证：routing targeted 22 tests / 2,390 assertions；全量347 tests / 4,700 assertions；typecheck、cache v5 golden、双mdBook 18 Markdown / 98 links与21 HTML / 608 links通过。
+- Cache impact: **NONE**；命令只读、0 provider/LLM call，不改routing或provider-visible bytes。
+
 ## 追溯
 
-- Plans: `PLAN-20260808-complete-new-reqs#T13g/T13i`
+- Plans: `PLAN-20260808-complete-new-reqs#T13g/T13i1/T13i2`
 - Commits: 从`Requirement: REQ-ROUTE-0002` git trailer查

@@ -73,8 +73,8 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13g** — 把用户新增的TinyFish、photo、routing、vision、Pi auth与项目哲学notes改写为有证据的REQ/AC；validates: six new requirements documented；commit: `453034d`
 - [x] **T13h1** — 强化单目录单群、极简/省token的用户与Agent权威说明及文档gate；validates: DOC-0002 AC1–AC6；commit: `dfc23b5`
 - [x] **T13h2** — 用T13h1真实commit hash记录DOC-0002完成并在REQ-LIST勾选；validates: DOC-0002 traceability；commit: completion record
-- [ ] **T13i1** — 增加只读脱敏routing审计脚本、0.66/0.34 property fixture与双语口径；validates: ROUTE-0002 AC1–AC6；commit: routing observability
-- [ ] **T13i2** — 用T13i1真实commit hash记录ROUTE-0002完成并在REQ-LIST勾选；validates: ROUTE-0002 traceability；commit: completion record
+- [x] **T13i1** — 增加只读脱敏routing审计脚本、0.66/0.34 property fixture与双语口径；validates: ROUTE-0002 AC1–AC6；commit: `a1321f1`
+- [x] **T13i2** — 用T13i1真实commit hash记录ROUTE-0002完成并在REQ-LIST勾选；validates: ROUTE-0002 traceability；commit: completion record
 - [ ] **T13j** — 以Pi settings/auth/catalog替代项目provider secret，shared runtime并移除向导key流程；validates: PLAT-0002 AC1–AC7；commit: Pi configuration reuse
 - [ ] **T13k** — 用Pi Luna low执行同步动态media gate、两路有界并发与匿名基准；validates: VISION-0001 AC1–AC9；commit: synchronous vision boundary
 - [ ] **T13l** — 增加durable-first photo precache/backfill与`media_ready`原位Pi更新；validates: UI-0014 AC1–AC7；commit: native photo readiness
