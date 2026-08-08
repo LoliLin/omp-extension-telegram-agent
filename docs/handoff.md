@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：deployment-wide一键受控restart已实现并完成真实CLI/Pi smoke；下一步提交并勾选OPS-0002，再调查REQ-LIST新note“bot会重复发”。
+2026-08-08：deployment-wide一键受控restart已实现、签名提交并在REQ-LIST勾选；下一步调查并正式化新note“bot会重复发”。
 
 ## 已完成
 

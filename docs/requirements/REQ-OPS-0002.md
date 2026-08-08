@@ -1,6 +1,6 @@
 # REQ-OPS-0002: 从 Pi 一键受控重启 Telegram daemon
 
-- **Status:** Implemented（2026-08-08；unit与真实CLI/Pi验证完成，REQ-LIST completion record待实现commit hash）
+- **Status:** Done（2026-08-08；implementation `3d7f9b3`）
 - **Priority:** P1
 - **Source:** 用户追加 `REQ-LIST`：「做bot一键重启功能」
 - **依赖:** REQ-OPS-0001、REQ-UI-0008、REQ-UI-0004
@@ -72,7 +72,7 @@ CLI/Pi输出阶段：`stopping old pid`、`waiting`、`starting new pid`、`read
 ## 追溯
 
 - Plans: `PLAN-20260808-complete-new-reqs#T10p`
-- Commits: 从 `Requirement:` git trailer 查
+- Commits: implementation `3d7f9b3`；其余从 `Requirement:` git trailer 查
 
 ## 实现证据
 
