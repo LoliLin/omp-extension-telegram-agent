@@ -457,3 +457,10 @@
 - Pi `/tg restart`改为异步CLI委托：立即关闭compose/dispose旧IPC，manual send保持unknown/no-retry；同一native transcript原位换client，以原A/all filter和footer重连，snapshot跨client去重。真实Pi`6795→6903`后status、live message及连续STREAMING partial均刷新。
 - controller/config/extension/timeline targeted tests及全量259 tests / 3882 assertions、typecheck与cache v5 golden通过；生产DB/IPC/provider grammar、context epoch、模型调用与每turn token均未改变。
 - Cache impact: **NONE**——纯进程与operator UI控制；restart恢复既有持久session，不引入provider-visible内容或额外LLM call。
+
+## 2026-08-08 (50) — 调查远端提交后的重复发送（文档）
+
+- 用户raw note“bot会重复发”已正式化为`REQ-SEND-0002`。生产DB中`#19614/#19615`、`#19619/#19621`逐字重复；agent trace证明每组第一次Telegram消息已创建，但canonical SQLite写锁让tool返回error，模型随后用相同参数重试。
+- 同期重复daemon/409解释了锁竞争来源，OPS-0002已恢复deployment单写者；独立发送缺口仍是runtime没有消费`SentMessagePersistenceError`，且sticker、markExposed、broadcast/event与组合第二段同样可能在远端commit后抛出。
+- 正式边界固定为：所有preflight先于网络；rich确定性拒绝只允许既有一次plain fallback；一旦create call开始，committed/partial/unknown均以terminal no-retry结束，本地canonical恢复按message id幂等且绝不触网。
+- Cache impact: **NONE（docs/research only）**。后续不改send tool/schema/provider grammar；正常turn零token变化，异常路径减少重复模型turn与Telegram消息。

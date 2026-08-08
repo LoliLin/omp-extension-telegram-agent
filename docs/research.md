@@ -309,3 +309,13 @@ custom entry 不进入 LLM context；IPC 与 provider serialization 不变。Cac
 - `send.message` description 是稳定 provider prefix；实现 Rich Markdown authority 必须 bump `CACHE_SCHEMA_VERSION`、开新 epoch并更新 tools hash golden。参数/顺序、LLM call 数与动态 tool result不增加。
 - private `sendRichMessageDraft` 不用于当前 supergroup；原生 draft Thinking 的 capability 边界由 REQ-TG-0002 单独锁定。
 - 官方参考：<https://core.telegram.org/bots/api#sendrichmessage>、<https://core.telegram.org/bots/api#inputrichmessage>、<https://core.telegram.org/bots/api#sendrichmessagedraft>；完整验收见 `requirements/REQ-TG-0003.md`。
+
+## REQ-SEND-0002 调查：重复消息来自远端成功后的本地失败被误报为可重试（2026-08-08）
+
+**结论：Telegram create call 是不可回滚的 commit boundary；跨过后只能终止并恢复本地副作用，不能把整次 tool call抛回模型重试。**
+
+- 生产 canonical 明确记录 `#19614/#19615` 与 `#19619/#19621` 两组逐字相同消息。对应 agent trace 都是：第一次 `tool_call send` 已在Telegram创建消息，随后 `tool_result.isError=true`；模型以“数据库锁了，重试一次”发出第二个相同tool call。
+- 第一条已成功但未进入第一次`send` event，说明失败点在API成功后的canonical/event链，而不是两次独立routing。同期多daemon造成的SQLite lock/409放大了问题；OPS-0002修复单写者后仍必须修正send事务语义。
+- `sendRichTextAndPersist`已经抛出专门的`SentMessagePersistenceError`，但runtime没有把它与preflight/network rejection区分。sticker insert、markExposed、broadcast/event，以及message成功后sticker失败也有相同半提交风险。
+- Telegram没有本项目可用的通用idempotency key。确定性rich rejection的一次plain fallback仍合法；timeout/网络断开、远端成功后的本地失败和组合partial都必须是terminal no-retry，且本地canonical恢复按message id幂等、绝不触网。
+- Cache impact **NONE**：send tool/schema/grammar不变；正常路径零token变化，异常路径减少重复Telegram请求和provider纠错turn。完整边界见`requirements/REQ-SEND-0002.md`。

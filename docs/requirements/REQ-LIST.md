@@ -41,6 +41,7 @@
 - [ ] [REQ-STICKER-0002](REQ-STICKER-0002.md) 固定目录与动态候选必须按 bot 可发送性隔离（P0，已复现定位/未修复）
 - [ ] [REQ-SEND-0001](REQ-SEND-0001.md) 统一 message/sticker/reply_to、tool-local 用法与 terminating 最小结果（P1，已实现/待真实群总验收）
 - [ ] [REQ-UI-0010](REQ-UI-0010.md) 恢复 Pi 原生 feed 的即时刷新与流式 Agent 输出（P1，已实现/待真实 Pi 总验收）
+- [ ] [REQ-SEND-0002](REQ-SEND-0002.md) Telegram 远端提交后不得因本地失败而重复发送（P0，已复现定位/未实现）
 
 
 ## 代码库与文档

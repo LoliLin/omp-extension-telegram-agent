@@ -1,7 +1,7 @@
 # PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
 
 - **Status:** Active
-- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-UI-0011, REQ-PLAT-0001, REQ-DOC-0001, REQ-ONBOARD-0001
+- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-SEND-0002, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-UI-0011, REQ-PLAT-0001, REQ-DOC-0001, REQ-ONBOARD-0001
 - **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
 
 ## 结果
@@ -49,6 +49,10 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10t** — 用T10s真实commit hash记录UI-0011完成并在REQ-LIST勾选；validates: UI-0011 traceability；commit: completion record
 - [x] **T10p** — 增加串行 graceful CLI/Pi restart、同deployment孤儿回收与原filter feed重连；validates: OPS-0002 AC1–AC7；commit: daemon restart workflow
 - [x] **T10u** — 用T10p真实commit hash记录OPS-0002完成并在REQ-LIST勾选；validates: OPS-0002 traceability；commit: completion record
+- [x] **T10v** — 复盘生产重复消息、tool trace与daemon锁竞争，正式化远端commit后的no-retry边界；validates: SEND-0002 documented scope/AC；commit: docs/research only
+- [ ] **T10w** — 调查并正式化Kitty/Ghostty媒体协议与Pi原生PNG转换边界；validates: new media note documented scope/AC；commit: docs/research only
+- [ ] **T10x** — 隔离远端committed/partial/unknown与本地副作用失败，阻止同turn重发并补恢复回归；validates: SEND-0002 AC1–AC7；commit: send commit boundary
+- [ ] **T10y** — 用T10x真实commit hash记录SEND-0002完成并在REQ-LIST勾选；validates: SEND-0002 traceability；commit: completion record
 - [ ] **T10m** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
 - [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification
@@ -75,6 +79,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 | Sticker/cache | `bun test test/sticker.test.ts test/cache.test.ts test/flush.test.ts` | T3 |
 | Routing | `bun test test/router.test.ts test/flush.test.ts` | T4 |
 | IPC/editor | `bun test test/ipc.test.ts test/tg-engine.test.ts test/tg-extension.test.ts` | T5–T10 |
+| Send commit | `bun test test/rich-send.test.ts test/sticker.test.ts test/flush.test.ts test/daemon-control.test.ts` | T10x |
 | Config/platform | `bun test test/config.test.ts` + 新 composition tests | T11–T13 |
 | 全量 | `bun test` + `bun run check` + `git diff --check` | T14 |
 | Real Pi | `bun run pi`: attach/compose/send/more/footer/completion/vision | T14 |
@@ -94,6 +99,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - T10o: **NONE**；reply identity/obligation属于确定性data plane，正常burst不新增call，只有超过batch上限的真实reply backlog才有必要分批。
 - T10r/T10s: **NONE**；只用Pi native stack重排已有TUI文字/媒体，IPC/DB/provider bytes与调用数不变。
 - T10p: **NONE**；restart不改provider/session协议或epoch，不新增LLM call/token。
+- T10v/T10x: **NONE**；不改send schema/provider grammar；异常路径在Telegram调用后只终止并重试本地幂等副作用，减少重复provider turn/token。
 - T10m: **NONE**；Telegram control command 与回复均由 deterministic control plane 消费，不进入 provider context；只有显式 compact 使用既有 summary 调用。
 - T11–T13f: 现有 deployment **NONE**；provider/persona choice 是显式配置边界，bootstrap/wizard/docs 不进入 provider context，现有 golden 必须不变。
 
@@ -104,6 +110,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - status/command refactor破坏 extension lifecycle：fake host锁 socket ownership和shutdown cleanup。
 - direct reply被普通catch-up截断或restart吞掉：durable obligation + provider suffix harness + file DB reopen回归。
 - restart并发或旧socket假ready：control lock、PID身份校验、旧资源消失后才spawn并用新连接验证。
+- Telegram已成功但SQLite/event/broadcast失败导致模型重试：远端commit boundary之后只给terminal committed/partial/unknown，本地恢复绝不触网。
 - cache bump误更新非 sticker grammar：逐项 hash diff，只有预期 system hash变化。
 - 多原子 commit 与脏工作树混淆：每次显式 staging并审查 staged paths。
 - onboarding 覆盖半份配置或泄露 secret：内存校验、同目录原子 rename、existing-file deny-by-default、脱敏 transcript fixture。
