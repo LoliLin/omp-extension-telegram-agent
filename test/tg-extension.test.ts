@@ -1,10 +1,10 @@
 process.env.TZ = "Asia/Singapore";
 
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import { FooterComponent, initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import * as Tui from "@earendil-works/pi-tui";
 import {
 	itemComponent,
@@ -21,6 +21,8 @@ const theme = {
 	bg: (_color: string, text: string) => text,
 	bold: (text: string) => text,
 } as Theme;
+
+beforeAll(() => initTheme(undefined, false));
 
 class FakeTimeline implements TimelinePort {
 	isConnected = false;
@@ -75,6 +77,10 @@ interface FakeHost {
 	widgetInputs: unknown[];
 	statuses: string[];
 	statusUpdates: { key: string; text: string | undefined }[];
+	footerInputs: unknown[];
+	renderRequests: { count: number };
+	sessionEntries: unknown[];
+	getFooter(): Tui.Component | undefined;
 	editorTexts: string[];
 	input(event: { text: string; source?: "interactive" | "rpc" | "extension"; images?: unknown[] }): Promise<{ action: string } | undefined>;
 	restore(data: unknown): Tui.Component | undefined;
@@ -89,18 +95,59 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 	const widgetInputs: unknown[] = [];
 	const statuses: string[] = [];
 	const statusUpdates: FakeHost["statusUpdates"] = [];
+	const footerInputs: unknown[] = [];
+	const renderRequests = { count: 0 };
+	const sessionEntries: unknown[] = [];
+	const footerStatuses = new Map<string, string>();
+	let currentFooter: Tui.Component | undefined;
 	const editorTexts: string[] = [];
 	const commands = new Map<string, { handler(args: string, ctx: unknown): Promise<void> }>();
 	const renderers = new Map<string, (entry: { data?: unknown }, options: unknown, theme: Theme) => Tui.Component | undefined>();
 	const shutdownHandlers: (() => void)[] = [];
 	let inputHandler: ((event: unknown, ctx: unknown) => Promise<{ action: string } | undefined> | { action: string } | undefined) | undefined;
+	const model = {
+		id: "deepseek-v4-flash",
+		provider: "deepseek",
+		api: "openai-completions",
+		contextWindow: 1_000_000,
+		reasoning: true,
+	};
+	const footerData = {
+		getGitBranch: () => "main",
+		getExtensionStatuses: () => footerStatuses,
+		getAvailableProviderCount: () => 1,
+		onBranchChange: () => () => {},
+	};
 	const ctx = {
 		mode: "tui",
+		model,
+		thinkingLevel: "max",
+		modelRegistry: { getAvailable: () => [model] },
+		sessionManager: {
+			getEntries: () => sessionEntries,
+			getCwd: () => join(import.meta.dir, ".."),
+			getSessionName: () => undefined,
+		},
+		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000_000, percent: 0 }),
 		ui: {
 			notify: (text: string, level: string) => notifies.push({ text, level }),
 			setStatus: (key: string, text: string | undefined) => {
 				statuses.push(text ?? "");
 				statusUpdates.push({ key, text });
+				if (text === undefined) footerStatuses.delete(key);
+				else footerStatuses.set(key, text);
+				renderRequests.count++;
+			},
+			setFooter: (input: unknown) => {
+				footerInputs.push(input);
+				if (input === undefined) currentFooter = undefined;
+				else {
+					currentFooter = (input as (tui: Tui.TUI, theme: Theme, footerData: unknown) => Tui.Component)(
+						{ requestRender: () => { renderRequests.count++; } } as never,
+						theme,
+						footerData,
+					);
+				}
 			},
 			setEditorText: (text: string) => editorTexts.push(text),
 			getEditorText: () => editorTexts.at(-1) ?? "",
@@ -146,6 +193,10 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 		widgetInputs,
 		statuses,
 		statusUpdates,
+		footerInputs,
+		renderRequests,
+		sessionEntries,
+		getFooter: () => currentFooter,
 		editorTexts,
 		input: async (event) => await inputHandler?.({ type: "input", source: "interactive", ...event }, ctx),
 		restore: (data) => renderers.get("telegram-chat")?.({ data }, {}, theme),
@@ -200,7 +251,9 @@ describe("native Pi Telegram extension", () => {
 		expect(rendered).toContain("Alice · @alice");
 		expect(rendered).toContain("reply to #3");
 		expect(rendered).toContain("edited");
-		expect(host.statuses.at(-1)).toContain("connected");
+		expect(rendered).not.toContain("connected · bot");
+		expect(host.getFooter()).toBeInstanceOf(FooterComponent);
+		expect(host.widgetInputs).toHaveLength(0);
 	});
 
 	test("a restored attach anchor renders detached without opening a socket", () => {
@@ -307,18 +360,21 @@ describe("native Pi Telegram extension", () => {
 		disconnected.clients[0]!.isConnected = false;
 		disconnected.clients[0]!.emit({ type: "disconnected", reason: "daemon disconnected" });
 		expect(await disconnected.input({ text: "Pi after disconnect" })).toEqual({ action: "continue" });
+		expect(disconnected.getFooter()).toBeUndefined();
 
 		const detached = makeHost();
 		await detached.command("attach A");
 		await detached.command("compose A");
 		await detached.command("detach");
 		expect(await detached.input({ text: "Pi after detach" })).toEqual({ action: "continue" });
+		expect(detached.getFooter()).toBeUndefined();
 
 		const shutdown = makeHost();
 		await shutdown.command("attach A");
 		await shutdown.command("compose A");
 		shutdown.shutdown();
 		expect(await shutdown.input({ text: "Pi after shutdown" })).toEqual({ action: "continue" });
+		expect(shutdown.getFooter()).toBeUndefined();
 	});
 
 	test("vision updates refresh every matching native media card in place and sanitize text", async () => {
@@ -352,17 +408,87 @@ describe("native Pi Telegram extension", () => {
 		expect(host.entries).toHaveLength(1);
 	});
 
-	test("panel uses a Pi component factory and disposes its standalone client", async () => {
+	test("native Pi FooterComponent renders Telegram usage with exact Pi metrics", async () => {
+		const host = makeHost();
+		await host.command("attach A");
+		const stats: BotStats = {
+			runs: 7,
+			contextTokens: 33_000,
+			cacheRead: 20_000,
+			cacheMiss: 13_000,
+			outputTokens: 817,
+			cost: 0.002,
+			epoch: 2,
+			last: { id: 7, botId: "A", ts: 7, model: "deepseek-v4-flash", epoch: 2, contextTokens: 15_000, cacheRead: 10_000, cacheMiss: 5000, outputTokens: 100, cost: 0.001 },
+		};
+		host.clients[0]!.emit({ type: "stats", stats: { A: stats } });
+
+		const footer = host.getFooter();
+		expect(footer).toBeInstanceOf(FooterComponent);
+		const rendered = footer!.render(180).join("\n");
+		expect(rendered).toContain("↑13k ↓817 R20k CH60.6% $0.002 1.5%/1.0M (auto)");
+		expect(rendered).toContain("deepseek-v4-flash • medium");
+		expect(host.widgetInputs).toHaveLength(0);
+		expect(host.sessionEntries).toEqual([]);
+		expect(host.renderRequests.count).toBeGreaterThan(0);
+		for (const width of [24, 80]) {
+			expect(host.getFooter()!.render(width).every((line) => Tui.visibleWidth(line) <= width)).toBe(true);
+		}
+		await host.command("compose A");
+		expect(host.getFooter()!.render(180).join("\n")).toContain("TELEGRAM · SEND AS A");
+	});
+
+	test("global footer aggregates bots and uses the latest run model context", async () => {
+		const host = makeHost();
+		await host.command("attach");
+		const base = { runs: 1, contextTokens: 1000, cacheRead: 800, cacheMiss: 200, outputTokens: 10, cost: 0.001, epoch: 1 };
+		host.clients[0]!.emit({
+			type: "stats",
+			stats: {
+				A: { ...base, last: { id: 1, botId: "A", ts: 1, model: "deepseek-v4-flash", epoch: 1, contextTokens: 1000, cacheRead: 800, cacheMiss: 200, outputTokens: 10, cost: 0.001 } },
+				B: { ...base, cacheRead: 1200, cacheMiss: 300, outputTokens: 20, cost: 0.002, last: { id: 2, botId: "B", ts: 2, model: "deepseek-v4-flash", epoch: 1, contextTokens: 20_000, cacheRead: 1200, cacheMiss: 300, outputTokens: 20, cost: 0.002 } },
+			},
+		});
+
+		const rendered = host.getFooter()!.render(160).join("\n");
+		expect(rendered).toContain("↑500 ↓30 R2.0k CH80.0% $0.003 2.0%/1.0M (auto)");
+		expect(host.clients).toHaveLength(1);
+	});
+
+	test("standalone panel owns one stats socket and off restores the default footer", async () => {
 		const host = makeHost();
 		await host.command("panel A");
-		expect(typeof host.widgetInputs[0]).toBe("function");
-		expect(host.widgets.get("tg-panel")).toBeInstanceOf(Tui.Container);
+		expect(host.getFooter()).toBeInstanceOf(FooterComponent);
+		expect(host.clients).toHaveLength(1);
 		const stats: BotStats = { runs: 1, contextTokens: 1000, cacheRead: 800, cacheMiss: 200, outputTokens: 10, cost: 0.01, epoch: 2, last: null };
 		host.clients[0]!.emit({ type: "stats", stats: { A: stats } });
-		expect(host.widgets.get("tg-panel")!.render(36).join(" ").replace(/\s+/g, " ")).toContain("hit 80.0%");
+		expect(host.getFooter()!.render(120).join("\n")).toContain("CH80.0%");
 		await host.command("panel off");
-		expect(host.widgets.has("tg-panel")).toBe(false);
+		expect(host.getFooter()).toBeUndefined();
 		expect(host.clients[0]!.disposed).toBe(true);
+		expect(host.widgetInputs).toHaveLength(0);
+
+		const disconnected = makeHost();
+		await disconnected.command("panel A");
+		disconnected.clients[0]!.emit({ type: "disconnected", reason: "daemon stopped" });
+		expect(disconnected.getFooter()).toBeUndefined();
+		expect(disconnected.clients[0]!.disposed).toBe(true);
+		expect(disconnected.notifies.at(-1)?.text).toContain("Telegram stats disconnected");
+	});
+
+	test("panel switches one standalone socket back to active-feed stats without detaching", async () => {
+		const host = makeHost();
+		await host.command("attach A");
+		await host.command("panel B");
+		expect(host.clients).toHaveLength(2);
+		expect(host.clients[0]!.disposed).toBe(false);
+		expect(host.clients[1]!.disposed).toBe(false);
+
+		await host.command("panel A");
+		expect(host.clients).toHaveLength(2);
+		expect(host.clients[0]!.disposed).toBe(false);
+		expect(host.clients[1]!.disposed).toBe(true);
+		expect(host.getFooter()).toBeInstanceOf(FooterComponent);
 	});
 
 	test("status reuses active feed telemetry without another socket", async () => {

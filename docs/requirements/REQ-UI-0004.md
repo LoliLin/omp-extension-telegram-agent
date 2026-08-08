@@ -63,8 +63,8 @@ Telegram 观察器是可安装、可自动发现的 Pi package。`/tg attach` �
 
 ## 可观察性
 
-- Pi footer status 显示 Telegram attached/detached/disconnected 与过滤 bot。
-- widget 显示 usage；连接失败保留可执行恢复命令。
+- feed header 显示过滤 bot；断线保留内容、发出可执行错误通知并恢复 default footer。
+- Pi 原生 `FooterComponent` 显示 Telegram usage；compose 身份通过同一 footer 的 extension status 行共存。
 
 ## 文档影响
 

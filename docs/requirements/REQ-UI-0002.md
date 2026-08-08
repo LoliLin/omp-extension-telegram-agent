@@ -50,7 +50,7 @@
 
 ## 可观察性
 
-Pi footer status 展示 filter、connected/loading older/detached/disconnected。
+feed header 展示 filter；分页/连接状态由内存状态和错误通知呈现，断线或 detach 恢复默认 footer。Telegram usage 由 REQ-UI-0003/0007 的 Pi 原生 footer 呈现。
 
 ## 文档影响
 

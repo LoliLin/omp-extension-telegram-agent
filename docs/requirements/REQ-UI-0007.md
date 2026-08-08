@@ -1,6 +1,6 @@
 # REQ-UI-0007: 将 Telegram stats 生命周期接入 Pi 原生 footer
 
-- **Status:** Specified（2026-08-08 根据用户原生 footer 样例重写；未实现）
+- **Status:** Implemented（2026-08-08；真实 Pi TTY smoke 留 T14）
 - **Priority:** P1
 - **Source:** 用户要求统计位于输入栏底端且完全使用 Pi 样式；后续实机反馈明确拒绝 widget 与额外 `setStatus` 行
 - **依赖:** REQ-UI-0003、REQ-UI-0004
@@ -60,3 +60,9 @@ REQ-UI-0003 规定最终 renderer 必须是 Pi `FooterComponent`；本需求负�
 
 - Plans: `PLAN-20260808-complete-new-reqs` T9a/T9b
 - Commits: 从 `Requirement: REQ-UI-0007` trailer 查
+
+## 完成证据
+
+- production 已删除 `TelegramStatsPanel` 与 stats `setWidget`；attach/panel factory 直接返回 `FooterComponent`。
+- active feed 复用与单一 standalone owner、panel off、attach 切换、detach、两类 disconnect、shutdown 均由 fake host 锁定，不累积 socket/footer。
+- Telegram stats 更新只刷新内存 telemetry view；完整 `/tg status` 与 Pi session/provider/cache 路径保持不变。

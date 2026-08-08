@@ -295,3 +295,11 @@
 - 新方案写入 UI-0003/UI-0007：factory 直接返回 Pi `FooterComponent`；IPC stats 只映射成内存 telemetry session view，不复制 render、format、padding或 theme，不修改/append Pi session。off/detach 恢复 default footer。
 - mapping 固定为 miss→↑、output→↓、read→R、read/(read+miss)→CH、cost→$、latest context/model→右侧；global totals aggregate。后续 T9b 必须用 render test 锁用户样例。
 - Cache impact: **NONE（docs/research only）**；未来实现也是 TUI-only、provider token 0。
+
+## 2026-08-08 (30) — Telegram telemetry 改用 Pi 原生 FooterComponent
+
+- 删除 `TelegramStatsPanel` 与 stats `setWidget`/`setStatus` 路径；attach/panel 经官方 `setFooter` mount point 直接返回 Pi 导出的 `FooterComponent`，主题、宽度、token formatter、cwd/git/status 均继续由 Pi 拥有。
+- IPC totals 只映射为只读内存 telemetry session view：miss→↑、output→↓、read→R、read/(read+miss)→CH、cost→$，最新 run 提供 context/model；不 append/修改真实 Pi session。
+- active feed 复用 stats；不同 panel 范围最多一个 standalone client。off/detach/feed 或 stats disconnect/session shutdown 都幂等清理并恢复 default footer；compose identity 继续通过同一原生 footer 显示。
+- targeted plugin/timeline/IPC/cache 53 tests + typecheck 通过，覆盖用户样例、global aggregation、24/80 列、socket ownership 与 session isolation；真实 Pi TTY smoke 留 T14。
+- Cache impact: **NONE**——纯 IPC→TUI read model，不改 provider prefix/suffix、tool/message grammar，token/cost 增量 0。

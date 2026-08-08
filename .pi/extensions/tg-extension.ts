@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { VERSION, type ExtensionAPI, type ExtensionContext, type Theme } from "@earendil-works/pi-coding-agent";
+import {
+	FooterComponent,
+	VERSION,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type ReadonlyFooterDataProvider,
+	type Theme,
+} from "@earendil-works/pi-coding-agent";
 import * as Tui from "@earendil-works/pi-tui";
 import { loadConfig, type BotConfig } from "../../src/config.ts";
 import type { BotStats, EvtItem, TimelineItem } from "../../src/ipc.ts";
@@ -96,35 +103,127 @@ export function itemComponent(item: TimelineItem, theme: Theme): Tui.Component {
 	return box;
 }
 
-export class TelegramStatsPanel extends Tui.Container {
+type FooterBot = Pick<BotConfig, "id" | "model" | "reasoningEffort">;
+type FooterHost = Pick<ExtensionContext, "sessionManager" | "modelRegistry" | "model" | "thinkingLevel">;
+
+/** Read-only IPC telemetry view consumed by Pi's own FooterComponent. */
+export class TelegramFooterTelemetry {
 	private stats: Record<string, BotStats> = {};
-	private status: string;
+	private requestRender: (() => void) | null = null;
 
-	constructor(private readonly theme: Theme, filter: string | null) {
-		super();
-		this.status = filter ? `Telegram · bot ${filter}` : "Telegram · all bots";
-		this.rebuild();
+	constructor(
+		private readonly bots: FooterBot[],
+		readonly filter: string | null,
+		private readonly host: FooterHost,
+	) {}
+
+	update(stats: Record<string, BotStats>): void {
+		this.stats = stats;
+		this.requestRender?.();
 	}
 
-	update(stats?: Record<string, BotStats>, status?: string): void {
-		if (stats) this.stats = stats;
-		if (status) this.status = status;
-		this.rebuild();
+	mount(tui: Tui.TUI, footerData: ReadonlyFooterDataProvider): FooterComponent {
+		this.requestRender = () => tui.requestRender();
+		const telemetry = this;
+		const sessionView = {
+			get state() {
+				const { bot } = telemetry.scope();
+				return {
+					model: telemetry.modelFor(bot),
+					thinkingLevel: bot?.reasoningEffort ?? telemetry.host.thinkingLevel,
+				};
+			},
+			sessionManager: {
+				getEntries: () => telemetry.entries(),
+				getCwd: () => telemetry.host.sessionManager.getCwd(),
+				getSessionName: () => telemetry.host.sessionManager.getSessionName(),
+			},
+			getContextUsage: () => telemetry.contextUsage(),
+			modelRuntime: { isUsingSubscription: () => false },
+		};
+		return new FooterComponent(sessionView as never, footerData);
 	}
 
-	private rebuild(): void {
-		this.clear();
-		this.addChild(new Tui.Text(this.theme.bold(this.theme.fg("accent", this.status)), 1, 0));
-		const rows = Object.entries(this.stats);
-		if (rows.length === 0) this.addChild(new Tui.Text(this.theme.fg("dim", "no telemetry yet"), 1, 0));
-		for (const [id, stats] of rows) this.addChild(new Tui.Text(this.theme.fg("muted", statsText(id, stats)), 1, 0));
+	private scope(): {
+		bot: FooterBot | undefined;
+		latest: NonNullable<BotStats["last"]> | null;
+		totals: Pick<BotStats, "runs" | "cacheMiss" | "cacheRead" | "outputTokens" | "cost">;
+	} {
+		const selectedBots = this.filter ? this.bots.filter((bot) => bot.id === this.filter) : this.bots;
+		let latest: NonNullable<BotStats["last"]> | null = null;
+		const totals = { runs: 0, cacheMiss: 0, cacheRead: 0, outputTokens: 0, cost: 0 };
+		for (const bot of selectedBots) {
+			const stats = this.stats[bot.id];
+			if (!stats) continue;
+			totals.runs += stats.runs;
+			totals.cacheMiss += stats.cacheMiss;
+			totals.cacheRead += stats.cacheRead;
+			totals.outputTokens += stats.outputTokens;
+			totals.cost += stats.cost;
+			if (stats.last && (!latest || stats.last.ts > latest.ts || (stats.last.ts === latest.ts && stats.last.id > latest.id))) latest = stats.last;
+		}
+		const bot = this.filter
+			? selectedBots[0]
+			: this.bots.find((candidate) => candidate.id === latest?.botId) ?? selectedBots[0];
+		return { bot, latest, totals };
+	}
+
+	private modelFor(bot: FooterBot | undefined): NonNullable<ExtensionContext["model"]> | undefined {
+		if (!bot) return this.host.model;
+		const configured = this.host.modelRegistry.getAvailable().find((model) => model.id === bot.model);
+		if (configured) return configured;
+		if (this.host.model?.id === bot.model) return this.host.model;
+		return {
+			...(this.host.model ?? {}),
+			id: bot.model,
+			provider: this.host.model?.provider ?? "telegram",
+			api: this.host.model?.api ?? "openai-completions",
+			contextWindow: this.host.model?.contextWindow ?? 0,
+			reasoning: bot.reasoningEffort !== "off",
+		} as NonNullable<ExtensionContext["model"]>;
+	}
+
+	private entries(): unknown[] {
+		const { bot, totals } = this.scope();
+		if (totals.runs === 0) return [];
+		const model = this.modelFor(bot);
+		const totalTokens = totals.cacheMiss + totals.cacheRead + totals.outputTokens;
+		return [{
+			type: "message",
+			id: "telegram-telemetry",
+			parentId: null,
+			timestamp: new Date(0).toISOString(),
+			message: {
+				role: "assistant",
+				content: [],
+				api: model?.api ?? "openai-completions",
+				provider: model?.provider ?? "telegram",
+				model: model?.id ?? bot?.model ?? "telegram",
+				usage: {
+					input: totals.cacheMiss,
+					output: totals.outputTokens,
+					cacheRead: totals.cacheRead,
+					cacheWrite: 0,
+					totalTokens,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: totals.cost },
+				},
+				stopReason: "stop",
+				timestamp: 0,
+			},
+		}];
+	}
+
+	private contextUsage(): { tokens: number; contextWindow: number; percent: number } {
+		const { bot, latest } = this.scope();
+		const contextWindow = this.modelFor(bot)?.contextWindow ?? 0;
+		const tokens = latest?.contextTokens ?? 0;
+		return { tokens, contextWindow, percent: contextWindow > 0 ? (tokens / contextWindow) * 100 : 0 };
 	}
 }
 
 export class TelegramFeed extends Tui.Container {
 	readonly client: TimelinePort;
 	private readonly content = new Tui.Container();
-	private readonly statusText: Tui.Text;
 	private readonly items: TimelineItem[] = [];
 	private statsValue: Record<string, BotStats> = {};
 	private statusValue = "connecting...";
@@ -140,11 +239,9 @@ export class TelegramFeed extends Tui.Container {
 		const header = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
 		header.addChild(new Tui.Text(theme.bold(theme.fg("accent", filter ? `Telegram · bot ${filter}` : "Telegram · all bots")), 0, 0));
 		header.addChild(new Tui.Text(theme.fg("dim", "Pi transcript owns scrolling, resize, selection and images · /tg more · /tg detach"), 0, 0));
-		this.statusText = new Tui.Text(theme.fg("dim", this.statusValue), 1, 0);
 		this.addChild(header);
 		this.addChild(new Tui.Spacer(1));
 		this.addChild(this.content);
-		this.addChild(this.statusText);
 		this.client = factory(filter, { onEvent: (event) => this.onEvent(event) });
 	}
 
@@ -206,7 +303,6 @@ export class TelegramFeed extends Tui.Container {
 
 	private setStatus(value: string): void {
 		this.statusValue = value;
-		this.statusText.setText(this.theme.fg("dim", value));
 	}
 }
 
@@ -229,9 +325,9 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	const feeds = new Map<string, TelegramFeed>();
 	let pending: { data: FeedEntry; changed: (event: TimelineEvent, feed: TelegramFeed) => void } | null = null;
 	let active: TelegramFeed | null = null;
-	let panel: TelegramStatsPanel | null = null;
-	let panelOwner: "feed" | "standalone" | null = null;
-	let panelClient: TimelinePort | null = null;
+	let footerTelemetry: TelegramFooterTelemetry | null = null;
+	let footerOwner: "feed" | "standalone" | null = null;
+	let footerClient: TimelinePort | null = null;
 	let compose: Pick<BotConfig, "id" | "name"> | null = null;
 	let sending = false;
 	let lastUi: ExtensionContext["ui"] | null = null;
@@ -247,6 +343,20 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	const closeCompose = (ui: ExtensionContext["ui"] | null = lastUi) => {
 		compose = null;
 		if (ui) ui.setStatus("telegram-compose", undefined);
+	};
+	const clearStatsFooter = (ui: ExtensionContext["ui"] | null = lastUi) => {
+		footerClient?.dispose();
+		footerClient = null;
+		footerTelemetry = null;
+		footerOwner = null;
+		ui?.setFooter(undefined);
+	};
+	const mountStatsFooter = (filter: string | null, owner: "feed" | "standalone", ctx: ExtensionContext) => {
+		const bots = loadConfig(rootDir).bots.map(({ id, model, reasoningEffort }) => ({ id, model, reasoningEffort }));
+		const telemetry = new TelegramFooterTelemetry(bots, filter, ctx);
+		footerTelemetry = telemetry;
+		footerOwner = owner;
+		ctx.ui.setFooter((tui, _theme, footerData) => telemetry.mount(tui, footerData));
 	};
 	const resolveBot = (arg: string | undefined, ui: ExtensionContext["ui"]): BotConfig | undefined => {
 		if (!arg) {
@@ -280,9 +390,8 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 
 	pi.on("session_shutdown", () => {
 		closeCompose();
+		clearStatsFooter();
 		for (const feed of feeds.values()) feed.dispose();
-		panelClient?.dispose();
-		panelClient = null;
 		active = null;
 	});
 
@@ -367,34 +476,29 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				return undefined;
 			};
 
-			const mountPanel = (filter: string | null, owner: "feed" | "standalone") => {
-				ctx.ui.setWidget("tg-panel", (_tui, theme) => {
-					panel = new TelegramStatsPanel(theme, filter);
-					return panel;
-				});
-				panelOwner = owner;
-			};
-
 			if (sub === "attach") {
 				const filter = resolveFilter(botArg);
 				if (filter === undefined) return;
 				closeCompose(ctx.ui);
 				active?.detach("replaced by a new /tg attach");
-				panelClient?.dispose();
-				panelClient = null;
-				mountPanel(filter, "feed");
+				clearStatsFooter(ctx.ui);
+				mountStatsFooter(filter, "feed", ctx);
 				const data = { instanceId: makeId(), filter };
 				pending = {
 					data,
 					changed: (event, feed) => {
-						if (panelOwner === "feed") panel?.update(event.type === "stats" ? feed.stats : undefined, feed.status);
-						ctx.ui.setStatus("telegram", `Telegram · ${feed.status}`);
-						if (event.type === "disconnected" && active === feed) closeCompose(ctx.ui);
+						if (footerOwner === "feed" && active === feed && event.type === "stats") footerTelemetry?.update(feed.stats);
+						if (event.type === "disconnected" && active === feed) {
+							closeCompose(ctx.ui);
+							clearStatsFooter(ctx.ui);
+							ctx.ui.notify(`Telegram feed disconnected: ${event.reason}`, "error");
+						}
 					},
 				};
 				pi.appendEntry<FeedEntry>(ENTRY_TYPE, data);
 				if (pending) {
 					pending = null;
+					clearStatsFooter(ctx.ui);
 					ctx.ui.notify("Pi did not mount the Telegram transcript entry", "error");
 				}
 			} else if (sub === "compose") {
@@ -421,37 +525,33 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 					closeCompose(ctx.ui);
 					active.detach();
 					active = null;
-					if (panelOwner === "feed") panel?.update(undefined, "Telegram · detached");
-					ctx.ui.setStatus("telegram", "Telegram · detached");
+					clearStatsFooter(ctx.ui);
 				}
 			} else if (sub === "panel") {
 				if (botArg === "off") {
-					panelClient?.dispose();
-					panelClient = null;
-					panel = null;
-					panelOwner = null;
-					ctx.ui.setWidget("tg-panel", undefined);
+					clearStatsFooter(ctx.ui);
 					return;
 				}
 				const filter = resolveFilter(botArg);
 				if (filter === undefined) return;
-				panelClient?.dispose();
-				panelClient = null;
-				if (active && active.filter === filter) {
-					mountPanel(filter, "feed");
-					panel?.update(active.stats, active.status);
+				clearStatsFooter(ctx.ui);
+				if (active?.client.isConnected && active.filter === filter) {
+					mountStatsFooter(filter, "feed", ctx);
+					footerTelemetry?.update(active.stats);
 				} else {
-					mountPanel(filter, "standalone");
-					panelClient = factory(filter, {
+					mountStatsFooter(filter, "standalone", ctx);
+					const telemetry = footerTelemetry;
+					footerClient = factory(filter, {
 						onEvent: (event) => {
-							if (panelOwner !== "standalone") return;
-							if (event.type === "stats") panel?.update(event.stats);
-							else if (event.type === "status") panel?.update(undefined, event.text);
-							else if (event.type === "disconnected") panel?.update(undefined, event.reason);
-							ctx.ui.setStatus("telegram", "Telegram · panel");
+							if (footerOwner !== "standalone" || footerTelemetry !== telemetry) return;
+							if (event.type === "stats") telemetry?.update(event.stats);
+							else if (event.type === "disconnected") {
+								clearStatsFooter(ctx.ui);
+								ctx.ui.notify(`Telegram stats disconnected: ${event.reason}`, "error");
+							}
 						},
 					});
-					void panelClient.connect();
+					void footerClient.connect();
 				}
 			} else if (sub === "status") {
 				const filter = resolveFilter(botArg);

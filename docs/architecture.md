@@ -18,7 +18,7 @@
                                   │
                     Pi interactive process（短生命周期）
                     ├─ Telegram transcript custom entry
-                    └─ Telegram stats widget
+                    └─ Pi native FooterComponent
 ```
 
 - **daemon**：唯一长驻进程。按 `bots.config.json` 为每个 bot 创建 poller 与 AgentSession，并持有 SQLite、router 和 IPC server。
@@ -76,17 +76,17 @@
 - 消息、LOCAL 事件、日期与媒体由 Pi 的 `Container`、`Box`、`Text`、`Image`、`Spacer` 和 theme 组合。Pi fullscreen host 拥有滚动、resize、选择、editor、宽度处理及 Kitty image placement/cropping；项目不持有 viewport、终端尺寸、键盘处理或 ANSI 主题代码。
 - `src/plugin/timeline.ts` 是无展示逻辑的 IPC client，只负责连接、snapshot/live/history、复合游标、去重、stats 合并与有界媒体读取。
 - public extension API 没有 transcript scroll-top 事件，因此更早历史由 `/tg more` 显式加载；`/tg detach` 只断开 live socket，已显示内容保留。session restore 的旧锚点以 detached 状态呈现，不自动重连。
-- stats 用 `ctx.ui.setWidget` component factory 渲染；active feed 可复用同一份 IPC stats，独立 panel 自己拥有并清理订阅。
+- stats 通过官方 `ctx.ui.setFooter` mount point 直接返回 Pi 导出的 `FooterComponent`。插件只提供只读内存 telemetry session view；不复制 footer renderer、不写真实 Pi session。active feed 复用同一份 IPC stats，独立 panel 只拥有一个可清理的订阅。
 - IPC：Unix socket JSONL，daemon 为 server；协议 = hello（可带 bot filter）/ history 分页拉取 / event 订阅 / usage 增量推送（REQ-UI-0003）/ additive `send_message`→`send_result`（REQ-UI-0005）。
 - **manual send（UI-0005 daemon contract）**：extension 只提交 request id、bot id 与纯文本；daemon 校验身份/空文本/4096 字符上限，在有界 256-entry request cache 中合并并发重复，再调用 Telegram。API 成功后先写 canonical DB、再 broadcast、最后 ACK；ACK 丢失不触发 daemon retry。相同 id 不同内容返回 conflict；API/DB 边界给出 explicit failure/unknown outcome，token 不出 daemon。
-- **原生 editor compose（UI-0005）**：`/tg compose <bot-id>` 显式打开发送身份，Pi default footer 持续显示 `TELEGRAM · SEND AS ...`；attach 本身永远只读。extension 只拦截 interactive `input` 并返回 `handled`，不写 Pi session/provider context；RPC/extension source 继续交给 Pi。发送期间拒绝第二次提交；明确失败恢复 editor 原文，ACK 超时/断线恢复原文并关闭 compose、提示先查群且不自动重试。附件被拦截且不降级为只发文字。attach 切换、detach、daemon 断线与 session shutdown 均清除身份。
+- **原生 editor compose（UI-0005）**：`/tg compose <bot-id>` 显式打开发送身份，当前 Pi footer 持续显示 `TELEGRAM · SEND AS ...`；attach 本身永远只读。extension 只拦截 interactive `input` 并返回 `handled`，不写 Pi session/provider context；RPC/extension source 继续交给 Pi。发送期间拒绝第二次提交；明确失败恢复 editor 原文，ACK 超时/断线恢复原文并关闭 compose、提示先查群且不自动重试。附件被拦截且不降级为只发文字。attach 切换、detach、daemon 断线与 session shutdown 均清除身份。
 - **传输层**：FrameDecoder 持单个 streaming TextDecoder（多字节字符跨 chunk 不腐蚀）；接收缓冲 4MB 上限，超限断开；socket.write <0 即踢连接，出站队列 1MB 上限，超限断开（TUI 挂起时 daemon 内存有界）
 - **分页**：merged timeline 统一排序键 (ts, rank, id)（rank 0=agent 事件，1=群消息），history 用复合游标，同秒多条消息不丢不重；旧客户端只发 beforeTs 时保持严格 `ts<` 语义（双向兼容，新客户端同时发送两字段）
 - **本机暴露面**：socket 文件 chmod 600；history limit 服务端夹取 [1,500]
 - **终端注入防护**：渲染前 strip ANSI/OSC/DCS 转义与控制字符（保留 \n/\t），群消息无法清屏/改色/写剪贴板（OSC 52）
 - **竞态去重**：snapshot 与 broadcast 重复条目按 (chatId,messageId)/(evtId) 去重；翻页补日期分隔线
 - **attach 过滤（REQ-UI-0002）**：`/tg attach <bot-id>` 以单 bot 视角观察——daemon 端对 snapshot / history / broadcast / usage 过滤 agent_events（群消息始终全量）；不指定时为全局视角；非法 id 由 extension 根据 daemon hello 信息列出有效清单。
-- **可观测性 widget（REQ-UI-0003）**：每 bot 显示当前 epoch、最近一次 run 的 context/read/miss、全历史累计 input/output/成本与 hit ratio；snapshot 附全历史聚合基线（`lastId` 防止与推送竞态双计），llm_run 落库时经 IPC 增量推送，插件不直连 DB。
+- **Pi 原生 telemetry footer（REQ-UI-0003/0007）**：累计 `cacheMiss/output/cacheRead/cost` 映射到 Pi 原生 `↑/↓/R/CH/$`，最近 run 提供 context，配置提供 model/reasoning；全局范围聚合 totals 并取最新 run 的 model。snapshot 附全历史聚合基线（`lastId` 防 live 双计），llm_run 经 IPC 增量推送。telemetry view 只存在于内存，委托 `FooterComponent` 处理 theme/width/cwd/git/status；`panel off` 恢复 operator session 的 default footer。
 - **媒体内联（REQ-UI-0001）**：Pi `Image` 渲染本地缓存的 PNG/JPEG/WebP/GIF（终端无图像能力时由 Pi 降级）；IPC 只传 `mediaPath`/`mediaDesc`（同 uid 读文件，不扩大暴露面）；不支持格式、无缓存或超过 1 MiB 时显示占位符与已有 vision 描述。
 
 ## Vision（Phase 7）

@@ -26,7 +26,7 @@
 
 - 启动 daemon → 配置的 bots 长期在线 → 消息落库 → Agent 按规则运行
 - 用户随时在项目目录运行 `bun run pi`，用 `/tg attach [bot-id]` 在 Pi 原生 transcript 查看完整群聊、LOCAL 事件与 usage；关闭 Pi 不影响 daemon
-- `/tg more` 加载更早历史，`/tg detach` 断开实时订阅，`/tg panel` 显示原生 stats widget
+- `/tg more` 加载更早历史，`/tg detach` 断开实时订阅，`/tg panel [bot|off]` 选择或恢复 Pi 原生 stats footer
 - daemon 运维：`start` / `status` / `stop`；详见 `docs/runbooks/daemon.md`
 
 ## 主要约束

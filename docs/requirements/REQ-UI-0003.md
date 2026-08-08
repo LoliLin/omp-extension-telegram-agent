@@ -1,6 +1,6 @@
 # REQ-UI-0003: 用 Pi 原生 FooterComponent 呈现实时可观测性
 
-- **Status:** Reopened / specified（2026-08-08；`19819c9` 的 component widget 不满足用户给出的原生 footer 样例）
+- **Status:** Implemented（2026-08-08；真实 Pi TTY smoke 留 T14）
 - **Priority:** P1
 - **Source:** 原 TUI 面板需求；用户实机复核要求统计必须进入 Pi 原生 `↑/↓/R/CH/$/context/model` 行，不接受 editor 上方 widget 或额外 status 行
 - **依赖:** REQ-UI-0004
@@ -69,3 +69,9 @@ attach 或兼容 `/tg panel` 开启后，Telegram usage 由 Pi 自己的 `Footer
 - Plans: `PLAN-20260808-complete-new-reqs` T9a/T9b
 - Invalidated implementation: `19819c9`（widget 形态保留为 transcript commit，但不再算 UI-0003 完成）
 - Commits: 从 `Requirement: REQ-UI-0003` trailer 查
+
+## 完成证据
+
+- fake Pi host 直接实例化并渲染 Pi 导出的 `FooterComponent`；fixture 精确得到 `↑13k ↓817 R20k CH60.6% $0.002 1.5%/1.0M (auto)` 与配置 model/reasoning。
+- filtered/global aggregation、24/80/180 列、compose status 共存、真实 session entries 不变、detach/disconnect/shutdown/off cleanup 均有回归测试。
+- `test/tg-extension.test.ts`、timeline/IPC/cache targeted 53 tests 与 typecheck 通过；真实 TTY footer 留最终验收。
