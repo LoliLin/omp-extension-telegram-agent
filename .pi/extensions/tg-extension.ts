@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { VERSION, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
+import { VERSION, type ExtensionAPI, type ExtensionContext, type Theme } from "@earendil-works/pi-coding-agent";
 import * as Tui from "@earendil-works/pi-tui";
-import { loadConfig } from "../../src/config.ts";
+import { loadConfig, type BotConfig } from "../../src/config.ts";
 import type { BotStats, EvtItem, TimelineItem } from "../../src/ipc.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
@@ -27,6 +27,7 @@ export interface TelegramExtensionOptions {
 	timelineFactory?: TimelineFactory;
 	processRunner?: ProcessRunner;
 	idFactory?: () => string;
+	requestIdFactory?: () => string;
 }
 
 export function supportsPiVersion(value: string): boolean {
@@ -214,12 +215,44 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	const factory = options.timelineFactory ?? ((filter, hooks) => new TimelineClient(join(rootDir, "data", "daemon.sock"), filter, hooks));
 	const runProcess = options.processRunner ?? spawnSync;
 	const makeId = options.idFactory ?? randomUUID;
+	const makeRequestId = options.requestIdFactory ?? randomUUID;
 	const feeds = new Map<string, TelegramFeed>();
 	let pending: { data: FeedEntry; changed: (event: TimelineEvent, feed: TelegramFeed) => void } | null = null;
 	let active: TelegramFeed | null = null;
 	let panel: TelegramStatsPanel | null = null;
 	let panelOwner: "feed" | "standalone" | null = null;
 	let panelClient: TimelinePort | null = null;
+	let compose: Pick<BotConfig, "id" | "name"> | null = null;
+	let sending = false;
+	let lastUi: ExtensionContext["ui"] | null = null;
+
+	const composeLabel = (bot: Pick<BotConfig, "id" | "name">) => bot.name === bot.id ? bot.id : `${bot.id} (${bot.name})`;
+	const showComposeStatus = (ui: ExtensionContext["ui"], busy = false) => {
+		if (!compose) {
+			ui.setStatus("telegram-compose", undefined);
+			return;
+		}
+		ui.setStatus("telegram-compose", `TELEGRAM · ${busy ? "SENDING" : "SEND"} AS ${composeLabel(compose)}`);
+	};
+	const closeCompose = (ui: ExtensionContext["ui"] | null = lastUi) => {
+		compose = null;
+		if (ui) ui.setStatus("telegram-compose", undefined);
+	};
+	const resolveBot = (arg: string | undefined, ui: ExtensionContext["ui"]): BotConfig | undefined => {
+		if (!arg) {
+			ui.notify("missing bot id; usage: /tg compose <bot-id>", "error");
+			return undefined;
+		}
+		try {
+			const bots = loadConfig(rootDir).bots;
+			const bot = bots.find((candidate) => candidate.id === arg);
+			if (bot) return bot;
+			ui.notify(`unknown bot id "${arg}"; configured bots: ${bots.map((candidate) => candidate.id).join(", ") || "(none)"}`, "error");
+		} catch (error) {
+			ui.notify(`config error: ${(error as Error).message}`, "error");
+		}
+		return undefined;
+	};
 
 	pi.registerEntryRenderer<FeedEntry>(ENTRY_TYPE, (entry, _renderOptions, theme) => {
 		const data = entry.data as FeedEntry | undefined;
@@ -236,15 +269,71 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	});
 
 	pi.on("session_shutdown", () => {
+		closeCompose();
 		for (const feed of feeds.values()) feed.dispose();
 		panelClient?.dispose();
 		panelClient = null;
 		active = null;
 	});
 
+	pi.on("input", async (event, ctx) => {
+		lastUi = ctx.ui;
+		if (!compose || event.source !== "interactive") return { action: "continue" };
+		const original = event.text;
+		if (event.images && event.images.length > 0) {
+			ctx.ui.setEditorText(original);
+			ctx.ui.notify("Telegram compose does not support attachments; remove them or leave compose mode", "error");
+			return { action: "handled" };
+		}
+		if (!original.trim()) {
+			ctx.ui.setEditorText(original);
+			ctx.ui.notify("Telegram message cannot be empty", "warning");
+			return { action: "handled" };
+		}
+		if (sending) {
+			ctx.ui.setEditorText(original);
+			ctx.ui.notify("A Telegram message is already being sent; this submission was not sent", "warning");
+			return { action: "handled" };
+		}
+		if (!active?.client.isConnected) {
+			closeCompose(ctx.ui);
+			ctx.ui.setEditorText(original);
+			ctx.ui.notify("Telegram daemon is disconnected; compose mode was closed and the message was not sent", "error");
+			return { action: "handled" };
+		}
+
+		const identity = compose;
+		sending = true;
+		showComposeStatus(ctx.ui, true);
+		try {
+			const result = await active.client.sendText(identity.id, original, makeRequestId());
+			if (result.ok) {
+				ctx.ui.notify(`Telegram sent as ${composeLabel(identity)} · #${result.messageId}`, "info");
+			} else {
+				ctx.ui.setEditorText(original);
+				if (result.code === "unknown_outcome") {
+					ctx.ui.notify("Telegram send result is unknown. Check the group before retrying to avoid a duplicate.", "warning");
+					closeCompose(ctx.ui);
+				} else {
+					ctx.ui.notify(`Telegram send failed (${result.code}): ${result.error}`, "error");
+					if (result.code === "service_unavailable") closeCompose(ctx.ui);
+				}
+			}
+		} catch (error) {
+			ctx.ui.setEditorText(original);
+			ctx.ui.notify(`Telegram send result is unknown. Check the group before retrying: ${String(error)}`, "warning");
+			closeCompose(ctx.ui);
+		} finally {
+			sending = false;
+			if (compose === identity) showComposeStatus(ctx.ui);
+		}
+		return { action: "handled" };
+	});
+
 	pi.registerCommand("tg", {
-		description: "Telegram: attach [bot] | more | detach | panel [bot|off] | status [bot] | start | stop | status-daemon",
+		description: "Telegram: attach [bot] | compose <bot|off> | more | detach | panel [bot|off] | status [bot] | start | stop | status-daemon",
 		handler: async (args, ctx) => {
+			lastUi = ctx.ui;
 			const [sub = "", botArg] = args.trim().split(/\s+/);
 			const daemonSub = sub === "start" || sub === "stop" || sub === "status-daemon";
 			if (!supported && !daemonSub) {
@@ -279,6 +368,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			if (sub === "attach") {
 				const filter = resolveFilter(botArg);
 				if (filter === undefined) return;
+				closeCompose(ctx.ui);
 				active?.detach("replaced by a new /tg attach");
 				panelClient?.dispose();
 				panelClient = null;
@@ -289,6 +379,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 					changed: (event, feed) => {
 						if (panelOwner === "feed") panel?.update(event.type === "stats" ? feed.stats : undefined, feed.status);
 						ctx.ui.setStatus("telegram", `Telegram · ${feed.status}`);
+						if (event.type === "disconnected" && active === feed) closeCompose(ctx.ui);
 					},
 				};
 				pi.appendEntry<FeedEntry>(ENTRY_TYPE, data);
@@ -296,12 +387,28 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 					pending = null;
 					ctx.ui.notify("Pi did not mount the Telegram transcript entry", "error");
 				}
+			} else if (sub === "compose") {
+				if (botArg === "off") {
+					closeCompose(ctx.ui);
+					ctx.ui.notify("Telegram compose mode is off; editor input goes to Pi", "info");
+					return;
+				}
+				if (!active?.client.isConnected) {
+					ctx.ui.notify("no connected Telegram feed; run /tg attach first and wait for the daemon connection", "error");
+					return;
+				}
+				const bot = resolveBot(botArg, ctx.ui);
+				if (!bot) return;
+				compose = { id: bot.id, name: bot.name };
+				showComposeStatus(ctx.ui);
+				ctx.ui.notify(`Telegram compose enabled: editor sends as ${composeLabel(compose)}. Run /tg compose off to return to Pi.`, "warning");
 			} else if (sub === "more") {
 				if (!active) ctx.ui.notify("no live Telegram feed; run /tg attach first", "warning");
 				else if (!active.more()) ctx.ui.notify(active.client.hasMore ? "Telegram history request already in progress" : "oldest Telegram record reached", "info");
 			} else if (sub === "detach") {
 				if (!active) ctx.ui.notify("no live Telegram feed", "warning");
 				else {
+					closeCompose(ctx.ui);
 					active.detach();
 					active = null;
 					if (panelOwner === "feed") panel?.update(undefined, "Telegram · detached");
@@ -371,7 +478,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim() || `daemon ${command}`;
 				ctx.ui.notify(output, result.status === 0 ? "info" : "error");
 			} else {
-				ctx.ui.notify("usage: /tg attach [bot] | more | detach | panel [bot|off] | status [bot] | start | stop | status-daemon", "info");
+				ctx.ui.notify("usage: /tg attach [bot] | compose <bot|off> | more | detach | panel [bot|off] | status [bot] | start | stop | status-daemon", "info");
 			}
 		},
 	});

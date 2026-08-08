@@ -265,3 +265,11 @@
 - IPC additive 增加 `send_message` / `send_result`；Telegram 成功后 DB 落库、live broadcast、ACK。401/普通失败可恢复，Telegram 已成功但 DB 失败或 socket ACK 丢失走 unknown/no-auto-retry 语义；observer callback 失败不把已发送消息翻成 failure。
 - 测试：manual service + IPC + real Unix observer client + canonical echo + agent send/cache regression 62 pass，含 4096 Unicode code-point 边界；typecheck 通过。
 - Cache impact: **NONE**——manual operator I/O 不调用 LLM、不改 system/tool/message grammar；provider token 增量 0。
+
+## 2026-08-08 (26) — Pi 原生 editor 显式 Telegram compose
+
+- `/tg compose <bot-id>` 显式选择唯一发送身份；attach 保持只读。Pi default footer 持续显示 `TELEGRAM · SEND AS id/name`，`compose off` 恢复默认 Pi 输入。
+- 只拦截 interactive `input` 并返回 `handled`，不创建 Pi session/provider-visible entry；RPC/extension source 原样 continue。附件/空文本阻止发送，明确失败恢复 editor 原文。
+- timeline client 以 request id 匹配 ACK，pending 上限 32、15 秒超时；ACK 前断线/IPC 错误/超时统一为 unknown outcome，恢复原文、关闭 compose、提示先查群且不自动重试。发送中第二次提交不会进入 socket。
+- attach 切换、detach、daemon disconnected 与 session shutdown 都清除 compose identity。真实 Unix socket ACK/timeout 和 fake Pi lifecycle 共 39 targeted tests 通过，`bun run check` 通过；真实 Pi/Telegram smoke 留 T14。
+- Cache impact: **NONE**——operator input 被 extension handled；不调用 LLM，不改 provider prefix/suffix、tool schema 或序列化 grammar，新增 token 为 0。

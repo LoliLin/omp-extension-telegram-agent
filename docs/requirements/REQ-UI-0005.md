@@ -1,6 +1,6 @@
 # REQ-UI-0005: 用 Pi 底部 editor 直接发送 Telegram 消息
 
-- **Status:** In progress（2026-08-08 daemon send service/IPC 已实现；Pi compose/editor T6 待实现）
+- **Status:** Implemented（2026-08-08 T5 daemon + T6 Pi compose/editor；真实 Pi/Telegram smoke 留到 T14 总验收）
 - **Priority:** P1
 - **Source:** 用户新增 REQ-LIST：「用底部的输入栏作为 bot 发送消息」
 - **依赖:** REQ-UI-0004、REQ-CONF-0001
@@ -69,9 +69,9 @@ Telegram feed 已在 Pi transcript 中显示，但 Pi 底部 editor 仍只会向
 
 ## 待决问题
 
-- `/tg attach A` 是否自动进入 compose A，还是必须显式 `/tg compose A`。为防误发，调查建议默认显式开启。
+- **已决：** `/tg attach A` 只选择观察范围，不自动打开发送；必须显式 `/tg compose A`。全局 attach 也可显式 compose 某个有效 bot，但 footer 始终显示唯一身份。
 
 ## 追溯
 
-- Plans: 实现前建立
-- Commits: 从 `Requirement:` git trailer 查
+- Plans: `PLAN-20260808-complete-new-reqs` T5/T6
+- Commits: `0b3fad0`（daemon contract）；Pi editor commit 从 `Requirement: REQ-UI-0005` trailer 查

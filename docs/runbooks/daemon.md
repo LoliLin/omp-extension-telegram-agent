@@ -34,6 +34,8 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 ```text
 /tg attach              # 全局视角：群消息 + 全部 bot LOCAL 事件
 /tg attach A            # 单 bot 视角：群消息 + 仅 A 的 LOCAL/usage
+/tg compose A           # 显式让原生 editor 以 A 身份发送纯文本
+/tg compose off         # 关闭发送模式，editor 恢复提交给 Pi agent
 /tg more                # 显式加载一页更早历史
 /tg detach              # 断开实时订阅，已显示内容保留
 /tg panel A             # 原生 widget 持续显示 A 的 usage
@@ -43,8 +45,9 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 ```
 
 - Telegram feed 是 Pi transcript 中一个 TUI-only custom entry；滚动、resize、选择、editor 与图片布局由 Pi fullscreen host 负责。
-- 当前普通 editor 提交仍发送给 Pi agent，**不会发送 Telegram**；该能力已调查为 `REQ-UI-0005`，尚未实现。
-- daemon 已有 additive `send_message` IPC 与 request-id 去重，但在 `/tg compose` 完成前没有用户入口；不要手工向 socket 写 JSON。
+- attach 永远是只读操作；只有显式 `/tg compose <bot-id>` 后，interactive editor 提交才会发 Telegram。default footer 会持续显示 `TELEGRAM · SEND AS <id/name>`；`compose off` 后输入恢复交给 Pi agent。
+- compose 仅支持纯文本。附件会被阻止；明确失败会把原文放回 editor。若 ACK 超时或 daemon 在发送中断线，结果可能未知：先检查群聊，不要直接重发；插件不会自动重试，并会安全关闭 compose。
+- RPC/extension source 不受 compose 影响。attach 切换、detach、daemon 断线或 Pi 退出都会关闭 compose；bot token 始终只在 daemon 内。
 - 当前 stats 仍是 Pi component widget；迁移到 default footer `setStatus` 的原生底栏样式见 `REQ-UI-0007`，尚未实现。
 - 当前 `/tg` 子命令没有参数补全；原生分级 completion 方案见 `REQ-UI-0008`，尚未实现。
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。
@@ -61,3 +64,5 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - `status` 说 not running 但进程在：pid 文件是残留 → `stop`/`start` 会自动清理/接管
 - 面板无数据：尚无 llm_runs（bot 从未被触发）
 - `/tg attach` 报「unknown bot id」：id 拼错，错误信息会列出全部配置的 id
+- `/tg compose` 报 no connected feed：先 `/tg attach [bot]` 并等 footer 显示 connected；compose 不会自行启动 daemon
+- 发送提示 unknown outcome：原文会恢复且 compose 自动关闭；先在 Telegram 群确认是否已出现，再决定是否重发

@@ -13,7 +13,7 @@ import {
 	TelegramFeed,
 	type TelegramExtensionOptions,
 } from "../.pi/extensions/tg-extension.ts";
-import type { BotStats, TimelineItem } from "../src/ipc.ts";
+import type { BotStats, SendMessageResult, TimelineItem } from "../src/ipc.ts";
 import type { TimelineEvent, TimelineHooks, TimelinePort } from "../src/plugin/timeline.ts";
 
 const theme = {
@@ -28,6 +28,14 @@ class FakeTimeline implements TimelinePort {
 	isLoadingOlder = false;
 	disposed = false;
 	moreRequests = 0;
+	readonly sendCalls: { botId: string; text: string; requestId: string }[] = [];
+	sendHandler: (botId: string, text: string, requestId: string) => Promise<SendMessageResult> = async (botId, _text, requestId) => ({
+		requestId,
+		botId,
+		ok: true,
+		chatId: -1001,
+		messageId: 42,
+	});
 
 	constructor(readonly filter: string | null, private readonly hooks: TimelineHooks) {}
 
@@ -41,6 +49,11 @@ class FakeTimeline implements TimelinePort {
 		if (this.disposed || this.isLoadingOlder || !this.hasMore) return false;
 		this.moreRequests++;
 		return true;
+	}
+
+	sendText(botId: string, text: string, requestId: string): Promise<SendMessageResult> {
+		this.sendCalls.push({ botId, text, requestId });
+		return this.sendHandler(botId, text, requestId);
 	}
 
 	dispose(): void {
@@ -61,6 +74,9 @@ interface FakeHost {
 	widgets: Map<string, Tui.Component>;
 	widgetInputs: unknown[];
 	statuses: string[];
+	statusUpdates: { key: string; text: string | undefined }[];
+	editorTexts: string[];
+	input(event: { text: string; source?: "interactive" | "rpc" | "extension"; images?: unknown[] }): Promise<{ action: string } | undefined>;
 	restore(data: unknown): Tui.Component | undefined;
 	shutdown(): void;
 }
@@ -72,14 +88,22 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 	const widgets = new Map<string, Tui.Component>();
 	const widgetInputs: unknown[] = [];
 	const statuses: string[] = [];
+	const statusUpdates: FakeHost["statusUpdates"] = [];
+	const editorTexts: string[] = [];
 	const commands = new Map<string, { handler(args: string, ctx: unknown): Promise<void> }>();
 	const renderers = new Map<string, (entry: { data?: unknown }, options: unknown, theme: Theme) => Tui.Component | undefined>();
-	const handlers = new Map<string, (() => void)[]>();
+	const shutdownHandlers: (() => void)[] = [];
+	let inputHandler: ((event: unknown, ctx: unknown) => Promise<{ action: string } | undefined> | { action: string } | undefined) | undefined;
 	const ctx = {
 		mode: "tui",
 		ui: {
 			notify: (text: string, level: string) => notifies.push({ text, level }),
-			setStatus: (_key: string, text: string | undefined) => statuses.push(text ?? ""),
+			setStatus: (key: string, text: string | undefined) => {
+				statuses.push(text ?? "");
+				statusUpdates.push({ key, text });
+			},
+			setEditorText: (text: string) => editorTexts.push(text),
+			getEditorText: () => editorTexts.at(-1) ?? "",
 			setWidget: (key: string, input: unknown) => {
 				widgetInputs.push(input);
 				if (input === undefined) widgets.delete(key);
@@ -94,13 +118,18 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 			const component = renderers.get(type)?.({ data }, {}, theme);
 			if (component) entries.push({ data, component });
 		},
-		on: (event: string, handler: () => void) => handlers.set(event, [...(handlers.get(event) ?? []), handler]),
+		on: (event: string, handler: (event?: unknown, ctx?: unknown) => unknown) => {
+			if (event === "input") inputHandler = handler as typeof inputHandler;
+			else if (event === "session_shutdown") shutdownHandlers.push(() => handler());
+		},
 	};
 	let id = 0;
+	let requestId = 0;
 	registerTelegramExtension(api as never, {
 		rootDir: join(import.meta.dir, ".."),
 		hostVersion: "0.84.1",
 		idFactory: () => `feed-${++id}`,
+		requestIdFactory: () => `send-${++requestId}`,
 		timelineFactory: (filter, hooks) => {
 			const client = new FakeTimeline(filter, hooks);
 			clients.push(client);
@@ -116,8 +145,11 @@ function makeHost(overrides: Partial<TelegramExtensionOptions> = {}): FakeHost {
 		widgets,
 		widgetInputs,
 		statuses,
+		statusUpdates,
+		editorTexts,
+		input: async (event) => await inputHandler?.({ type: "input", source: "interactive", ...event }, ctx),
 		restore: (data) => renderers.get("telegram-chat")?.({ data }, {}, theme),
-		shutdown: () => handlers.get("session_shutdown")?.forEach((handler) => handler()),
+		shutdown: () => shutdownHandlers.forEach((handler) => handler()),
 	};
 }
 
@@ -189,6 +221,104 @@ describe("native Pi Telegram extension", () => {
 		expect(host.clients[1]!.moreRequests).toBe(1);
 		await host.command("detach");
 		expect(host.clients[1]!.disposed).toBe(true);
+	});
+
+	test("explicit compose sends interactive editor text once and keeps it out of Pi", async () => {
+		const host = makeHost();
+		await host.command("attach A");
+		await host.command("compose A");
+
+		const result = await host.input({ text: "hello" });
+
+		expect(result).toEqual({ action: "handled" });
+		expect(host.clients[0]!.sendCalls).toEqual([{ botId: "A", text: "hello", requestId: "send-1" }]);
+		expect(host.entries).toHaveLength(1);
+		expect(host.editorTexts).toHaveLength(0);
+		expect(host.statusUpdates.some((update) => update.key === "telegram-compose" && update.text?.includes("SEND AS A"))).toBe(true);
+		expect(host.notifies.at(-1)?.text).toContain("#42");
+	});
+
+	test("read-only, compose-off and non-interactive inputs continue to Pi unchanged", async () => {
+		const host = makeHost();
+		await host.command("attach");
+		expect(await host.input({ text: "normal Pi prompt" })).toEqual({ action: "continue" });
+		await host.command("compose nobody");
+		expect(host.notifies.at(-1)?.text).toContain("configured bots");
+		expect(await host.input({ text: "still a Pi prompt" })).toEqual({ action: "continue" });
+
+		await host.command("compose A");
+		expect(await host.input({ text: "rpc prompt", source: "rpc" })).toEqual({ action: "continue" });
+		expect(await host.input({ text: "extension prompt", source: "extension" })).toEqual({ action: "continue" });
+		await host.command("compose off");
+		expect(await host.input({ text: "back to Pi" })).toEqual({ action: "continue" });
+		expect(host.clients[0]!.sendCalls).toHaveLength(0);
+	});
+
+	test("compose blocks attachments and restores text after an explicit daemon failure", async () => {
+		const host = makeHost();
+		await host.command("attach A");
+		await host.command("compose A");
+
+		expect(await host.input({ text: "caption", images: [{}] })).toEqual({ action: "handled" });
+		expect(host.clients[0]!.sendCalls).toHaveLength(0);
+		expect(host.editorTexts.at(-1)).toBe("caption");
+		expect(host.notifies.at(-1)?.text).toContain("does not support attachments");
+
+		host.clients[0]!.sendHandler = async (botId, _text, requestId) => ({
+			requestId,
+			botId,
+			ok: false,
+			code: "telegram_error",
+			error: "Unauthorized",
+		});
+		expect(await host.input({ text: "keep me" })).toEqual({ action: "handled" });
+		expect(host.editorTexts.at(-1)).toBe("keep me");
+		expect(host.notifies.at(-1)?.text).toContain("telegram_error");
+
+		const before = host.clients[0]!.sendCalls.length;
+		expect(await host.input({ text: "   " })).toEqual({ action: "handled" });
+		expect(host.clients[0]!.sendCalls).toHaveLength(before);
+	});
+
+	test("a pending send suppresses duplicates and unknown outcome closes compose without retry", async () => {
+		const host = makeHost();
+		await host.command("attach A");
+		await host.command("compose A");
+		let finish: ((result: SendMessageResult) => void) | undefined;
+		host.clients[0]!.sendHandler = (_botId, _text, _requestId) => new Promise((resolve) => { finish = resolve; });
+
+		const first = host.input({ text: "possibly sent" });
+		await Promise.resolve();
+		expect(await host.input({ text: "do not duplicate" })).toEqual({ action: "handled" });
+		expect(host.clients[0]!.sendCalls).toHaveLength(1);
+		finish?.({ requestId: "send-1", botId: "A", ok: false, code: "unknown_outcome", error: "ack lost" });
+		expect(await first).toEqual({ action: "handled" });
+
+		expect(host.editorTexts).toContain("possibly sent");
+		expect(host.notifies.at(-1)?.text).toContain("Check the group before retrying");
+		expect(await host.input({ text: "now Pi owns this" })).toEqual({ action: "continue" });
+		expect(host.clients[0]!.sendCalls).toHaveLength(1);
+	});
+
+	test("disconnect, detach and shutdown safely clear compose identity", async () => {
+		const disconnected = makeHost();
+		await disconnected.command("attach A");
+		await disconnected.command("compose A");
+		disconnected.clients[0]!.isConnected = false;
+		disconnected.clients[0]!.emit({ type: "disconnected", reason: "daemon disconnected" });
+		expect(await disconnected.input({ text: "Pi after disconnect" })).toEqual({ action: "continue" });
+
+		const detached = makeHost();
+		await detached.command("attach A");
+		await detached.command("compose A");
+		await detached.command("detach");
+		expect(await detached.input({ text: "Pi after detach" })).toEqual({ action: "continue" });
+
+		const shutdown = makeHost();
+		await shutdown.command("attach A");
+		await shutdown.command("compose A");
+		shutdown.shutdown();
+		expect(await shutdown.input({ text: "Pi after shutdown" })).toEqual({ action: "continue" });
 	});
 
 	test("panel uses a Pi component factory and disposes its standalone client", async () => {

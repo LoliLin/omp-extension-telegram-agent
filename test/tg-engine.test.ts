@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { IpcServer } from "../src/daemon/ipc-server.ts";
+import type { SendMessageRequest } from "../src/ipc.ts";
 import { TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
 
 let db: Database;
@@ -62,6 +63,54 @@ function allItems(log: EventLog) {
 }
 
 describe("Pi plugin timeline client", () => {
+	test("manual send resolves the matching daemon acknowledgement", async () => {
+		server.stop();
+		const requests: SendMessageRequest[] = [];
+		server = new IpcServer(
+			db,
+			sockPath,
+			new Map([["A", "小雪"]]),
+			new Map([["A", 777]]),
+			async (request) => {
+				requests.push(request);
+				return { requestId: request.requestId, botId: request.botId, ok: true, chatId: -1001, messageId: 73 };
+			},
+		);
+		server.start();
+		const { client } = await connect("A");
+
+		const result = await client.sendText("A", "hello", "request-1");
+		client.dispose();
+
+		expect(requests).toEqual([{ type: "send_message", requestId: "request-1", botId: "A", text: "hello" }]);
+		expect(result).toEqual({ requestId: "request-1", botId: "A", ok: true, chatId: -1001, messageId: 73 });
+	});
+
+	test("missing send acknowledgement becomes unknown without retrying", async () => {
+		server.stop();
+		let calls = 0;
+		server = new IpcServer(
+			db,
+			sockPath,
+			new Map([["A", "小雪"]]),
+			new Map([["A", 777]]),
+			async () => {
+				calls++;
+				return await new Promise(() => {});
+			},
+		);
+		server.start();
+		const log = new EventLog();
+		const client = new TimelineClient(sockPath, "A", { onEvent: (event) => log.events.push(event) }, 20);
+		await client.connect();
+
+		const result = await client.sendText("A", "only once", "request-timeout");
+		client.dispose();
+
+		expect(calls).toBe(1);
+		expect(result).toMatchObject({ requestId: "request-timeout", botId: "A", ok: false, code: "unknown_outcome" });
+	});
+
 	test("snapshot emits raw items and merged DB stats", async () => {
 		insertMsg(100, 1754600000, "hello");
 		insertEvt("A", 1754600001 * 1000);
