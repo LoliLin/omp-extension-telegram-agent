@@ -326,7 +326,7 @@ function emitTelemetry(options: EnsureVisionOptions, telemetry: VisionTelemetry)
 	}
 }
 
-function mediaMime(filePath: string): VisionDescribeInput["mimeType"] | null {
+export function visionMimeForPath(filePath: string): VisionDescribeInput["mimeType"] | null {
 	const extension = filePath.split(".").pop()?.toLowerCase();
 	if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
 	if (extension === "png") return "image/png";
@@ -372,7 +372,7 @@ async function ensureVisionInner(
 		return null;
 	}
 
-	const mimeType = mediaMime(filePath);
+	const mimeType = visionMimeForPath(filePath);
 	if (!mimeType) {
 		db.query("UPDATE media SET vision = ? WHERE file_unique_id = ?").run(
 			JSON.stringify({ model: "none", kind, text: null, unsupported: true, outcome: "unsupported_format", at: Date.now() }),

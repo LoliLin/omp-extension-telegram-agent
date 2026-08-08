@@ -653,3 +653,11 @@
 - vision event测试锁定9个allowlist字段，production不记录identity/path/prompt/description/upstream body。只读current-deployment复核configured catalog 220/pending 0、历史cache hit 98.74%，不输出身份或hash。
 - 验证：flush/vision/sticker/cache 52 pass / 416 assertions；全量368 / 4815、`bun run check`、cache v5 golden和双mdBook link/build门禁通过。
 - Cache impact: **NONE**——只改变既有必要vision的等待调度；system/tool/message/summary grammar与context epoch不变，调用数不增，两路并发只降低多媒体batch墙钟时间。
+
+## 2026-08-08 (75) — 增加匿名视觉基准
+
+- 新增显式`--photo`/`--sticker`才运行的本地脚本；每类1–10次顺序调用同一Pi executor，可选canonical model ref。fixture先做静态格式和8 MiB边界校验；无DB/Telegram写入，任何失败只输出固定category，不回显path或上游正文。
+- 聚合报告只含model、attempt/success、latency与input/output token的mean/p50/p95、reasoning、cost、outcome及source/converted bytes bucket；description从不进入report。photo/sticker分别用调查基线2倍作为smoke gate，失败、超时、reasoning>0或p95越界均如实exit 1。
+- current deployment用既有本地photo/static sticker各n=1复测：photo 3312ms / 994 input / 53 output / 0 reasoning / $0.000262；sticker 4309ms / 332 input / 70 output / 0 reasoning / $0.000150，均成功且低于7738ms/5376ms gate。n=1的p50=p95，仅证明本次验收，不外推分布。
+- benchmark/vision/cache目标测试18 pass / 80 assertions；全量372 / 4836、typecheck、cache v5 golden和双mdBook link/build门禁通过。
+- Cache impact: **NONE**——脚本完全opt-in、每个显式run对应一次视觉调用；daemon/session/provider聊天grammar、epoch与日常每turn token均不变。

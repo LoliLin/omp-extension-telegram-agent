@@ -36,6 +36,7 @@ bun run scripts/e2e-agent.ts --bot <id>              # 真实链路 e2e（需 .e
 bun run scripts/e2e-compaction.ts --bot <id>         # compaction e2e（需 .env）
 bun run scripts/e2e-compaction-manual.ts --bot <id>  # 手动 compact() 验证 compaction_end 成功/失败路径（需 .env；1M window 下 threshold e2e 已无法廉价触发自动 compaction）
 bun run scripts/analyze-routing.ts                    # 只读、零网络的current-effective routing审计
+bun run scripts/benchmark-vision.ts --photo <local.jpg> --sticker <local.webp> --runs 3  # opt-in Pi视觉聚合基准
 ```
 
 ## 当前状态
@@ -57,7 +58,7 @@ bun run scripts/analyze-routing.ts                    # 只读、零网络的cur
 | flush/compaction 状态机（REQ-AGENT-0001） | ✅ | 2026-08-07 test/flush.test.ts + test/search.test.ts：慢 vision 并发触发不重复序列化、send 失败不标 exposed 可重试、compaction 失败/中止/空摘要不错切 epoch、exposure 与 kept tail（N≠40）对齐、search 10s 超时与响应护栏、send 先校验后发 |
 | ingestion/poller 可靠性（REQ-TG-0001） | ✅ | 2026-08-07 test/ingest.test.ts + test/poller.test.ts：二次编辑 revision 全链（v1 按原始 date、v2 按首次 edit_date 作 key）、ingest 失败不推进 offset 且重放无重复、setBotState 失败走 backoff poller 存活、stop 发生在长轮询期间则丢弃返回批次、401 fail-fast |
 | vision lazy/cache | ✅ | 2026-08-07 真实群 sticker/photo 语义正确，双 bot file_id 映射 |
-| provider前视觉gate（REQ-VISION-0001 T13k1a/T13k1b） | ✅ fake / ⏳ opt-in benchmark | 2026-08-08 1/2/3 uncached media deferred fixture锁并发峰值1/2/2、第三项第二波、release前0 provider submit、release后单次suffix直接含描述；failure/unsupported单次fallback且exposed后不重写，persistent cache零Telegram/describe。同identity in-flight只下载/识别一次；catalog两路后台不阻塞且当前prompt/hash snapshot不变。vision telemetry payload精确allowlist字段且无identity/path/description；flush/vision/sticker/cache 52 pass / 416 assertions，typecheck与cache v5 golden通过。匿名真实基准留T13k1c。 |
+| provider前视觉gate（REQ-VISION-0001 T13k1a–T13k1c） | ✅ fake + real opt-in smoke | 2026-08-08 1/2/3 uncached media deferred fixture锁并发峰值1/2/2、第三项第二波、release前0 provider submit、release后单次suffix直接含描述；failure/unsupported单次fallback且exposed后不重写，persistent cache零Telegram/describe。同identity in-flight只下载/识别一次；catalog两路后台不阻塞且当前prompt/hash snapshot不变。vision telemetry/report精确allowlist且无identity/path/description。benchmark unit 4 cases覆盖strict args、p50/p95/token/cost/gate、failure/reasoning与path redaction；current Pi各n=1 photo 3312ms、sticker 4309ms、reasoning均0且2×gate通过（n=1不代表分布）。 |
 | vision update transport（REQ-UI-0006 T7） | ✅ | 2026-08-08 50 targeted pass：新描述写库后 identity-only callback、concurrent/cache 共用且 describe call=1、empty/unsupported 不发布、snapshot identity/trim、additive IPC 向所有 listener 广播；sticker/flush/timeline regression 与 `bun run check` 通过。native card merge/real smoke 留 T8/T14。 |
 | native live vision card（REQ-UI-0006 T8） | ✅ unit / ⏳ real smoke | 2026-08-08 44 plugin/timeline/IPC pass：update-before-live、later history、256-entry bound、重复幂等、同 uid 多卡片原位更新、`视觉理解` 置于 media 下方、ANSI/OSC sanitize、Pi entry 不增长；`bun run check` 通过。真实 live photo/sticker 留 T14。 |
 | IPC/插件数据层健壮性（REQ-IPC-0001） | ✅ | 2026-08-08 test/ipc.test.ts 14 条 + test/tg-engine.test.ts 5 条：streaming FrameDecoder、多字节边界、复合游标、队列上限、socket 600、过滤/stats、ANSI/OSC strip，以及真实 Unix socket snapshot/live/more/断线 |
@@ -90,7 +91,7 @@ bun run scripts/analyze-routing.ts                    # 只读、零网络的cur
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |
 | threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ⏳ Phase 9 | - |
-| 当前全量回归 | ✅ | 2026-08-08 `bun test`：368 pass / 0 fail / 4815 assertions；`bun run check` 通过；cache v5 golden 6/6；双mdBook 18 Markdown/98 links与21 HTML/608 links通过 |
+| 当前全量回归 | ✅ | 2026-08-08 `bun test`：372 pass / 0 fail / 4836 assertions；`bun run check` 通过；cache v5 golden 6/6；双mdBook 18 Markdown/98 links与21 HTML/608 links通过 |
 
 ## 已知 flaky
 

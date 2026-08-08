@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：T13k1a/b已删除视觉`codex exec` hack并实现provider前两路gate；daemon唯一Pi runtime、静态转换、失败fallback、catalog snapshot和脱敏telemetry均有fake回归。下一步T13k1c匿名benchmark，再做photo readiness、TinyFish与T14总验收；PLAT/VISION尚未勾选。
+2026-08-08：T13k1a–c已删除视觉`codex exec` hack并实现shared Pi、provider前两路gate与匿名benchmark；当前photo/sticker各n=1真实gate通过且reasoning=0。下一步用真实hash勾选PLAT/VISION，再做photo readiness、TinyFish与T14总验收。
 
 ## 已完成
 
@@ -12,7 +12,7 @@
 - `src/plugin/timeline.ts` 只保留 IPC、history cursor、dedupe、stats 与有界媒体读取；旧 `src/tui/engine.ts` 已删除。
 - `/tg config`、`/tg attach [bot]`、显式 `/tg compose <bot|off>`、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]` 与 daemon commands 可用。
 - package manifest、项目 Pi launcher、fullscreen settings、native Image 和 Pi `FooterComponent` telemetry 已落地。
-- 全量验证：368 tests pass / 0 fail / 4815 assertions；`bun run check`、cache v5 golden、双mdBook 18 Markdown/98 links与21 HTML/608 links通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Telegram群control及Kitty/Ghostty媒体、Rich/reply/组合发送trace留T14。
+- 全量验证：372 tests pass / 0 fail / 4836 assertions；`bun run check`、cache v5 golden、双mdBook 18 Markdown/98 links与21 HTML/608 links通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Telegram群control及Kitty/Ghostty媒体、Rich/reply/组合发送trace留T14。
 
 ## 当前实施队列
 
