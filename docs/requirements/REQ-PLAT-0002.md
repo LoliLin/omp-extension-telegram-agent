@@ -1,6 +1,6 @@
 # REQ-PLAT-0002: 复用 Pi 的模型设置与认证
 
-- **Status:** In progress（2026-08-08 T13j1–T13j3 已实现；shared vision runtime 待完成）
+- **Status:** Completed（2026-08-08；实现与真实脱敏 smoke 均通过）
 - **Priority:** P0
 - **Source:** 用户新增 REQ-LIST：「直接复用 Pi 的配置，不要在项目配置里填写 API key；已经用 Pi 登录 DeepSeek 和 Codex」
 - **依赖:** REQ-PLAT-0001、REQ-ONBOARD-0001
@@ -14,7 +14,8 @@
 - 项目固定的 Pi 0.84.1 中，`ModelRuntime.create()` 默认读取 Pi agent 目录的 `auth.json`、`models.json`，并通过 `hasConfiguredAuth()` / `completeSimple()`统一处理 API key、OAuth 与 refresh。
 - `SettingsManager.create(projectRoot, getAgentDir())`会合并 Pi global/project settings，并公开 `defaultProvider`、`defaultModel`、`defaultThinkingLevel`。
 - 当前机器的非敏感元数据确认：Pi 已配置 `deepseek` API-key credential 与 `openai-codex` OAuth credential；默认模型为 `deepseek/deepseek-v4-flash`，`openai-codex/gpt-5.6-luna`支持 image input。检查过程没有读取或打印 credential 值。
-- 项目当前 `configureBotModelRuntime()`先把项目 secret 注入 runtime，正是重复来源。多 bot 可以共享一个 Pi `ModelRuntime`；每 bot 的模型选择不需要复制 credential。
+- 2026-08-08 completion smoke 使用当前 Pi credential 各执行一次脱敏真实请求：DeepSeek text 为 `ok`、795ms、8 input / 1 output / 0 reasoning token、$0.0000014；Codex Luna low image 的 photo/static-sticker 样本均为 `ok`、0 reasoning token。只记录 status/usage/latency/cost 聚合，没有输出 prompt、response、媒体、路径或 credential。
+- 调查时的 `configureBotModelRuntime()`曾先把项目 secret 注入 runtime；实现现已删除该重复来源。多 bot 共享一个 Pi `ModelRuntime`，每 bot 的模型选择不复制 credential。
 - `auxiliary_visual_model`表达的是任务模型选择，不是认证。它可以显式选择 Pi catalog 中的视觉模型与 low reasoning，但必须使用同一个 Pi runtime/auth。
 
 ## 目标
@@ -80,4 +81,5 @@ Pi 成为 LLM provider、模型目录和认证的唯一事实来源。项目配�
 ## 追溯
 
 - Plans: `PLAN-20260808-complete-new-reqs#T13g/T13j`
-- Commits: 从`Requirement: REQ-PLAT-0002` git trailer查
+- Behavior commits: `0859490`（移除项目 credential）、`f30e22c`（Pi defaults/shared runtime）、`c95c695`（keyless onboarding）、`f4ff63b`（shared Pi vision executor）
+- 完整查询：从 `Requirement: REQ-PLAT-0002` git trailer 查

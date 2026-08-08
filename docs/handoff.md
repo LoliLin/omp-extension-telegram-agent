@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：T13k1a–c已删除视觉`codex exec` hack并实现shared Pi、provider前两路gate与匿名benchmark；当前photo/sticker各n=1真实gate通过且reasoning=0。下一步用真实hash勾选PLAT/VISION，再做photo readiness、TinyFish与T14总验收。
+2026-08-08：REQ-PLAT-0002已用四个behavior hash关闭，当前Pi credential的DeepSeek text与Luna low image脱敏真实smoke均通过。下一步关闭VISION traceability，再做photo readiness、TinyFish、editor bot selector与T14总验收。
 
 ## 已完成
 
@@ -41,7 +41,7 @@
 23. **新增实施队列 T13h–T13m**：先写单目录单群/极简成本原则和routing审计，再以Pi全局settings/auth共享runtime替代项目provider key；动态群media继续在provider前同步并改用Luna low，photo另做零LLM后台precache，最后给既有search tool增加有界TinyFish fetch。调查实证：概率bucket约67/33正常；photo缺path是下载时机；Luna low真实photo/static sticker各1次约3.87s/$0.000282与2.69s/$0.000124，样本不外推。
 24. **已实现 `REQ-DOC-0002`（`dfc23b5`）**：project拥有“最少机制、完整边界”六原则与无namespace资源清单；中英operations解释history/session/offset/PID/socket隔离和第二群安全做法；AGENTS/development/maintainer加入可执行减法检查。7 docs tests、双mdBook links、全量340/4641与typecheck通过。
 25. **已实现 `REQ-ROUTE-0002`（`a1321f1`）**：production loader + readonly SQLite只返回identity/trigger code，100,000连续id property锁0.66/0.34互斥；报告匿名拆分assignment、partial lifecycle、run与public。验收快照重放2,046 probability为67.06/32.94%，started为66.74/33.26%，public为52.05/47.95%，确认采样正常而口径不同。
-26. **进行中 `REQ-PLAT-0002`**：T13j1 `0859490`移除项目provider secret，T13j2 `f30e22c`合并Pi defaults并建立daemon shared runtime；T13j3已让fresh `/tg config`在dialog/写入前预检Pi model/auth，生成config继承Pi，`.env`只写Telegram token。视觉复用仍由T13k1完成后再勾选。
+26. **已完成 `REQ-PLAT-0002`（`0859490` + `f30e22c` + `c95c695` + `f4ff63b`）**：项目不再拥有provider secret；Pi defaults/auth与单shared runtime覆盖chat和vision，fresh `/tg config`只收Telegram配置。当前credential的DeepSeek text与Luna low image真实smoke只输出聚合并通过。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 

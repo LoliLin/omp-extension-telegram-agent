@@ -661,3 +661,11 @@
 - current deployment用既有本地photo/static sticker各n=1复测：photo 3312ms / 994 input / 53 output / 0 reasoning / $0.000262；sticker 4309ms / 332 input / 70 output / 0 reasoning / $0.000150，均成功且低于7738ms/5376ms gate。n=1的p50=p95，仅证明本次验收，不外推分布。
 - benchmark/vision/cache目标测试18 pass / 80 assertions；全量372 / 4836、typecheck、cache v5 golden和双mdBook link/build门禁通过。
 - Cache impact: **NONE**——脚本完全opt-in、每个显式run对应一次视觉调用；daemon/session/provider聊天grammar、epoch与日常每turn token均不变。
+
+## 2026-08-08 (76) — 关闭Pi认证与模型复用需求
+
+- 用真实behavior commits记录REQ-PLAT-0002完成：项目credential收口`0859490`、Pi defaults/shared runtime `f30e22c`、keyless onboarding `c95c695`、shared vision executor `f4ff63b`；REQ-LIST只在全部AC满足后勾选。
+- completion audit确认canonical source/example/user steps无provider credential字段；`src/config.ts`只保留明确的legacy接受后丢弃边界，历史REQ保留迁移背景。测试文档不再把T11的旧per-bot key/runtime当当前架构。
+- 当前Pi credential执行一次不回显内容的DeepSeek text completion：ok、795ms、8 input / 1 output / 0 reasoning token、$0.0000014；Luna low image证据复用匿名photo/static-sticker smoke，二者均ok且0 reasoning。所有真实调用只记录status/usage/latency/cost聚合。
+- 验证沿用行为提交后的全量372 / 4836、typecheck、cache v5 golden与双mdBook gate；本次文档变更另跑docs gate和diff check。
+- Cache impact: **NONE**——completion只更新追溯与验收记录；provider-visible bytes、runtime行为、context epoch、调用数与每turn token不变。
