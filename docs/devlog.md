@@ -502,3 +502,10 @@
 - Context7与当前Pi源码确认`ImageOptions.maxWidthCells/maxHeightCells`就是公开约束，Pi继续负责比例、窄宽度clamp、Kitty/Ghostty crop、resize与fallback。结合`better-ui`的既有组件/密度约束，实施固定为sticker 24×12、photo维持56×16，不加容器、动画或协议代码。
 - AC将锁forced Kitty方形wire placement、WebP转换后原位尺寸、vision/label、多宽度与photo不回归；真实Kitty/Ghostty视觉smoke并入T14。
 - Cache impact: **NONE（docs/research only）**。未来实现也只改变TUI Image options，不改图片bytes、IPC/DB/provider、vision/LLM调用或context epoch。
+
+## 2026-08-08 (56) — 缩小 Pi 原生 sticker 卡片
+
+- `itemComponent()`按媒体语义选择Pi `Image`公开尺寸上限：sticker为24×12，photo等其他图片仍为56×16。Pi继续独占比例、窄宽度clamp、resize/crop、terminal协议与fallback；没有新增布局器、escape或图片处理分支。
+- forced Kitty回归锁定方形sticker实际24×12、photo实际32×16；40/80/120列逐行不溢出，sticker label/emoji/vision文案保留。既有WebP异步转换用例同时确认转换完成后的同一卡片仍为24×12。
+- extension/engine targeted 51 tests / 586 assertions；全量287 / 4196、typecheck、cache v5 golden与diff check通过。真实Kitty/Ghostty视觉smoke并入T14。
+- Cache impact: **NONE**——只改变TUI `ImageOptions`；图片bytes、IPC/SQLite/session/provider grammar、vision/LLM调用、context epoch及每turn token均不变。

@@ -460,7 +460,10 @@ export function itemComponent(item: TimelineItem, theme: Theme, resolveMedia: Me
 	if (item.mediaKind) {
 		box.addChild(new Tui.Text(theme.fg("muted", `[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]`), 0, 0));
 		const image = resolveMedia(item);
-		if (image) box.addChild(new Tui.Image(image.base64, image.mime, { fallbackColor: (text) => theme.fg("muted", text) }, { maxWidthCells: 56, maxHeightCells: 16, filename: basename(image.filename) }));
+		const imageBounds = item.mediaKind === "sticker"
+			? { maxWidthCells: 24, maxHeightCells: 12 }
+			: { maxWidthCells: 56, maxHeightCells: 16 };
+		if (image) box.addChild(new Tui.Image(image.base64, image.mime, { fallbackColor: (text) => theme.fg("muted", text) }, { ...imageBounds, filename: basename(image.filename) }));
 		if (item.mediaDesc?.trim()) box.addChild(new Tui.Text(theme.fg("muted", `视觉理解 · ${sanitize(item.mediaDesc.trim())}`), 0, 0));
 	}
 	return box;

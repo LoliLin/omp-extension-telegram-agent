@@ -71,6 +71,18 @@ function firstKittyPayload(rendered: string): string | null {
 	return separator < 0 || end < 0 ? null : rendered.slice(separator + 1, end);
 }
 
+function firstKittyPlacement(rendered: string): { columns: number; rows: number } | null {
+	const start = rendered.indexOf("\x1b_G");
+	const separator = rendered.indexOf(";", start);
+	if (start < 0 || separator < 0) return null;
+	const controls = new Map(
+		rendered.slice(start + "\x1b_G".length, separator).split(",").map((control) => control.split("=", 2) as [string, string]),
+	);
+	const columns = Number(controls.get("c"));
+	const rows = Number(controls.get("r"));
+	return Number.isFinite(columns) && Number.isFinite(rows) ? { columns, rows } : null;
+}
+
 class FakeTimeline implements TimelinePort {
 	isConnected = false;
 	hasMore = true;
@@ -878,11 +890,37 @@ describe("native Pi Telegram extension", () => {
 			expect(host.renderRequests.count).toBeGreaterThan(rendersBeforeCompletion);
 			expect(payload).not.toBeNull();
 			expect(pngSignature(payload!)).toBe("89504e470d0a1a0a");
+			expect(firstKittyPlacement(convertedFrame)).toEqual({ columns: 24, rows: 12 });
 			expect(conversionCalls).toBe(1);
 			expect(mediaSlot.children[0]).not.toBe(mediaCardBefore);
 			expect(unrelatedSlot.children[0]).toBe(unrelatedCardBefore);
 		} finally {
 			host.shutdown();
+			unlinkSync(path);
+		}
+	});
+
+	test("sticker Image stays compact while photo retains its native detail bounds", () => {
+		Tui.setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		const path = writeMediaFixture("png", TINY_PNG);
+		try {
+			for (const width of [40, 80, 120]) {
+				const sticker = itemComponent({
+					...message,
+					text: null,
+					mediaKind: "sticker",
+					stickerEmoji: "👋",
+					mediaDesc: "挥手贴纸",
+					mediaPath: path,
+				}, theme).render(width);
+				const photo = itemComponent({ ...message, text: null, mediaKind: "photo", mediaPath: path }, theme).render(width);
+				expect(firstKittyPlacement(sticker.join("\n"))).toEqual({ columns: 24, rows: 12 });
+				expect(firstKittyPlacement(photo.join("\n"))).toEqual({ columns: 32, rows: 16 });
+				expect(Tui.stripTerminalSequences(sticker.join("\n"))).toContain("[sticker 👋]");
+				expect(Tui.stripTerminalSequences(sticker.join("\n"))).toContain("视觉理解 · 挥手贴纸");
+				for (const line of [...sticker, ...photo]) expect(Tui.visibleWidth(line)).toBeLessThanOrEqual(width);
+			}
+		} finally {
 			unlinkSync(path);
 		}
 	});
