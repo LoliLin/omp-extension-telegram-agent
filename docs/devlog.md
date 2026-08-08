@@ -589,3 +589,11 @@
 - Documentation workflow把checkout、setup-bun、configure/upload/deploy Pages action固定到当前完整release SHA；mdBook x86_64 Linux archive同时固定版本与SHA-256。PR/手工/main共用check并上传单一artifact，仅main push deploy job取得pages/id-token write，无secret；同ref新run取消旧run。
 - 维护指南现在给出真实本地命令、GitHub Actions唯一发布入口和一次性Pages Source设置；不支持手改gh-pages或上传未检查目录。targeted 4 tests / 24 assertions、全量337 / 4603、typecheck与diff check通过；首次GitHub-hosted run需合并后观察。
 - Cache impact: **NONE**——只新增离线文档构建、测试与CI配置；runtime/provider/session/IPC/DB bytes、context epoch、模型调用和每turn token均不变。
+
+## 2026-08-08 (67) — 正式化新增的媒体、路由、检索与Pi复用需求
+
+- 把REQ-LIST中六条raw note改写为SEARCH-0001、UI-0014、ROUTE-0002、VISION-0001、PLAT-0002、DOC-0002，分别锁定验收、失败、安全、可观察性和成本边界；raw note只替换为未勾选链接，没有提前声称完成。
+- 只读生产重放确认0.66/0.34概率桶为67.08/32.92%，公开发言52.06/47.94是不同口径；photo缺图定位为`local_path`只随vision写入。TinyFish与Telegram现行API边界来自官方文档。
+- 本地Pi 0.84.1源码和非敏感metadata确认`ModelRuntime.create()`原生拥有settings/catalog/auth，当前项目`setRuntimeApiKey()`属于重复配置；现有Pi已配置DeepSeek与Codex，credential值从未读取或输出。
+- 用Pi OAuth + Luna low对现有本地photo/static sticker各做一次匿名真实基准：成功延迟约3.87s/2.69s、reasoning token均0、成本约$0.000282/$0.000124；样本只用于设定秒级同步与两路并发边界，不宣称分布。
+- Cache impact: **NONE（本提交）**——仅REQ/PLAN/handoff/devlog；未来SEARCH-0001工具schema实施会INTENTIONAL bump v6，其余五项不改变provider grammar或新增LLM调用。

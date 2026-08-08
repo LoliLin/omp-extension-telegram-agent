@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：ONBOARD-0001 T13a–T13f 已完成；下一步调查并正式化REQ-LIST两条新raw note，再逐项实现，最后T14总验收。
+2026-08-08：ONBOARD-0001 T13a–T13f 已完成；六条新增note已调查并正式化为SEARCH-0001/UI-0014/ROUTE-0002/VISION-0001/PLAT-0002/DOC-0002，下一步按T13h–T13m逐项实现，最后T14总验收。
 
 ## 已完成
 
@@ -38,6 +38,7 @@
 20. **已实现 `REQ-UI-0012`（`49e3067`）**：只服从Pi capability；Kitty路径以公开`convertToPng`异步归一化JPEG/GIF/WebP并继续由`Tui.Image`渲染。path/size/mtime revision共享in-flight，32项/32 MiB LRU、8 MiB单项、32 pending及失败记忆有界；完成只替换相关卡片，detach/restart/shutdown迟到callback失效。targeted 50/469、全量279/4041通过，真实Kitty/Ghostty smoke留T14。
 21. **已实现 `REQ-CMD-0001`（`fa311ea` + `f22ed0c` + `c0e5f26`）**：config/override、strict parser/auth/queue/runtime compact、poller前置分流、suffix目标plain reply→canonical→IPC、全runtime consume与best-effort菜单均完成。fake全链锁一次执行/create/broadcast，command+reply跨epoch不进provider；command/cache 45/374、全量302/4298通过。真实群权限/set-reset/compact留T14。
 22. **已实现 `REQ-UI-0013`（`533c9ec`）**：sticker改用Pi `Image`公开24×12上限，photo保持56×16；forced Kitty锁24×12/32×16实际placement，WebP转换后仍紧凑，40/80/120列、label/vision与逐行宽度均覆盖。不改转换、vision、协议或数据；targeted 51/586、全量287/4196通过，真实视觉smoke留T14。
+23. **新增实施队列 T13h–T13m**：先写单目录单群/极简成本原则和routing审计，再以Pi全局settings/auth共享runtime替代项目provider key；动态群media继续在provider前同步并改用Luna low，photo另做零LLM后台precache，最后给既有search tool增加有界TinyFish fetch。调查实证：概率bucket约67/33正常；photo缺path是下载时机；Luna low真实photo/static sticker各1次约3.87s/$0.000282与2.69s/$0.000124，样本不外推。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 
@@ -62,3 +63,4 @@ attach 默认只读；仅显式 compose 时 interactive editor 发 Telegram，of
 - 原子提交规范已在 `c32d937` 固化；ONBOARD-0001 已拆成六个实施task；全部按目标测试→显式暂存→签名commit推进。
 - SEND-0002 是 **NONE**：tool schema/system/serialization/cache epoch逐字节不变；正常成功仍是`ok`，只有异常路径用固定terminal `no_retry`省掉重复provider turn与Telegram消息。
 - UI-0012 是 **NONE**：只在本地Pi TUI按terminal capability准备显示PNG；IPC/DB/provider bytes、vision调用与context epoch不变。
+- 新增六REQ中只有SEARCH-0001会改变tool schema并计划cache v5→v6；Pi auth、vision gate、photo readiness、routing审计与哲学文档均为provider grammar **NONE**。

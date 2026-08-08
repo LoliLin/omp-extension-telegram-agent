@@ -34,6 +34,7 @@
 - [ ] [REQ-REPLY-0001](REQ-REPLY-0001.md) 直接回复 bot 的消息保证进入对应模型上下文（P1，durable provider-delivery已实现，待真实 A/B trace 后勾选）
 - [x] [REQ-OPS-0002](REQ-OPS-0002.md) 从 Pi 一键受控重启全部 bot 服务（P1，commit `3d7f9b3`）
 - [x] [REQ-UI-0011](REQ-UI-0011.md) 用 Pi 原生 stack 优化聊天卡片信息层级、trailing 对齐与窄终端退化（P2，commit `614d6d3`）
+- [ ] [REQ-SEARCH-0001](REQ-SEARCH-0001.md) 用 TinyFish 读取群友链接并增强检索（P1，已调查/未实现）
 
 
 ## Bug
@@ -43,7 +44,11 @@
 - [ ] [REQ-UI-0010](REQ-UI-0010.md) 恢复 Pi 原生 feed 的即时刷新与流式 Agent 输出（P1，已实现/待真实 Pi 总验收）
 - [x] [REQ-SEND-0002](REQ-SEND-0002.md) Telegram 远端提交后不得因本地失败而重复发送（P0，commit `bd4be62`）
 - [x] [REQ-UI-0012](REQ-UI-0012.md) 用Pi原生PNG转换与Image修复Kitty/Ghostty媒体显示（P1，commit `49e3067`）
+- [ ] [REQ-UI-0014](REQ-UI-0014.md) 群友照片不依赖 vision 即时进入 Pi 原生卡片（P1，已复现定位/未实现）
 - [x] [REQ-UI-0013](REQ-UI-0013.md) 用Pi原生Image语义化缩小sticker卡片、保持photo尺寸（P2，commit `533c9ec`）
+- [ ] [REQ-ROUTE-0002](REQ-ROUTE-0002.md) 验证 0.66/0.34 概率桶频率并区分回应机会与公开发言（P1，采样正常/诊断未实现）
+- [ ] [REQ-VISION-0001](REQ-VISION-0001.md) 群内动态媒体在 provider 提交前同步识别，目录 sticker 保持后台处理（P1，主路径已同步/Pi执行器未实现）
+- [ ] [REQ-PLAT-0002](REQ-PLAT-0002.md) 复用 Pi 的模型设置与认证，取消项目 provider API key（P0，已调查/未实现）
 
 
 ## 代码库与文档
@@ -51,6 +56,7 @@
 - [ ] [REQ-PLAT-0001](REQ-PLAT-0001.md) 收口为通用、快速、简洁的可配置 bot 平台（P1，已完成代码库调查/未实现）
 - [ ] [REQ-DOC-0001](REQ-DOC-0001.md) README 从用户视角解释平台、配置、使用与边界（P1，已调查/未实现）
 - [ ] [REQ-ONBOARD-0001](REQ-ONBOARD-0001.md) clone → `bun run pi` → `/tg config`、TypeScript 本机配置、提示词隐私与双语 mdBook 用户文档（P1，已调查/未实现）
+- [ ] [REQ-DOC-0002](REQ-DOC-0002.md) 明确单目录单群与极简省 token 的项目哲学（P1，已调查/未实现）
 
 ## 顺序与依赖
 
@@ -76,6 +82,11 @@
 - REQ-OPS-0002 按当前共享进程架构做 deployment-wide graceful restart；Pi `/tg restart` 复用 PID 身份/ready 检查并恢复原 feed，不在进程内热重建单个 bot
 - REQ-CMD-0001 是 Telegram 群内 deterministic control plane；只读命令公开，compact/set/reset 只认 deployment allowlist，命令不得进入 agent context
 - REQ-STICKER-0002 是 REQ-STICKER-0001 的 per-bot sendability 回归修复，并会触发 cache schema bump
+- REQ-PLAT-0002 以 Pi 0.84.1 的 settings/catalog/auth 为唯一 LLM 配置源；REQ-VISION-0001 复用同一 runtime 执行 Luna low
+- REQ-UI-0014 只异步准备本地显示文件，不新增 vision/LLM call；REQ-VISION-0001 只阻塞真正进入 provider batch 的动态媒体
+- REQ-SEARCH-0001 保持既有 `search` tool 名称与顺序，但扩展 schema 会触发下一次 cache schema bump
+- REQ-ROUTE-0002 只增加确定性审计与口径文档，当前生产重放不授权修改 HMAC 概率算法
+- REQ-DOC-0002 是现状 deployment/invariant 的权威说明，不扩展为同目录多群架构
 - REQ-PLAT-0001 复用 REQ-CONF-0001 已完成的 N-bot 核心，不重复重写 daemon composition
 - REQ-DOC-0001 等待 PLAT-0001 的 provider/config schema 稳定后再写最终 README，避免文档抢跑
 - REQ-ONBOARD-0001 依赖 PLAT-0001 的 provider schema、DOC-0001 的用户旅程与 OPS-0002 的受控 readiness；新默认是 ignored `telegram.config.ts`，legacy JSON 保持兼容；真实 persona 只从后续 HEAD 退出，不偷偷改写 Git 历史

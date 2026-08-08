@@ -1,7 +1,7 @@
 # PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
 
 - **Status:** Active
-- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-SEND-0002, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-UI-0011, REQ-UI-0012, REQ-UI-0013, REQ-PLAT-0001, REQ-DOC-0001, REQ-ONBOARD-0001
+- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-ROUTE-0002, REQ-SEND-0001, REQ-SEND-0002, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-UI-0011, REQ-UI-0012, REQ-UI-0013, REQ-UI-0014, REQ-PLAT-0001, REQ-PLAT-0002, REQ-DOC-0001, REQ-DOC-0002, REQ-ONBOARD-0001, REQ-VISION-0001, REQ-SEARCH-0001
 - **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
 
 ## 结果
@@ -70,6 +70,13 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13d** — 用 Pi 原生 dialogs 实现 `/tg config`，成功后复用受控 readiness 并建立 live feed；validates: ONBOARD-0001 AC2/AC5；commit: native setup wizard
 - [x] **T13e** — 将双语 README/package/project/runbook/example 重写为用户旅程，加入双语用户指南、成本设计概览与机器维护指南；validates: PLAT-0001 AC6 + DOC-0001 AC1–AC6 + ONBOARD-0001 AC7/AC9/AC11；commit: docs/metadata only
 - [x] **T13f** — 配置双 mdBook build/link check 与最小权限 GitHub Pages CI/deploy；validates: ONBOARD-0001 AC8/AC10；commit: docs publishing
+- [ ] **T13g** — 把用户新增的TinyFish、photo、routing、vision、Pi auth与项目哲学notes改写为有证据的REQ/AC；validates: six new requirements documented；commit: docs/research only
+- [ ] **T13h** — 强化单目录单群、极简/省token的用户与Agent权威说明及文档gate；validates: DOC-0002 AC1–AC6；commit: project philosophy docs
+- [ ] **T13i** — 增加脱敏routing审计脚本、0.66/0.34 property fixture与双语口径；validates: ROUTE-0002 AC1–AC6；commit: routing observability
+- [ ] **T13j** — 以Pi settings/auth/catalog替代项目provider secret，shared runtime并移除向导key流程；validates: PLAT-0002 AC1–AC7；commit: Pi configuration reuse
+- [ ] **T13k** — 用Pi Luna low执行同步动态media gate、两路有界并发与匿名基准；validates: VISION-0001 AC1–AC9；commit: synchronous vision boundary
+- [ ] **T13l** — 增加durable-first photo precache/backfill与`media_ready`原位Pi更新；validates: UI-0014 AC1–AC7；commit: native photo readiness
+- [ ] **T13m** — 在既有search tool增加TinyFish fetch/recency、安全边界并bump cache v6；validates: SEARCH-0001 AC1–AC7；commit: bounded web retrieval
 - [ ] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
 
 ## 每个 commit 的固定流程
@@ -114,6 +121,9 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - T10ab–T10ad: **NONE**；只按media kind调整Pi Image公开尺寸上限，不改图片bytes、IPC/DB/provider或调用数。
 - T10m1–T10m4: **NONE**；Telegram control command 与回复均由 deterministic control plane 消费，不进入 provider context；只有显式 compact 使用既有 summary 调用。
 - T11–T13f: 现有 deployment **NONE**；provider/persona choice 是显式配置边界，bootstrap/wizard/docs 不进入 provider context，现有 golden 必须不变。
+- T13g/T13h/T13i: **NONE**；需求/哲学/只读审计不改provider bytes或调用。
+- T13j/T13k/T13l: **NONE** grammar；Pi认证源、必要vision等待和TUI media side channel不改system/tools/message/summary格式，也不新增LLM call。
+- T13m: **INTENTIONAL**；既有search schema增加url/recency，cache schema 5→6并开新epoch；不新增tool项或eager fetch。
 
 ## 风险
 
@@ -129,6 +139,10 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - onboarding 覆盖半份配置或泄露 secret：内存校验、同目录原子 rename、existing-file deny-by-default、脱敏 transcript fixture。
 - TypeScript config 执行不一致或被误认为沙箱：Node/Pi + Bun 双 runtime fixture，文档明确只加载受信本地代码；legacy JSON 保持兼容。
 - 双语文档漂移：schema examples/link checker做机械 gate，两个 book 同一 CI；用户概览只链接内部权威细节。
+- Pi认证漂移或默认模型缺失：daemon/向导用非敏感preflight fail-fast，绝不回退项目secret或猜catalog第一项。
+- dynamic vision误以为UI异步就是provider异步：deferred fixture直接锁`sendUserMessage`在全部media settle前为0；catalog/媒体显示仍是隔离side channel。
+- photo download反卡poller或无限扫库：durable-first、pending128/并发2/startup100，完成只发additive identity update。
+- 网页prompt injection或signed URL泄漏：显式tool fetch、host-only event与untrusted result envelope；不自动抓取群链接。
 - native card 右对齐在窄/CJK终端溢出：40/60/80/120列visible-width tests，身份/正文优先，metadata次行退化；禁止自绘compositor。
 
 ## 完成记录
