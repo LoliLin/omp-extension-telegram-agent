@@ -362,11 +362,20 @@ export function resolvePath(rootDir: string, p: string): string {
 	return resolve(rootDir, p);
 }
 
-export function loadConfig(rootDir: string): AppConfig {
+export interface LoadConfigOptions {
+	/** Explicit trusted local .ts/.json source, primarily for validating an editor draft. */
+	configPath?: string;
+	/** In-memory values used by onboarding validation; values override file/process env. */
+	env?: Record<string, string>;
+}
+
+export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): AppConfig {
 	const env: Record<string, string> = { ...parseEnvFile(join(rootDir, ".env")) };
 	for (const [k, v] of Object.entries(process.env)) {
 		if (v !== undefined) env[k] = v;
 	}
+	Object.assign(env, options.env);
+	if (options.configPath) env.bots_config = options.configPath;
 	const raw = loadBotConfig(rootDir, env);
 	const errors: string[] = [];
 
@@ -394,7 +403,6 @@ export function loadConfig(rootDir: string): AppConfig {
 	if (!Number.isFinite(groupPeerId)) errors.push(`[config] group_peer_id: required (bare positive peer id, see .env.example)`);
 	const tinyfishKeyEnv = typeof raw.tinyfish_key_env === "string" ? raw.tinyfish_key_env : "tiny_fish_api_key";
 	const routerSecretEnv = typeof raw.router_secret_env === "string" ? raw.router_secret_env : "router_secret";
-	const tinyfishApiKey = needEnv(tinyfishKeyEnv, `tinyfish_key_env "${tinyfishKeyEnv}"`);
 	const defaultProvider = typeof raw.provider === "string" ? raw.provider.trim() : "deepseek";
 	// Existing configs keep their exact DeepSeek behavior; the generic key wins when present.
 	const defaultApiKeyEnv = typeof raw.api_key_env === "string"
@@ -439,6 +447,9 @@ export function loadConfig(rootDir: string): AppConfig {
 			stickerSets: Array.isArray(b.sticker_sets) ? (b.sticker_sets as string[]) : [],
 		};
 	});
+	const tinyfishApiKey = bots.some((bot) => bot.tools.search)
+		? needEnv(tinyfishKeyEnv, `tinyfish_key_env "${tinyfishKeyEnv}"`)
+		: env[tinyfishKeyEnv] ?? "";
 
 	if (errors.length > 0) throw new ConfigError(errors);
 

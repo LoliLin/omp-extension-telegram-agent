@@ -555,3 +555,11 @@
 - tracked typed example与legacy example都改为通用单bot占位；Node+jiti/Bun同fixture、TS/JSON等价、双文件/扩展名、tracked example与typecheck均有回归。`.env`仍只存secret，TS只引用env key。
 - 当前真实persona从Git索引与`docs/requirement.md`当前HEAD移除，但ignored本机文件原字节保留；`personas/*.md`默认忽略，只negate公开README与中英模板。文档明确旧Git历史仍含旧对象，未暗示已净化历史。
 - Cache impact: **NONE**——生产ignored persona、system/tool/message/summary grammar与schema v5未变；cache test仅从不再tracked的deployment文件切到公开模板并记录新fixture hash，不代表provider prefix迁移。每turn新增0 token/call。
+
+## 2026-08-08 (63) — 建立可回滚的 onboarding 配置事务
+
+- `FirstRunDraft`先在内存校验group peer、provider/model、env key、Telegram token、bot id/name与≤256 KiB persona；错误只返回字段名。确定性renderer生成只引用env key的typed config，secret只进入`.env`；persona/config/env均以0600同目录临时文件落盘。
+- fresh create遇到任一现有`.env`/TS/legacy JSON/persona即零写入拒绝。明确backup-replace先把所有旧目标原子rename为同nonce backup，再安装新目标；中途rename/chmod或final production `loadConfig()`失败会删除新文件并恢复旧字节。legacy JSON在replace时只退役为backup，避免双配置歧义。
+- existing validation与Pi editor未来使用的source API保持原文：临时同扩展名验证不碰目标，未确认replace原字节不变，确认后保留完整backup。env merge保留注释/无关key并把受管重复key收口为一次。
+- 7个core tests覆盖fresh/deny/invalid/rename rollback/full replace/editor/final loader与0600。首配显式`tools.search=false`，loader仅在任一bot启用search时要求TinyFish key，避免最小首配被可选服务阻断。
+- Cache impact: **NONE**——onboarding文件I/O不进入provider；既有deployment search默认true且credential/工具集合不变，新用户选择显式config后才形成自己的稳定prefix。正常turn新增0 token/call。
