@@ -366,8 +366,13 @@ describe("dynamic candidates coexistence (R4/R6)", () => {
 		const fake = { sent: [] as string[], listener: null as null };
 		(rt as any).session = {
 			subscribe: () => {},
-			sendUserMessage: async (t: string) => { fake.sent.push(t); },
-			sessionManager: { buildContextEntries: () => [] },
+			sendCustomMessage: async (message: { content: string }) => { fake.sent.push(message.content); },
+			getContextUsage: () => undefined,
+			sessionManager: {
+				buildContextEntries: () => [],
+				getBranch: () => [],
+				appendCustomEntry: () => "commit",
+			},
 			dispose: async () => {},
 		};
 		return fake;

@@ -61,8 +61,13 @@ function attach(
 ): void {
 	(rt as any).session = {
 		subscribe: () => {},
-		sendUserMessage: send,
-		sessionManager: { buildContextEntries: () => [] },
+		sendCustomMessage: async (message: { content: string }) => { await send(message.content); },
+		getContextUsage: () => undefined,
+		sessionManager: {
+			buildContextEntries: () => [],
+			getBranch: () => [],
+			appendCustomEntry: () => "commit",
+		},
 		dispose: async () => {},
 	};
 }

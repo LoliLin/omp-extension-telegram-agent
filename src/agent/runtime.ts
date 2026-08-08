@@ -480,17 +480,12 @@ export class BotRuntime {
 		);
 		setConsumedSeq(this.db, this.bot.id, chatId, state.consumedSeq);
 		replaceVisibleMessageIds(this.db, this.bot.id, chatId, this.epoch, [...state.visible]);
-		const manager = this.session.sessionManager as typeof this.session.sessionManager & {
-			getBranch?: () => SessionEntry[];
-		};
-		if (typeof manager.getBranch === "function") {
-			const delivered = this.deliveredCommitIdsFromEntries(manager.getBranch());
-			removeReplyObligations(
-				this.db,
-				this.bot.id,
-				[...delivered].map((messageId) => ({ chatId, messageId })),
-			);
-		}
+		const delivered = this.deliveredCommitIdsFromEntries(this.session.sessionManager.getBranch());
+		removeReplyObligations(
+			this.db,
+			this.bot.id,
+			[...delivered].map((messageId) => ({ chatId, messageId })),
+		);
 		this.visibleMessageIds = state.visible;
 	}
 
@@ -1109,9 +1104,7 @@ export class BotRuntime {
 			mandatory = requiredEvents();
 			normal = ordinaryEvents();
 		}
-		const getContextUsage = (this.session as { getContextUsage?: () => { tokens: number | null; contextWindow: number } | undefined })
-			.getContextUsage;
-		const usage = typeof getContextUsage === "function" ? getContextUsage.call(this.session) : undefined;
+		const usage = this.session.getContextUsage();
 		const suffixBudget = availableSuffixBudget({
 			contextWindow: usage?.contextWindow ?? this.model?.contextWindow ?? 200_000,
 			currentContextTokens: usage?.tokens ?? 0,
@@ -1167,25 +1160,17 @@ export class BotRuntime {
 			rowsScanned,
 			visionCalls: this.pendingInputMetrics.visionCalls,
 		};
-		const supportsCustomMessages = typeof (this.session as { sendCustomMessage?: unknown }).sendCustomMessage === "function";
-		const visibleBeforeTurn = new Set(this.visibleMessageIds);
 		// sendCustomMessage(triggerTurn) does not resolve until the provider turn, including
 		// tool execution, has finished. Make only the fully packed references addressable
 		// during that turn; durable visibility still commits after the session submission.
 		for (const messageId of packed.visibleMessageIds) this.visibleMessageIds.add(messageId);
 		try {
-			if (supportsCustomMessages) {
-				await this.session.sendCustomMessage(
-					{ customType: TELEGRAM_CONTEXT_TYPE, content: suffix, display: false, details },
-					{ triggerTurn: true },
-				);
-			} else {
-				// Compatibility seam for old deterministic test doubles only.
-				await this.session.sendUserMessage(suffix);
-			}
+			await this.session.sendCustomMessage(
+				{ customType: TELEGRAM_CONTEXT_TYPE, content: suffix, display: false, details },
+				{ triggerTurn: true },
+			);
 		} catch (error) {
-			if (supportsCustomMessages) this.reconcileContextStateFromSession();
-			else this.visibleMessageIds = visibleBeforeTurn;
+			this.reconcileContextStateFromSession();
 			throw error;
 		}
 		log.info("agent_runtime", "provider_turn_settled", {
@@ -1193,10 +1178,8 @@ export class BotRuntime {
 			input_events: packed.events.length, provider_calls: this.providerCallsInRun,
 		});
 		const deliveredObligationIds = delivered.map((obligation) => obligation.messageId);
-		const appendCommit = (this.session.sessionManager as { appendCustomEntry?: (type: string, data: unknown) => string })
-			.appendCustomEntry;
-		if (deliveredObligationIds.length > 0 && typeof appendCommit === "function") {
-			appendCommit.call(this.session.sessionManager, TELEGRAM_CONTEXT_COMMIT_TYPE, {
+		if (deliveredObligationIds.length > 0) {
+			this.session.sessionManager.appendCustomEntry(TELEGRAM_CONTEXT_COMMIT_TYPE, {
 				consumedSeq: highWater,
 				deliveredObligationIds,
 			});

@@ -119,7 +119,7 @@ class FakeActivityScheduler implements ActivityScheduler {
 interface FakeSession {
 	sent: string[];
 	listener: ((e: unknown) => void) | null;
-	sendUserMessage: (text: string) => Promise<void>;
+	sendCustomMessage: (message: { content: string; details: { visibleMessageIds: number[] } }) => Promise<void>;
 	compact: (...args: unknown[]) => Promise<{ tokensBefore: number }>;
 }
 
@@ -137,16 +137,23 @@ function attachFakeSession(
 	const fake: FakeSession = {
 		sent: [],
 		listener: null,
-		sendUserMessage: opts.send ?? (async (t: string) => { fake.sent.push(t); }),
+		sendCustomMessage: opts.customSend ?? (async (m) => {
+			if (opts.send) await opts.send(m.content);
+			else fake.sent.push(m.content);
+		}),
 		compact: opts.compact ?? (async () => ({ tokensBefore: 100 })),
 	};
 	(rt as any).session = {
 		subscribe: (l: (e: unknown) => void) => { fake.listener = l; },
-		sendUserMessage: (t: string) => fake.sendUserMessage(t),
-		...(opts.customSend ? { sendCustomMessage: opts.customSend } : {}),
+		sendCustomMessage: (m: { content: string; details: { visibleMessageIds: number[] } }) => fake.sendCustomMessage(m),
+		getContextUsage: () => undefined,
 		compact: (...args: unknown[]) => fake.compact(...args),
 		isStreaming: opts.isStreaming ?? false,
-		sessionManager: { buildContextEntries: () => opts.contextEntries?.() ?? [] },
+		sessionManager: {
+			buildContextEntries: () => opts.contextEntries?.() ?? [],
+			getBranch: () => [],
+			appendCustomEntry: () => "commit",
+		},
 		dispose: async () => {},
 	};
 	(rt as any).subscribeEvents();
