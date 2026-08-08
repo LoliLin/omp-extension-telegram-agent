@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：SEND-0001 已实现并完成 cache schema 3→4；下一步实现 CMD-0001 Telegram control plane，再继续平台 provider/config。
+2026-08-08：SEND-0001 已实现并完成 cache schema 3→4；用户新增的 UI-0010 已定位为缺少 `message_update` transport 与 host `requestRender()`，下一步先恢复原生流式 feed，再实现 CMD-0001。
 
 ## 已完成
 
@@ -27,10 +27,11 @@
 9. **已实现 `REQ-SEND-0001`**：唯一 send schema 拥有全部用法，persona/protocol 共去掉 8,859 bytes 重复；显式点名不再被 silence 覆盖；固定 `ok` + terminate 保证一次 provider call；tools hash 含 description，cache schema 3→4。
 10. **已调查 `REQ-DOC-0001`**：README 需从内部索引改为 prerequisites→配置→启动/Pi→扩 bot→排障的用户旅程；等 provider schema 完成后在 T13 写最终示例。
 11. **已调查 `REQ-CMD-0001`**：Telegram `/tg` 由 deterministic control service 消费；help/bots/status 公开，compact/set/reset deny-by-default。allowlist 支持 id/`@username`，当前 ignored deployment 最终只配 `@aac6fef`。
+12. **已调查 `REQ-UI-0010`**：runtime 丢弃 Pi `message_update`，feed 变更也未请求宿主重绘。方案是 additive、有界、不持久的 assistant stream snapshot + Pi `TUI.requestRender()`；cache/token impact NONE。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 
-建议顺序：ROUTE 精确回归 → SEND tool contract/cache epoch → Telegram admin commands → PLAT provider/config → 参数化 e2e/composition → 平台/README 文档 → T14 总验收。
+建议顺序：UI-0010 native stream → Telegram admin commands → PLAT provider/config → 参数化 e2e/composition → 平台/README 文档 → T14 总验收。
 
 ## 使用方式
 

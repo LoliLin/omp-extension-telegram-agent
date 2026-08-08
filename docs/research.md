@@ -275,3 +275,13 @@ custom entry 不进入 LLM context；IPC 与 provider serialization 不变。Cac
 - 当前 telemetry 丢失了 provider `cacheWrite` 的独立值；`llm_runs` 需加默认 0 的兼容列，新 run 精确记录，历史未知值不回填。这样 Pi 在非零时自然显示 `W`。
 - runs、epoch、first/last time、reasoning total 与 latency 不属于 Pi native usage layout；`reasoning_tokens/latency_ms` 已在 DB，可作为 `/tg status` 的 lifetime/latest 详情。拒绝额外 footer status 行、session name hack 或自绘 renderer。
 - Cache impact **NONE**：只补 provider response telemetry 的持久化/IPC/TUI，不改请求字节或 agent context。详细契约见 `requirements/REQ-UI-0009.md`。
+
+## REQ-UI-0010 调查：延迟来自漏掉 host render，流式来自漏掉 message_update（2026-08-08）
+
+**结论：两个根因都在项目 glue code；复用 Pi 已有事件和 scheduler 即可，不需要自绘 UI。**
+
+- `BotRuntime.subscribeEvents()` 当前只在 `message_end` 提取 assistant text/thinking；Pi AgentSession 已按 provider token 发出 `message_update`，其中 partial message还包含逐步修复后的 tool call arguments。项目主动丢掉这些事件，所以以 `send` tool 为主的回复直到 tool execution 才有可见输出。
+- `TelegramFeed.onEvent()` 会 append/rebuild component tree，但 custom entry renderer 拿不到 TUI，changed callback 也没有请求重绘。于是 socket 数据已经到达，屏幕仍要等宿主下一次无关 render，形成不稳定延迟。
+- Pi 的 `setFooter(factory)` 官方 factory 会同步拿到同一个 session `TUI`；attach 本来就挂 native footer，可以保留这个 handle 的 `requestRender` callback 供 feed 生命周期使用。`panel off` 只恢复 footer presentation，不应清掉 session render handle。
+- Pi `TUI.requestRender()` 内部已合并重复请求并限制到约 16 ms 一帧；项目不再加 debounce/render loop。stream update 使用有界完整展示快照，允许 update-before-start 自愈，并覆盖 thinking/text/partial tool args；start/update/end 不落 DB/Pi session/provider context。
+- Cache impact **NONE**，新增 completion/token/DB writes 均为 0。详细边界见 `requirements/REQ-UI-0010.md`。

@@ -91,5 +91,5 @@
 
 ## 追溯
 
-- Plans: `PLAN-20260808-complete-new-reqs#T10f`
+- Plans: `PLAN-20260808-complete-new-reqs#T10h`
 - Commits: 从 `Requirement:` git trailer 查

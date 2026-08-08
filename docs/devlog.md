@@ -350,3 +350,10 @@
 - `toolsHash` 与 per-bot filtered hash 现在覆盖 name + description + parameters + order；description-only drift 有回归。`CACHE_SCHEMA_VERSION` 3→4，golden 更新为 system A `6ad7407d617b`、B `4ac8de55e029`、tools `592f789e80f6`、catalog `c7014c404819`。
 - targeted send/sticker/flush/cache 34 tests、262 assertions 与 `bun run check` 通过；真实群文字/纯 sticker/组合 reply smoke 留 T14。
 - Cache impact: **INTENTIONAL**——这是 tool/persona/system 稳定 prefix 的显式修订；daemon 下次受控重启开新 epoch。每次成功 send 的动态结果 token 降为固定一 token，且不增加 provider request。
+
+## 2026-08-08 (37) — 调查 Pi feed 刷新延迟与流式缺口（文档）
+
+- 用户新增 raw note 已正式化为 `REQ-UI-0010`；没有把“看起来不好”直接当实现标准，而是分别锁定离散变更立即重绘和 assistant partial 原位更新。
+- 源码证据确认 runtime 忽略 Pi `message_update`，只在 `message_end` 广播 final；feed 收到 IPC 后修改组件树却未调用 host `requestRender()`。这解释了无流式和依赖无关 UI 事件才刷新的两个现象。
+- 实现边界固定为 additive、有界、非持久 stream snapshot，覆盖 thinking/text/tool args；Pi session entry 仍只有 attach anchor，最终事件继续单次持久化。复用 Pi 官方 TUI handle 与约 16 ms 合帧，不建 timer/render loop。
+- Cache impact: **NONE（docs/research only）**；后续实现也不改 provider-visible bytes、不增加模型调用或 DB partial writes，token/cost 增量 0。
