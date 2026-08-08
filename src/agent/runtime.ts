@@ -22,11 +22,27 @@ import type { BotConfig, AppConfig } from "../config.ts";
 import { getBotState, setBotState } from "../db/db.ts";
 import { BotApi, TelegramApiError } from "../telegram/api.ts";
 import { TelegramTypingLease, type ActivityScheduler } from "../telegram/activity.ts";
-import { insertSentMessage } from "../telegram/ingest.ts";
-import { sendRichTextAndPersist } from "../telegram/send.ts";
+import {
+	classifyTelegramCreateFailure,
+	localFailureCategory,
+	persistSentMessageWithRetry,
+	retrySqliteBusy,
+	sendRichTextAndPersist,
+	SentMessagePersistenceError,
+	type SentMessageTransport,
+} from "../telegram/send.ts";
 import { serializeMessages, type MessageRow } from "./serialize.ts";
 import { buildSystemPrompt, sha256Short, CACHE_SCHEMA_VERSION, COMPACTION_SUMMARY_PROMPT } from "./prompt.ts";
-import { successfulSendResult, TOOL_DEFS, toolProtocolHash, toolsHash, type SendParams } from "./tools.ts";
+import {
+	degradedSendResult,
+	successfulSendResult,
+	TOOL_DEFS,
+	toolProtocolHash,
+	toolsHash,
+	type SendComponentOutcome,
+	type SendDegradedOutcome,
+	type SendParams,
+} from "./tools.ts";
 import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
 import { ensureVision, fileIdForBot, type VisionUpdateSink } from "../media/vision.ts";
@@ -46,6 +62,18 @@ const EPOCH_KEY = "context_epoch";
 const STREAM_TEXT_MAX = 4096;
 const STREAM_TOOL_ARGS_MAX = 2048;
 const STREAM_TOOLS_MAX = 4;
+
+interface SendFailure {
+	failed_component: "message" | "sticker";
+	failed_outcome: SendComponentOutcome;
+	stage: "telegram_create" | "canonical_persist" | "local_effect";
+	category: string;
+}
+
+function rawTelegramMessageId(raw: Record<string, unknown>): number | null {
+	const id = raw.message_id;
+	return typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? id : null;
+}
 
 function boundedDisplay(value: string, max: number): string {
 	return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
@@ -337,7 +365,15 @@ export class BotRuntime {
 					this.recordEvent("tool_call", { tool: event.toolName, args: event.args });
 					break;
 				case "tool_execution_end":
-					this.recordEvent("tool_result", { tool: event.toolName, isError: event.isError });
+					if (event.toolName === "send") {
+						try {
+							this.recordEvent("tool_result", { tool: event.toolName, isError: event.isError });
+						} catch {
+							console.warn(`[send] bot=${this.bot.id} tool_result telemetry failed category=local_failure`);
+						}
+					} else {
+						this.recordEvent("tool_result", { tool: event.toolName, isError: event.isError });
+					}
 					break;
 				case "agent_settled":
 					this.running = false;
@@ -536,31 +572,173 @@ export class BotRuntime {
 		}
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		const sentIds: number[] = [];
-		if (params.message) {
-			const { raw, canonical, transport } = await sendRichTextAndPersist(
-				this.db,
-				this.api,
-				this.bot.id,
-				chatId,
-				params.message,
-				params.reply_to,
+		const failures: SendFailure[] = [];
+		let remoteCommits = 0;
+		let sendEventAttempted = false;
+		let typingStopAttempted = false;
+
+		const addFailure = (failure: SendFailure): void => {
+			// One tool call has at most two remote components and a small fixed set of local effects.
+			if (failures.length < 8) failures.push(failure);
+		};
+		const runLocalEffect = async (
+			component: "message" | "sticker",
+			category: string,
+			effect: () => void,
+			retryBusy: boolean,
+		): Promise<void> => {
+			try {
+				if (retryBusy) await retrySqliteBusy(effect);
+				else effect();
+			} catch (error) {
+				const localCategory = localFailureCategory(error);
+				addFailure({
+					failed_component: component,
+					failed_outcome: "committed",
+					stage: "local_effect",
+					category: localCategory === "local_failure" ? category : localCategory,
+				});
+			}
+		};
+		const finishCommittedComponent = async (
+			component: "message" | "sticker",
+			raw: Record<string, unknown>,
+			messageId: number | null,
+			transport?: SentMessageTransport,
+		): Promise<void> => {
+			remoteCommits++;
+			if (messageId != null && !sentIds.includes(messageId)) sentIds.push(messageId);
+			if (messageId != null) {
+				await runLocalEffect(component, "exposure_failed", () => this.markExposed([messageId]), true);
+			}
+			await runLocalEffect(component, "broadcast_failed", () => this.sentMessageSink?.(raw), false);
+			if (component === "message" && messageId != null && transport) {
+				await runLocalEffect(
+					component,
+					"event_failed",
+					() => this.recordEvent(transport === "rich" ? "rich_sent" : "plain_fallback", { message_id: messageId }),
+					true,
+				);
+			}
+		};
+		const finishDegraded = async (outcome: SendDegradedOutcome) => {
+			const component = failures[0]?.failed_component ?? (params.sticker && !params.message ? "sticker" : "message");
+			if (sentIds.length > 0 && !sendEventAttempted) {
+				sendEventAttempted = true;
+				await runLocalEffect(
+					component,
+					"event_failed",
+					() => this.recordEvent("send", { reply_to: params.reply_to ?? null, sticker: params.sticker ?? null, sent: sentIds }),
+					true,
+				);
+			}
+			if (!typingStopAttempted) {
+				typingStopAttempted = true;
+				await runLocalEffect(component, "typing_stop_failed", () => this.typingLease.stop(), false);
+			}
+			const primary = (outcome === "partial" ? failures.find((failure) => failure.stage === "telegram_create") : null)
+				?? failures[0]
+				?? {
+				failed_component: component,
+				failed_outcome: "unknown" as const,
+				stage: "local_effect" as const,
+				category: "local_failure",
+				};
+			const diagnostic = {
+				outcome,
+				sent: [...sentIds],
+				failures: failures.length > 0 ? failures : [primary],
+			};
+			try {
+				await retrySqliteBusy(() => this.recordEvent("send_degraded", diagnostic));
+			} catch {
+				// The bounded, redacted process log remains available when SQLite/event sinks are unavailable.
+			}
+			console.warn(
+				`[send] bot=${this.bot.id} degraded outcome=${outcome} component=${primary.failed_component} stage=${primary.stage} category=${primary.category} sent=${sentIds.join(",") || "none"}`,
 			);
-			sentIds.push(canonical.message_id);
-			this.markExposed([canonical.message_id]);
-			this.sentMessageSink?.(raw);
-			this.recordEvent(transport === "rich" ? "rich_sent" : "plain_fallback", {
-				message_id: canonical.message_id,
+			return degradedSendResult({ sent: [...sentIds], outcome, ...primary });
+		};
+		const handleCreateFailure = async (
+			component: "message" | "sticker",
+			error: unknown,
+		): Promise<ReturnType<typeof degradedSendResult>> => {
+			const failure = classifyTelegramCreateFailure(error);
+			if (failure.outcome === "rejected" && remoteCommits === 0) {
+				try {
+					this.typingLease.stop();
+				} catch {
+					// Preserve the actionable pre-commit Telegram rejection.
+				}
+				throw error;
+			}
+			addFailure({
+				failed_component: component,
+				failed_outcome: failure.outcome,
+				stage: "telegram_create",
+				category: failure.category,
 			});
+			return await finishDegraded(remoteCommits > 0 ? "partial" : "unknown");
+		};
+
+		if (params.message) {
+			try {
+				const { raw, canonical, transport } = await sendRichTextAndPersist(
+					this.db,
+					this.api,
+					this.bot.id,
+					chatId,
+					params.message,
+					params.reply_to,
+				);
+				await finishCommittedComponent("message", raw, canonical.message_id, transport);
+			} catch (error) {
+				if (!(error instanceof SentMessagePersistenceError)) return await handleCreateFailure("message", error);
+				addFailure({
+					failed_component: "message",
+					failed_outcome: "committed",
+					stage: "canonical_persist",
+					category: localFailureCategory(error.cause),
+				});
+				await finishCommittedComponent("message", error.raw, rawTelegramMessageId(error.raw), error.transport);
+			}
 		}
 		if (stickerFileId) {
-			const m = await this.api.sendSticker(chatId, stickerFileId, params.reply_to);
-			const canonical = insertSentMessage(this.db, this.bot.id, m);
-			sentIds.push(canonical.message_id);
-			this.markExposed([canonical.message_id]);
-			this.sentMessageSink?.(m);
+			try {
+				const raw = await this.api.sendSticker(chatId, stickerFileId, params.reply_to);
+				try {
+					const canonical = await persistSentMessageWithRetry(this.db, this.bot.id, raw, "sticker");
+					await finishCommittedComponent("sticker", raw, canonical.message_id);
+				} catch (error) {
+					if (!(error instanceof SentMessagePersistenceError)) throw error;
+					addFailure({
+						failed_component: "sticker",
+						failed_outcome: "committed",
+						stage: "canonical_persist",
+						category: localFailureCategory(error.cause),
+					});
+					await finishCommittedComponent("sticker", error.raw, rawTelegramMessageId(error.raw));
+				}
+			} catch (error) {
+				if (error instanceof SentMessagePersistenceError) throw error;
+				return await handleCreateFailure("sticker", error);
+			}
 		}
-		this.recordEvent("send", { reply_to: params.reply_to ?? null, sticker: params.sticker ?? null, sent: sentIds });
-		this.typingLease.stop();
+		sendEventAttempted = true;
+		typingStopAttempted = true;
+		await runLocalEffect(
+			params.sticker && !params.message ? "sticker" : "message",
+			"event_failed",
+			() => this.recordEvent("send", { reply_to: params.reply_to ?? null, sticker: params.sticker ?? null, sent: sentIds }),
+			true,
+		);
+		await runLocalEffect(
+			params.sticker && !params.message ? "sticker" : "message",
+			"typing_stop_failed",
+			() => this.typingLease.stop(),
+			false,
+		);
+		if (failures.length > 0) return await finishDegraded("committed");
 		return successfulSendResult(sentIds);
 	}
 

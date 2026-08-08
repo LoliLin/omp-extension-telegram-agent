@@ -13,10 +13,88 @@ export interface RichTextSendApi extends TextSendApi {
 	sendRichMessage(chatId: number, markdown: string, replyToMessageId?: number): Promise<Record<string, unknown>>;
 }
 
+export type SentMessageTransport = "plain" | "rich" | "plain_fallback" | "sticker";
+
 export class SentMessagePersistenceError extends Error {
-	constructor(public readonly cause: unknown) {
+	constructor(
+		public readonly cause: unknown,
+		public readonly raw: Record<string, unknown>,
+		public readonly transport: SentMessageTransport,
+	) {
 		super("Telegram accepted the message but canonical persistence failed");
 		this.name = "SentMessagePersistenceError";
+	}
+}
+
+const SQLITE_BUSY_RETRY_DELAYS_MS = [25, 100, 250] as const;
+
+/** SQLite reports BUSY/LOCKED synchronously; these retries never repeat Telegram I/O. */
+export function isSqliteBusy(error: unknown): boolean {
+	const value = error as { code?: unknown; errno?: unknown; message?: unknown } | null;
+	const code = typeof value?.code === "string" ? value.code.toUpperCase() : "";
+	if (code === "SQLITE_BUSY" || code === "SQLITE_LOCKED") return true;
+	if (value?.errno === 5 || value?.errno === 6) return true;
+	const message = typeof value?.message === "string" ? value.message.toLowerCase() : "";
+	return message.includes("database is locked") || message.includes("database is busy");
+}
+
+export function localFailureCategory(error: unknown): "sqlite_busy" | "sqlite_closed" | "local_failure" {
+	if (isSqliteBusy(error)) return "sqlite_busy";
+	const message = error instanceof Error ? error.message.toLowerCase() : "";
+	if (message.includes("database") && (message.includes("closed") || message.includes("not open"))) {
+		return "sqlite_closed";
+	}
+	return "local_failure";
+}
+
+export interface TelegramCreateFailure {
+	outcome: "rejected" | "unknown";
+	category: "telegram_4xx" | "rate_limited" | "timeout" | "server_error" | "non_json" | "network_error";
+}
+
+/**
+ * Only a structured, non-timeout Telegram 4xx proves that no message was created.
+ * Everything else crosses an unknown commit boundary and must not be retried.
+ */
+export function classifyTelegramCreateFailure(error: unknown): TelegramCreateFailure {
+	if (error instanceof TelegramApiError) {
+		const description = error.description.toLowerCase();
+		if (description.includes("non-json")) return { outcome: "unknown", category: "non_json" };
+		if (error.code === 408) return { outcome: "unknown", category: "timeout" };
+		if (error.code === 429) return { outcome: "unknown", category: "rate_limited" };
+		if (error.code >= 500) return { outcome: "unknown", category: "server_error" };
+		if (error.code >= 400 && error.code < 500) return { outcome: "rejected", category: "telegram_4xx" };
+		return { outcome: "unknown", category: "network_error" };
+	}
+	const name = error instanceof Error ? error.name : "";
+	if (name === "TimeoutError" || name === "AbortError") return { outcome: "unknown", category: "timeout" };
+	return { outcome: "unknown", category: "network_error" };
+}
+
+export async function retrySqliteBusy<T>(operation: () => T): Promise<T> {
+	let attempt = 0;
+	while (true) {
+		try {
+			return operation();
+		} catch (error) {
+			const delay = SQLITE_BUSY_RETRY_DELAYS_MS[attempt++];
+			if (!isSqliteBusy(error) || delay == null) throw error;
+			await new Promise<void>((resolve) => setTimeout(resolve, delay));
+		}
+	}
+}
+
+/** Persist only the local projection; callers must never wrap this in a Telegram retry. */
+export async function persistSentMessageWithRetry(
+	db: Database,
+	botId: string,
+	raw: Record<string, unknown>,
+	transport: SentMessageTransport,
+): Promise<CanonicalMessage> {
+	try {
+		return await retrySqliteBusy(() => insertSentMessage(db, botId, raw));
+	} catch (error) {
+		throw new SentMessagePersistenceError(error, raw, transport);
 	}
 }
 
@@ -29,11 +107,7 @@ export async function sendTextAndPersist(
 	replyToMessageId?: number,
 ): Promise<{ raw: Record<string, unknown>; canonical: CanonicalMessage }> {
 	const raw = await api.sendMessage(chatId, text, replyToMessageId);
-	try {
-		return { raw, canonical: insertSentMessage(db, botId, raw) };
-	} catch (error) {
-		throw new SentMessagePersistenceError(error);
-	}
+	return { raw, canonical: await persistSentMessageWithRetry(db, botId, raw, "plain") };
 }
 
 /**
@@ -81,9 +155,5 @@ export async function sendRichTextAndPersist(
 		transport = "plain_fallback";
 		raw = await api.sendMessage(chatId, markdown, replyToMessageId);
 	}
-	try {
-		return { raw, canonical: insertSentMessage(db, botId, raw), transport };
-	} catch (error) {
-		throw new SentMessagePersistenceError(error);
-	}
+	return { raw, canonical: await persistSentMessageWithRetry(db, botId, raw, transport), transport };
 }

@@ -51,7 +51,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10u** — 用T10p真实commit hash记录OPS-0002完成并在REQ-LIST勾选；validates: OPS-0002 traceability；commit: completion record
 - [x] **T10v** — 复盘生产重复消息、tool trace与daemon锁竞争，正式化远端commit后的no-retry边界；validates: SEND-0002 documented scope/AC；commit: docs/research only
 - [x] **T10w** — 调查并正式化Kitty/Ghostty媒体协议与Pi原生PNG转换边界；validates: UI-0012 documented scope/AC；commit: docs/research only
-- [ ] **T10x** — 隔离远端committed/partial/unknown与本地副作用失败，阻止同turn重发并补恢复回归；validates: SEND-0002 AC1–AC7；commit: send commit boundary
+- [x] **T10x** — 隔离远端committed/partial/unknown与本地副作用失败，阻止同turn重发并补恢复回归；validates: SEND-0002 AC1–AC7；commit: send commit boundary
 - [ ] **T10y** — 用T10x真实commit hash记录SEND-0002完成并在REQ-LIST勾选；validates: SEND-0002 traceability；commit: completion record
 - [ ] **T10z** — 复用Pi公开`convertToPng`做Kitty异步去重转换、有界LRU与原卡片重绘；validates: UI-0012 AC1–AC7；commit: native media compatibility
 - [ ] **T10aa** — 用T10z真实commit hash记录UI-0012完成并在REQ-LIST勾选；validates: UI-0012 traceability；commit: completion record

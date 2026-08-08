@@ -471,3 +471,11 @@
 - Pi coding-agent已公开`convertToPng`并在自己的`ToolExecutionComponent`用“Kitty-only异步转换→updateDisplay→requestRender”模式。本项目将复用它与`getCapabilities`/`Tui.Image`，不patch Pi、不自写terminal escape、不引入图像依赖。
 - 实施约束为同file revision in-flight去重、32项/32MiB LRU、单项8MiB、dispose generation与可读fallback；PNG零转换，iTerm2/unsupported继续完全服从Pi。
 - Cache impact: **NONE（docs/research only）**。只影响本地TUI图像payload准备，DB/IPC/provider与vision调用不变。
+
+## 2026-08-08 (52) — 阻止 Telegram 远端提交后的模型重发
+
+- 发送事务现在把每个 Telegram create 当作不可回滚 commit boundary。canonical insert 只按25/100/250ms有界重试SQLite BUSY/LOCKED，绝不重放Telegram；返回Message后的DB/exposure/broadcast/event/typing失败都收敛为固定`committed/no_retry`终态。
+- timeout、socket reset、non-JSON、429/5xx统一为`unknown/no_retry`；文字已提交后sticker rejected/unknown为`partial/no_retry`。只有首个组件明确Telegram 4xx未创建时仍把普通错误交给模型；既有rich parse/method拒绝→一次literal plain fallback保持不变。
+- `send_degraded`与process warning只含component/outcome/stage/category/known ids，不含正文、token或完整异常。完整成功仍返回原有固定`ok`；Pi agent loop回归证明两种terminal result都只产生一次provider call。
+- 双SQLite连接真实复现`#19614`：Telegram create与feed broadcast各一次，canonical锁重试耗尽后不抛给模型，poller echo重放两次仍只有一行。另覆盖transient lock恢复、sticker-only closed DB、组合第二段（包括远端返回但无可用id）、全部unknown类别、preflight零网络与四类本地副作用隔离；相关33 tests / 190 assertions、全量268 / 3949、typecheck、cache v5 golden与diff check通过。真实群组合smoke并入T14。
+- Cache impact: **NONE**——tool name/description/schema、system/message/summary grammar与epoch不变；正常路径新增0 provider token/call，异常路径减少一次或更多重复provider turn与Telegram副作用。

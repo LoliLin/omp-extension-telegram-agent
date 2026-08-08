@@ -21,6 +21,19 @@ export interface RunJsParams {
 }
 
 export const SEND_SUCCESS_ACK = "ok";
+export const SEND_NO_RETRY_ACK = "no_retry";
+
+export type SendDegradedOutcome = "committed" | "partial" | "unknown";
+export type SendComponentOutcome = "committed" | "rejected" | "unknown";
+
+export interface SendDegradedDetails {
+	sent: number[];
+	outcome: SendDegradedOutcome;
+	failed_component: "message" | "sticker";
+	failed_outcome: SendComponentOutcome;
+	stage: "telegram_create" | "canonical_persist" | "local_effect";
+	category: string;
+}
 
 /** Fixed tool order — never reorder (cache-visible). */
 export const TOOL_DEFS = [
@@ -88,6 +101,15 @@ export function successfulSendResult(sent: number[]) {
 	return {
 		content: [{ type: "text" as const, text: SEND_SUCCESS_ACK }],
 		details: { sent },
+		terminate: true as const,
+	};
+}
+
+/** Fixed terminal result for a create outcome that must never be retried by the model. */
+export function degradedSendResult(details: SendDegradedDetails) {
+	return {
+		content: [{ type: "text" as const, text: SEND_NO_RETRY_ACK }],
+		details,
 		terminate: true as const,
 	};
 }

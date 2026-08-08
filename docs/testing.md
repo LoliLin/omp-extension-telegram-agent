@@ -44,6 +44,7 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | Bun × Pi SDK 兼容性 smoke | ✅ | 2026-08-07 smoke-pi.ts 真实调用成功 |
 | Telegram ingestion/dedupe/restart | ✅ | 2026-08-07 bun test 12/12 + 真实群 e2e + restart 全通过 |
 | unified terminating send（REQ-SEND-0001） | ✅ unit / ⏳ real smoke | 2026-08-08 `test/send-tool.test.ts` + sticker/flush/cache 34 targeted：唯一 message/sticker/reply_to schema、persona/protocol 去重、description-only hash drift、一次组合网络调用与本地 details、固定 `ok` result；Pi agent-loop harness 证明 providerCalls=1/turn_end=1。cache schema v4 golden/check 通过；真实群三种组合留 T14。 |
+| send commit boundary（REQ-SEND-0002） | ✅ unit / ⏳ real smoke | 2026-08-08 `test/send-commit.test.ts` 以双连接真实 SQLite lock 复现 Telegram `#19614` 已创建后 `SQLITE_BUSY`：create/broadcast 各一次，terminal `committed/no_retry`，poller recovery 最终一行；另锁 transient retry、sticker-only closed DB、message→sticker rejected/unknown partial（含返回Message却缺id）、timeout/socket/non-JSON/429/5xx、preflight 零调用与 exposure/broadcast/event/typing 隔离。Pi agent-loop degraded result仍 providerCalls=1。相关 33 pass / 190 assertions；全量 268 / 3949、typecheck、cache v5 golden与 diff check通过。真实组合发送并入 T14。 |
 | local assistant 不进群 | ✅ | e2e：assistant_text/thinking 只进 agent_events |
 | Pi 原生 Telegram attach/detach | ✅ | 2026-08-08 项目 Pi 真实 fullscreen TTY：`/tg attach A` 显示 #19061–#19063，`/tg more` prepend 到 #18961，`/tg detach` 断开后内容保留；退出 Pi 不影响 daemon |
 | deterministic routing property tests | ✅ | 2026-08-07 33/33 + 真实群双 bot 实况 |
@@ -75,7 +76,7 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |
 | threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ⏳ Phase 9 | - |
-| 当前全量回归 | ✅ | 2026-08-08 `bun test`：259 pass / 0 fail / 3882 assertions；`bun run check` 通过；cache v5 golden 6/6 |
+| 当前全量回归 | ✅ | 2026-08-08 `bun test`：268 pass / 0 fail / 3949 assertions；`bun run check` 通过；cache v5 golden 6/6 |
 
 ## 已知 flaky
 

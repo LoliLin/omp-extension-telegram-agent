@@ -31,7 +31,8 @@
 
 ### agent_events — bot 内部行为
 
-- 每条：bot、时间、kind（assistant_text / thinking / tool_call / tool_result / vision / usage / compaction / error）、payload(JSON)
+- 每条：bot、时间、kind（assistant_text / thinking / tool_call / tool_result / vision / usage / compaction / error / send_degraded）、payload(JSON)
+- `send_degraded` 是发送commit boundary后的有界诊断：只存overall outcome、已知message ids与至多8个component/outcome/stage/category，不存正文、token、请求URL或完整异常。
 - TUI 的 `Bot X · LOCAL` 区域数据源
 
 ### llm_runs / telemetry — provider 遥测

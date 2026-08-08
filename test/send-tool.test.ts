@@ -18,11 +18,14 @@ import {
 } from "@earendil-works/pi-ai";
 import { buildSystemPrompt } from "../src/agent/prompt.ts";
 import {
+	degradedSendResult,
+	SEND_NO_RETRY_ACK,
 	SEND_SUCCESS_ACK,
 	successfulSendResult,
 	TOOL_DEFS,
 	toolProtocolHash,
 	toolsHash,
+	type SendDegradedDetails,
 } from "../src/agent/tools.ts";
 
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -150,5 +153,43 @@ describe("send tool contract (REQ-SEND-0001)", () => {
 		expect(result?.role === "toolResult" ? result.content : null).toEqual([{ type: "text", text: SEND_SUCCESS_ACK }]);
 		expect(result?.role === "toolResult" ? result.details : null).toEqual({ sent: [9001] });
 		expect(JSON.stringify(result?.role === "toolResult" ? result.content : null)).not.toContain("9001");
+	});
+
+	test("a degraded no-retry result also stops after one provider call", async () => {
+		const definition = TOOL_DEFS[0];
+		const tool: AgentTool<typeof definition.parameters, SendDegradedDetails> = {
+			...definition,
+			execute: async () => degradedSendResult({
+				sent: [],
+				outcome: "unknown",
+				failed_component: "message",
+				failed_outcome: "unknown",
+				stage: "telegram_create",
+				category: "timeout",
+			}),
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+		const config: AgentLoopConfig = {
+			model: model(),
+			convertToLlm: (messages: AgentMessage[]) =>
+				messages.filter((message) => ["user", "assistant", "toolResult"].includes(message.role)) as Message[],
+		};
+		let providerCalls = 0;
+		const stream = agentLoop([userMessage()], context, config, undefined, () => {
+			providerCalls++;
+			const response = new MockAssistantStream();
+			queueMicrotask(() => response.push({ type: "done", reason: "toolUse", message: assistantToolCall() }));
+			return response;
+		});
+
+		const events: AgentEvent[] = [];
+		for await (const event of stream) events.push(event);
+		const messages = await stream.result();
+		const result = messages.find((message) => message.role === "toolResult");
+
+		expect(providerCalls).toBe(1);
+		expect(events.filter((event) => event.type === "turn_end")).toHaveLength(1);
+		expect(result?.role === "toolResult" ? result.content : null).toEqual([{ type: "text", text: SEND_NO_RETRY_ACK }]);
+		expect(result?.role === "toolResult" ? result.details : null).toMatchObject({ outcome: "unknown", category: "timeout" });
 	});
 });
