@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, parseEnvFile, normalizePeerId, ConfigError } from "../src/config.ts";
-import { acquirePidLock, releasePidLock, readPid, pidAlive, isOurDaemon } from "../src/daemon/pid.ts";
+import { acquirePidLock, releasePidLock, readPid, pidAlive, isOurDaemon, listOurDaemons } from "../src/daemon/pid.ts";
 import { buildSystemPrompt, sha256Short } from "../src/agent/prompt.ts";
 
 const FIXTURE_LOCK = join(import.meta.dir, "fixtures/daemon/index.ts");
@@ -269,6 +269,18 @@ describe("pid lock (REQ-OPS-0001 R4)", () => {
 		}
 	});
 
+	test("release only removes the pid file still owned by the exiting daemon", () => {
+		const dir = mkdtempSync(join(tmpdir(), "pidlock-owner-"));
+		try {
+			const fd = acquirePidLock(dir);
+			writeFileSync(join(dir, "daemon.pid"), "99999999");
+			releasePidLock(fd, dir);
+			expect(readPid(join(dir, "daemon.pid"))).toBe(99999999);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("second acquire while a daemon-like process holds the lock exits with 'already running' and leaves the lock intact", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "pidlock-"));
 		try {
@@ -299,5 +311,17 @@ describe("pid lock (REQ-OPS-0001 R4)", () => {
 	test("an alive but foreign pid is not our daemon (stop would refuse)", () => {
 		expect(pidAlive(process.pid)).toBe(true);
 		expect(isOurDaemon(process.pid)).toBe(false);
+	});
+
+	test("a shell command merely containing the daemon path is not enumerated as a daemon", async () => {
+		const decoy = Bun.spawn(["sh", "-c", "sleep 5", "src/daemon/index.ts"], { stdout: "ignore", stderr: "ignore" });
+		try {
+			expect(pidAlive(decoy.pid)).toBe(true);
+			expect(isOurDaemon(decoy.pid)).toBe(false);
+			expect(listOurDaemons()).not.toContain(decoy.pid);
+		} finally {
+			decoy.kill("SIGTERM");
+			await decoy.exited;
+		}
 	});
 });

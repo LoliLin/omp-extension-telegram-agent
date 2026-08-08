@@ -47,7 +47,8 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10r** — 调查并正式化 Pi native card hierarchy、trailing metadata 与 narrow-width退化；validates: UI-0011 documented scope/AC；commit: docs/research only
 - [x] **T10s** — 共享 Pi native header stack，统一message/event/stream层级并锁多宽度/零净LOC；validates: UI-0011 AC1–AC7；commit: native card presentation
 - [x] **T10t** — 用T10s真实commit hash记录UI-0011完成并在REQ-LIST勾选；validates: UI-0011 traceability；commit: completion record
-- [ ] **T10p** — 增加串行 graceful CLI/Pi restart 与原 filter feed重连；validates: OPS-0002 AC1–AC7；commit: daemon restart workflow
+- [x] **T10p** — 增加串行 graceful CLI/Pi restart、同deployment孤儿回收与原filter feed重连；validates: OPS-0002 AC1–AC7；commit: daemon restart workflow
+- [ ] **T10u** — 用T10p真实commit hash记录OPS-0002完成并在REQ-LIST勾选；validates: OPS-0002 traceability；commit: completion record
 - [ ] **T10m** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
 - [ ] **T12** — 参数化 e2e `--bot`，增加 1/2/3-bot daemon composition/IPC fixture；validates: PLAT-0001 AC1–AC3/AC7；commit: generic verification

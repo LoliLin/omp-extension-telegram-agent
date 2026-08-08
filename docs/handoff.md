@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：Pi native card polish UI-0011 已实现、签名提交并在REQ-LIST勾选；下一步实现deployment-wide一键受控restart。
+2026-08-08：deployment-wide一键受控restart已实现并完成真实CLI/Pi smoke；下一步提交并勾选OPS-0002，再调查REQ-LIST新note“bot会重复发”。
 
 ## 已完成
 
@@ -12,7 +12,7 @@
 - `src/plugin/timeline.ts` 只保留 IPC、history cursor、dedupe、stats 与有界媒体读取；旧 `src/tui/engine.ts` 已删除。
 - `/tg attach [bot]`、显式 `/tg compose <bot|off>`、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]` 与 daemon commands 可用。
 - package manifest、项目 Pi launcher、fullscreen settings、native Image 和 Pi `FooterComponent` telemetry 已落地。
-- 全量验证：246 tests pass / 0 fail / 3772 assertions；`bun run check`、cache v5 golden通过；真实 Pi fullscreen TTY 已验证 attach/more/detach，Rich/reply真实群trace留T14。
+- 全量验证：259 tests pass / 0 fail / 3882 assertions；`bun run check`、cache v5 golden通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Rich/reply发送trace留T14。
 
 ## 当前实施队列
 
@@ -31,7 +31,7 @@
 13. **已实现 `REQ-TG-0002`**：Telegram 确有private draft Thinking但只接受目标私聊；当前supergroup accepted trigger立即`typing`、每4秒续约，单timer/in-flight。组合send成功、flush settle与shutdown幂等停止；failure streak脱敏且不影响主流程，draft调用恒为0。54 targeted / 2640 assertions通过，真实群长run留T14。
 14. **已实现 `REQ-TG-0003`**：T10k统一≤256 KiB source与有界projector；T10l把agent文字接到final `sendRichMessage`，确认parse/method拒绝才单次literal fallback，unknown outcome绝不重发。manual compose仍plain；tool-only说明触发cache 4→5，targeted 61/730通过，真实群留T14。
 15. **已实现 `REQ-REPLY-0001`**：只存嵌入父sender numeric id；canonical+obligation在offset前原子提交。reason/chat/message id穿过dispatch，reply优先占≤40 batch；45 reply按40+5提交，busy/cooldown/stopping/file reopen与A/B隔离已锁。provider成功才清，绝无内容兜底/额外纠错call；targeted 70/2680通过，真实trace留T14。
-16. **已调查 `REQ-OPS-0002`**：当前所有bot共享daemon，故一键操作定义为deployment-wide `/tg restart`；PID身份校验→graceful stop→资源释放→规范start/ready，并恢复调用前Pi feed filter，绝不热重建单runtime。
+16. **已实现 `REQ-OPS-0002`**：共享controller做同仓库PID身份/孤儿枚举、排他control lock、一次SIGTERM、40秒资源释放与真实socket-connect readiness；现场回收`5090+9316→6329`后跨退避窗口无新409。Pi `/tg restart`异步关闭compose，保留transcript并恢复A/all filter与原生footer；真实stopped/running/Pi三路径均通过。
 17. **已调查 `REQ-ONBOARD-0001`**：当前`file:../pi`、手工JSON配置、tracked真实persona与单语内部索引阻断fresh clone。实施拆为portable launcher、typed local config/prompt privacy、atomic config core、Pi原生`/tg config`、双语用户/成本/维护指南和mdBook Pages六个原子task；legacy JSON兼容，不偷偷改写Git历史。
 18. **已实现 `REQ-UI-0011`**：message/event/stream复用Pi `HStack/TruncatedText` header；身份leading、metadata trailing，bot id优先。40/60/80/120 columns覆盖CJK/emoji/长username与OSC，普通消息仍两行；真实Pi 80/40 columns和当前/浅色主题通过，production extension精确`+15/-15`净零行。
 
@@ -42,7 +42,7 @@ UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 
 ## 使用方式
 
 ```bash
-bun run src/main.ts start
+bun run src/main.ts start   # 或 restart
 bun run pi
 # Pi 内：/tg attach A · /tg compose A · 输入纯文本 · /tg compose off
 bun run src/main.ts stop

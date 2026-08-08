@@ -1,6 +1,6 @@
 # REQ-OPS-0002: 从 Pi 一键受控重启 Telegram daemon
 
-- **Status:** Approved（2026-08-08 已调查，未实现）
+- **Status:** Implemented（2026-08-08；unit与真实CLI/Pi验证完成，REQ-LIST completion record待实现commit hash）
 - **Priority:** P1
 - **Source:** 用户追加 `REQ-LIST`：「做bot一键重启功能」
 - **依赖:** REQ-OPS-0001、REQ-UI-0008、REQ-UI-0004
@@ -73,3 +73,12 @@ CLI/Pi输出阶段：`stopping old pid`、`waiting`、`starting new pid`、`read
 
 - Plans: `PLAN-20260808-complete-new-reqs#T10p`
 - Commits: 从 `Requirement:` git trailer 查
+
+## 实现证据
+
+- `DaemonController`统一start/restart readiness；restart lock按控制进程PID排他且可回收，旧进程只在同仓库cwd/绝对entry匹配后才会收到一次SIGTERM。
+- 除pid file owner外会枚举同仓库孤儿daemon。真实deployment发现遗留PID `9316`与当前PID并存，restart同时优雅停止两者、等待所有PID/pid file/socket消失，再启动唯一替代进程；命令文本型decoy有回归保证不被误判。
+- readiness不再只看socket pathname：旧socket先清理，新进程必须拥有有效pid identity且Unix socket可真实connect，才报告`ready`；60秒后仍存活则只报告`starting`。early exit只回显15行/4096字符的credential-redacted log tail。
+- Pi `/tg restart`异步委托CLI，先关闭compose并dispose旧IPC（pending send沿用unknown outcome/no retry），原位保留transcript；ready后同一A/all filter与原生footer重连，跨client snapshot按canonical identity去重。
+- 真实smoke覆盖running→restart、stopped→restart及Pi attached A：`75075→5090`后暴露孤儿，修复后`5090+9316→6329`且跨30秒无新409；stopped→`6795`、Pi `6795→6903`，SQLite数据保留，重连后snapshot/status/live message/连续stream均可见。
+- Cache impact: **NONE**；cache v5 golden不变，DB/IPC/provider grammar与token/call数不变。

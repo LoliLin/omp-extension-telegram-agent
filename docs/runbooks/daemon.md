@@ -14,6 +14,7 @@
 ```bash
 bun run src/main.ts start          # 后台运行，日志 data/daemon.log
 bun run src/main.ts start --foreground   # 前台（调试用）
+bun run src/main.ts restart        # deployment-wide 优雅重启全部配置 bot
 bun run src/main.ts status         # 状态（pid 校验：cmdline 必须是本项目 daemon）
 bun run src/main.ts stop           # SIGTERM 优雅停止
 ```
@@ -21,7 +22,9 @@ bun run src/main.ts stop           # SIGTERM 优雅停止
 - 首启可能较慢：sticker set 下载 + vision 预识别（114 个 sticker 约 10–15 分钟，一次性；之后秒起）。`start` 会在 60s 内等 socket；没等到会提示用 `status` / `daemon.log` 确认，不会误报失败。
 - 每 bot 启动日志的 `sticker-catalog` 行会报告 `catalog/sendable/missing_file_id`；`missing_file_id>0` 的条目不会暴露给该 bot。检查 set 名/token 权限或 Telegram `getStickerSet` 失败，不要复制另一个 bot 的 file_id。
 - 配置错误会在启动期逐条列出（stderr / daemon.log），不会静默跑坏配置。
-- 双 start 竞态由排他 pid 锁挡住：第二个立即报「daemon already running」。
+- 双 start 竞态由排他pid锁挡住；并发restart由`data/daemon.control.lock`串行，第二个立即报`restart already in progress`。
+- restart会验证同仓库进程身份，并回收同一deployment里缺失于pid file的孤儿daemon；foreign PID与仅在参数中提到daemon路径的shell命令不会收到signal。旧PID、pid file与socket全部消失后才spawn，新socket必须可真实连接才报告ready。
+- 首次初始化超过60秒但child仍存活时只报告starting；child早退会显示`data/daemon.log`中有界且脱敏的末尾，不会输出token/env值。
 
 ## 观察
 
@@ -41,6 +44,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 /tg panel A             # 将 Pi 原生 footer 切到 A 的 Telegram usage
 /tg panel off           # 恢复当前 Pi session 的默认 footer
 /tg status A            # lifetime + latest usage/latency 详细通知
+/tg restart             # 优雅重启deployment并恢复当前feed filter/footer
 /tg status-daemon       # daemon 进程状态
 ```
 
@@ -53,6 +57,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - `/tg panel` 可单独切换范围，`panel off` 恢复 operator Pi session usage。`/tg status [bot]` 另列 runs/since/epoch、latest cache/output/reasoning/latency/cost 与 lifetime totals/平均 latency。
 - 在 editor 输入 `/tg ` 后按 Tab/选择使用 Pi 原生分级菜单；`attach/status/compose/panel` 的下一层会从配置动态列出 bot id/name，`compose/panel` 另有 `off`。
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。
+- `/tg restart`先关闭compose并中止旧IPC；在途manual send按unknown outcome处理且绝不自动重发。ready后保留原transcript，自动以原A/all filter重连并恢复此前的原生footer scope；失败时保留已显示内容与可执行诊断。
 
 ## 新增一个 bot
 
@@ -63,7 +68,8 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 
 ## 故障排查
 
-- `status` 说 not running 但进程在：pid 文件是残留 → `stop`/`start` 会自动清理/接管
+- `status` 报duplicate/orphan project daemon：运行`restart`；它只处理同仓库真实daemon entry并等待全部退出，避免Telegram long poll 409。
+- malformed pid file与socket同时存在：controller会拒绝猜测；先检查`data/daemon.pid`、`data/daemon.sock`与`ps`，不要手工signal未经身份确认的PID。
 - 面板无数据：尚无 llm_runs（bot 从未被触发）
 - `/tg attach` 报「unknown bot id」：id 拼错，错误信息会列出全部配置的 id
 - `/tg compose` 报 no connected feed：先 `/tg attach [bot]`，确认 transcript 已收到 snapshot；compose 不会自行启动 daemon

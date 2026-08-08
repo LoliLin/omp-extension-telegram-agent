@@ -257,7 +257,7 @@ describe("native Pi Telegram extension", () => {
 			label: "A (小雪)",
 			description: "Telegram bot 小雪",
 		});
-		expect(formatTgHelp()).toBe("usage: /tg attach [bot] | compose <bot|off> | more | detach | panel [bot|off] | status [bot] | start | stop | status-daemon");
+		expect(formatTgHelp()).toBe("usage: /tg attach [bot] | compose <bot|off> | more | detach | panel [bot|off] | status [bot] | start | restart | stop | status-daemon");
 		for (const root of completeTgArguments("", bots) ?? []) {
 			expect(parseTgArguments(root.value, bots).ok).toBe(true);
 			for (const child of completeTgArguments(`${root.value} `, bots) ?? []) {
@@ -705,6 +705,62 @@ describe("native Pi Telegram extension", () => {
 		await host.command("attach A");
 		host.shutdown();
 		expect(host.clients.at(-1)?.disposed).toBe(true);
+	});
+
+	test("restart delegates to the CLI and reconnects the same filtered feed and footer", async () => {
+		const calls: { command: string; args: readonly string[]; cwd: string }[] = [];
+		const host = makeHost({
+			processRunner: async (command, args, options) => {
+				calls.push({ command, args, cwd: options.cwd });
+				return { status: 0, stdout: "stopping old daemon (pid 100)\ndaemon ready (pid 200)\n", stderr: "" };
+			},
+		});
+		await host.command("attach A");
+		host.clients[0]!.emit({ type: "append", items: [message] });
+		await host.command("compose A");
+		await host.command("restart");
+
+		expect(calls).toEqual([{ command: "bun", args: ["run", "src/main.ts", "restart"], cwd: join(import.meta.dir, "..") }]);
+		expect(host.entries).toHaveLength(1);
+		expect(host.clients).toHaveLength(2);
+		expect(host.clients[0]!.disposed).toBe(true);
+		expect(host.clients[1]!.filter).toBe("A");
+		expect(host.clients[1]!.isConnected).toBe(true);
+		expect(host.getFooter()).toBeInstanceOf(FooterComponent);
+		expect(host.statusUpdates).toContainEqual({ key: "telegram-daemon", text: "TELEGRAM · RESTARTING" });
+		expect(host.statusUpdates.at(-1)).toEqual({ key: "telegram-daemon", text: undefined });
+		expect(host.statusUpdates).toContainEqual({ key: "telegram-compose", text: undefined });
+		expect(host.notifies.at(-1)).toEqual({ text: "stopping old daemon (pid 100)\ndaemon ready (pid 200)", level: "info" });
+
+		// A reconnect snapshot may overlap the retained transcript; the feed owns cross-client dedupe.
+		host.clients[1]!.emit({ type: "append", items: [message, { ...message, messageId: 6, text: "after restart" }] });
+		const rendered = host.entries[0]!.component.render(80).join("\n");
+		expect(rendered.match(/Alice · @alice/g)).toHaveLength(2);
+		expect(rendered).toContain("after restart");
+		expect(host.clients.flatMap((client) => client.sendCalls)).toHaveLength(0);
+	});
+
+	test("restart preserves transcript on failure, reports starting honestly, and creates no feed when detached", async () => {
+		const failed = makeHost({ processRunner: async () => ({ status: 1, stdout: "", stderr: "shutdown timed out; no replacement was started" }) });
+		await failed.command("attach A");
+		failed.clients[0]!.emit({ type: "append", items: [message] });
+		await failed.command("restart");
+		expect(failed.clients).toHaveLength(1);
+		expect(failed.clients[0]!.disposed).toBe(true);
+		expect(failed.entries[0]!.component.render(80).join("\n")).toContain("Alice · @alice");
+		expect(failed.notifies.at(-1)).toEqual({ text: "shutdown timed out; no replacement was started", level: "error" });
+
+		const starting = makeHost({ processRunner: async () => ({ status: 0, stdout: "daemon starting (pid 201)", stderr: "" }) });
+		await starting.command("attach");
+		await starting.command("restart");
+		expect(starting.clients).toHaveLength(1);
+		expect(starting.clients[0]!.disposed).toBe(true);
+		expect(starting.notifies.at(-1)).toEqual({ text: "daemon starting (pid 201)", level: "info" });
+
+		const detached = makeHost({ processRunner: async () => ({ status: 0, stdout: "daemon ready (pid 202)", stderr: "" }) });
+		await detached.command("restart");
+		expect(detached.entries).toHaveLength(0);
+		expect(detached.clients).toHaveLength(0);
 	});
 
 	test("message, LOCAL event and stream cards share trailing native headers at every width", () => {

@@ -5,8 +5,8 @@
 // recycled OS pid is never killed.
 
 import { openSync, closeSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
-import { execSync } from "node:child_process";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { basename, isAbsolute, join, resolve } from "node:path";
 
 export const PID_PATH = join(process.cwd(), "data", "daemon.pid");
 
@@ -25,13 +25,56 @@ export function pidAlive(pid: number): boolean {
 	}
 }
 
-/** True when the pid's process cmdline contains our daemon entry — a recycled pid is refused. */
-export function isOurDaemon(pid: number): boolean {
+function processCommand(pid: number): string | null {
 	try {
-		const out = execSync(`ps -p ${pid} -o command=`, { encoding: "utf8", timeout: 3000 });
-		return out.includes("src/daemon/index.ts") || out.includes("daemon/index");
+		return execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 3000 }).trim();
 	} catch {
-		return false;
+		return null;
+	}
+}
+
+function processCwd(pid: number): string | null {
+	try {
+		const output = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], { encoding: "utf8", timeout: 3000 });
+		return output.split("\n").find((line) => line.startsWith("n"))?.slice(1) ?? null;
+	} catch {
+		return null;
+	}
+}
+
+function daemonEntry(command: string): string | null {
+	const args = command.trim().split(/\s+/);
+	if (basename(args[0] ?? "") !== "bun") return null;
+	const entry = args[1] === "run" ? args[2] : args[1];
+	if (!entry) return null;
+	const unquoted = entry.replace(/^["']|["']$/g, "");
+	return /(?:^|\/)daemon\/index(?:\.ts)?$/.test(unquoted) ? unquoted : null;
+}
+
+/** True only for a daemon entry running from this repository; recycled/other-repo pids are refused. */
+export function isOurDaemon(pid: number, rootDir: string = process.cwd()): boolean {
+	const command = processCommand(pid);
+	if (!command) return false;
+	const entry = daemonEntry(command);
+	if (!entry) return false;
+	const root = resolve(rootDir);
+	if (isAbsolute(entry) && resolve(entry) === join(root, "src/daemon/index.ts")) return true;
+	const cwd = processCwd(pid);
+	return cwd != null && resolve(cwd) === root && resolve(cwd, entry).startsWith(`${root}/`);
+}
+
+/** Enumerate every live daemon from this repository, including an orphan missing from daemon.pid. */
+export function listOurDaemons(rootDir: string = process.cwd()): number[] {
+	try {
+		const output = execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8", timeout: 3000 });
+		const candidates = output
+			.split("\n")
+			.filter((line) => daemonEntry(line.replace(/^\s*\d+\s+/, "")) != null)
+			.map((line) => Number(line.trim().match(/^(\d+)/)?.[1] ?? 0))
+			.filter((pid) => pid > 0 && pid !== process.pid);
+		return [...new Set(candidates.filter((pid) => pidAlive(pid) && isOurDaemon(pid, rootDir)))].sort((a, b) => a - b);
+	} catch {
+		return [];
 	}
 }
 
@@ -81,5 +124,6 @@ export function releasePidLock(pidFd: number, dataDir: string): void {
 	} catch {
 		// already closed
 	}
-	rmSync(join(dataDir, "daemon.pid"), { force: true });
+	const pidPath = join(dataDir, "daemon.pid");
+	if (readPid(pidPath) === process.pid) rmSync(pidPath, { force: true });
 }

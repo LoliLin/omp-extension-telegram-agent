@@ -28,7 +28,7 @@
 - 用户随时在项目目录运行 `bun run pi`，用 `/tg attach [bot-id]` 在 Pi 原生 transcript 查看完整群聊、LOCAL 事件与数据库 telemetry 保留期的 lifetime usage；关闭 Pi 不影响 daemon，累计值不归零
 - `/tg more` 加载更早历史，`/tg detach` 断开实时订阅，`/tg panel [bot|off]` 选择或恢复 Pi 原生 stats footer
 - `/tg ` 使用 Pi 自带分级菜单补全子命令与当前配置中的 bot，不需要记忆 id
-- daemon 运维：`start` / `status` / `stop`；详见 `docs/runbooks/daemon.md`
+- daemon 运维：`start` / `restart` / `status` / `stop`；Pi中可用`/tg restart`原位恢复当前feed；详见 `docs/runbooks/daemon.md`
 
 ## 主要约束
 

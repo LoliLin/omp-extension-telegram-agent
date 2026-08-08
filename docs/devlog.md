@@ -448,3 +448,12 @@
 - 真实Pi TTY在80/40 columns及当前/浅色主题attach feed验证无溢出或错位；连续partial继续复用已锁定的原位stream component/lifecycle，真实Telegram generation留总验收。
 - 生产扩展diff精确为15 additions / 15 deletions；没有新dependency、presentation file、timer或自绘layout engine。targeted extension/engine 37 tests / 352 assertions、typecheck与cache v5 golden通过。
 - Cache impact: **NONE**——只重排TUI已有字段；DB/IPC/provider grammar、provider-visible bytes、模型/vision/network调用与每turn token均不变。
+
+## 2026-08-08 (49) — 增加 deployment-wide 一键受控重启
+
+- `DaemonController`统一CLI start/restart：可回收control lock拒绝并发restart；同仓库cwd/绝对entry身份校验拒绝foreign PID和命令文本decoy。restart给每个同deployment daemon一次SIGTERM，等所有PID、pid file与socket消失后才单次spawn。
+- 真实smoke首次暴露pid file外仍有遗留PID 9316，解释了此前持续Telegram 409。新增孤儿枚举后`5090+9316→6329`，跨30秒退避窗口无新409；pid release也只删除仍属于自己的file，避免迟到shutdown破坏新owner。
+- readiness先清旧socket，再要求新pid identity与Unix socket真实connect；60秒仍alive只报starting，early exit回显≤15行/4096字符credential-redacted log。stopped→restart真实启动到6795，SQLite表数据保留。
+- Pi `/tg restart`改为异步CLI委托：立即关闭compose/dispose旧IPC，manual send保持unknown/no-retry；同一native transcript原位换client，以原A/all filter和footer重连，snapshot跨client去重。真实Pi`6795→6903`后status、live message及连续STREAMING partial均刷新。
+- controller/config/extension/timeline targeted tests及全量259 tests / 3882 assertions、typecheck与cache v5 golden通过；生产DB/IPC/provider grammar、context epoch、模型调用与每turn token均未改变。
+- Cache impact: **NONE**——纯进程与operator UI控制；restart恢复既有持久session，不引入provider-visible内容或额外LLM call。

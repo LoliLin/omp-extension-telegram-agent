@@ -11,6 +11,7 @@
 	"scripts": {
 		"pi": "node node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
 		"start": "bun run src/main.ts start",
+		"restart": "bun run src/main.ts restart",
 		"status": "bun run src/main.ts status",
 		"attach": "bun run src/main.ts attach",
 		"stop": "bun run src/main.ts stop",
