@@ -14,7 +14,8 @@
 ### messages — canonical 群消息
 
 - `(chat_id, message_id)` 唯一 —— 多个 bot 收到同一条群消息只存一条
-- 元数据：send_time、thread_id、sender_id、display_name、username、sender_tag、sender_chat、is_bot、text、caption、entities(JSON)、`rich_message`(JSON)、reply_to_message_id、quote(JSON)、forward_origin(JSON)、edit_time、media 引用
+- 元数据：send_time、thread_id、sender_id、display_name、username、sender_tag、sender_chat、is_bot、text、caption、entities(JSON)、`rich_message`(JSON)、reply_to_message_id、`reply_to_sender_id`、quote(JSON)、forward_origin(JSON)、edit_time、media 引用
+- `reply_to_sender_id`只保存Telegram嵌入的`reply_to_message.from.id`/`sender_chat.id` numeric snapshot；不复制父消息正文或完整对象。snapshot缺失时router仍查询canonical父行；second-bot duplicate可幂等补齐null snapshot，edit保持/补齐该identity。
 - Rich Message：`rich_message`保存原始Telegram structure，UTF-8 JSON上限256 KiB；超限/不可序列化时只存 `{truncated,reason,raw_bytes?}` 有界诊断。`text`保存无LLM projector的纯文本结果（16层、500 blocks、4096 nodes、32768 Unicode code points），保持heading/list/table/details/caption阅读顺序；URL、file id与未知metadata不进projection。IPC/Pi/provider只读`text`，不传source。
 - edit：messages 表永远是最新版，旧版进 message_revisions；rich edit同时保存旧/新projection与source
 
@@ -43,13 +44,19 @@
 - session 文件路径、context epoch、update offset、exposure 水位线等 KV
 - bot_id 为 TEXT，任意 bot id 可用（REQ-CONF-0001 泛型化：bot_state / agent_events / llm_runs / raw_updates 的 bot 列均为 TEXT，bot 清单来自 bots.config.json，代码无 A/B 假设）
 
+### reply_obligations — direct reply provider 交付义务
+
+- `(bot_id, chat_id, message_id)`唯一；只保存目标bot、canonical消息id与创建时间，不保存正文。
+- direct human reply的canonical insert/enrichment与obligation在同一个SQLite transaction提交，发生在poller offset前；bot sender不创建。
+- `session.sendUserMessage`成功接收含原`#message_id`的既有suffix后删除；provider失败/shutdown保留。daemon完成session/IPC初始化后按bot/Telegram顺序恢复；已在`exposed_ids`中的崩溃边界行只清理、不重复提交。
+
 ### aliases — 无 username 用户的稳定短 alias
 
 - `(chat_id, user_id) → u<N>`，单调分配，永久稳定
 
 ## ID / dedupe 规则
 
-- update 唯一性：`(bot_id, update_id)`；重复 update 直接跳过
+- update 唯一性：`(bot_id, update_id)`；raw/canonical/reply obligation在一个transaction内，失败整体回滚，重复 update 直接跳过
 - 消息唯一性：`(chat_id, message_id)`；多个 bot 各收到一次 → 后续副本视为 duplicate
 - restart：offset 从 bot_state 恢复，Telegram 重发的旧 update 被 raw_updates 去重
 - bot 自发消息：plain/rich send返回都经同一normalize立即落库；随后poller也会收到同一条 → 按 (chat_id, message_id)去重，不重复

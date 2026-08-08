@@ -2,10 +2,11 @@
 // See docs/data-model.md for dedupe rules.
 
 import type { Database } from "bun:sqlite";
+import { createReplyObligation } from "../db/reply-obligations.ts";
 import { extractUpdateMessage, isTargetChat, normalizeMessage, type CanonicalMessage } from "../telegram/normalize.ts";
 
 export interface IngestResult {
-	kind: "inserted" | "edited" | "duplicate" | "ignored";
+	kind: "inserted" | "edited" | "enriched" | "duplicate" | "ignored";
 	chatId?: number;
 	messageId?: number;
 }
@@ -14,7 +15,23 @@ export interface IngestResult {
 export const EDIT_UNKNOWN_BOT_ID = "edit-unknown";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export function ingestUpdate(db: Database, botId: string, update: any, groupPeerId: number): IngestResult {
+export function ingestUpdate(
+	db: Database,
+	botId: string,
+	update: any,
+	groupPeerId: number,
+	replyBotTargets?: ReadonlyMap<number, string>,
+): IngestResult {
+	return db.transaction(() => ingestUpdateTransaction(db, botId, update, groupPeerId, replyBotTargets))();
+}
+
+function ingestUpdateTransaction(
+	db: Database,
+	botId: string,
+	update: any,
+	groupPeerId: number,
+	replyBotTargets?: ReadonlyMap<number, string>,
+): IngestResult {
 	const updateId = update.update_id as number;
 
 	// 1. store raw update (bot_id + update_id dedupe)
@@ -33,10 +50,32 @@ export function ingestUpdate(db: Database, botId: string, update: any, groupPeer
 	recordMedia(db, botId, canonical); // media identity/file_id tracked even for duplicate messages
 
 	const result = payload.edited ? editMessage(db, canonical) : insertMessage(db, botId, canonical);
+	if ((result.kind === "inserted" || result.kind === "enriched") && replyBotTargets) {
+		createIngestReplyObligation(db, canonical, replyBotTargets);
+	}
 	if (canonical.rich_truncated && (result.kind === "inserted" || result.kind === "edited")) {
 		console.warn(`[rich-message] rich_parse_truncated bot=${botId} msg=#${canonical.message_id}`);
 	}
 	return result;
+}
+
+/** Canonical row + pending obligation commit together, before the poller advances its offset. */
+function createIngestReplyObligation(
+	db: Database,
+	message: CanonicalMessage,
+	replyBotTargets: ReadonlyMap<number, string>,
+): void {
+	if (message.is_bot || message.reply_to_message_id == null) return;
+	let parentSenderId = message.reply_to_sender_id;
+	if (parentSenderId == null) {
+		const parent = db
+			.query("SELECT sender_id FROM messages WHERE chat_id = ? AND message_id = ?")
+			.get(message.chat_id, message.reply_to_message_id) as { sender_id: number | null } | null;
+		parentSenderId = parent?.sender_id ?? null;
+	}
+	if (parentSenderId == null) return;
+	const targetBotId = replyBotTargets.get(parentSenderId);
+	if (targetBotId) createReplyObligation(db, targetBotId, message.chat_id, message.message_id);
 }
 
 /** Persist media identity (shared file_unique_id) and this bot's file_id mapping. */
@@ -59,8 +98,8 @@ function insertMessage(db: Database, botId: string, m: CanonicalMessage): Ingest
 			`INSERT OR IGNORE INTO messages (
 				chat_id, message_id, date, thread_id, sender_id, display_name, username,
 				sender_tag, sender_chat, is_bot, text, caption, entities, rich_message,
-				reply_to_message_id, quote, forward_origin, edit_date, media, first_seen_by
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				reply_to_message_id, reply_to_sender_id, quote, forward_origin, edit_date, media, first_seen_by
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.run(
 			m.chat_id,
@@ -78,13 +117,26 @@ function insertMessage(db: Database, botId: string, m: CanonicalMessage): Ingest
 			m.entities ? JSON.stringify(m.entities) : null,
 			m.rich_message,
 			m.reply_to_message_id,
+			m.reply_to_sender_id,
 			m.quote ? JSON.stringify(m.quote) : null,
 			m.forward_origin ? JSON.stringify(m.forward_origin) : null,
 			m.edit_date,
 			m.media ? JSON.stringify(m.media) : null,
 			botId,
 		);
-	if (res.changes === 0) return { kind: "duplicate", chatId: m.chat_id, messageId: m.message_id };
+	if (res.changes === 0) {
+		// A second bot's copy may carry the embedded reply sender snapshot that the first
+		// update omitted. Enrich once so the direct reply can still be routed durably.
+		if (m.reply_to_sender_id != null) {
+			const enriched = db
+				.query(
+					"UPDATE messages SET reply_to_sender_id = ? WHERE chat_id = ? AND message_id = ? AND reply_to_sender_id IS NULL",
+				)
+				.run(m.reply_to_sender_id, m.chat_id, m.message_id);
+			if (enriched.changes > 0) return { kind: "enriched", chatId: m.chat_id, messageId: m.message_id };
+		}
+		return { kind: "duplicate", chatId: m.chat_id, messageId: m.message_id };
+	}
 	return { kind: "inserted", chatId: m.chat_id, messageId: m.message_id };
 }
 
@@ -120,11 +172,12 @@ function editMessage(db: Database, m: CanonicalMessage): IngestResult {
 		existing.entities,
 		existing.rich_message,
 	);
-	db.query("UPDATE messages SET text = ?, caption = ?, entities = ?, rich_message = ?, edit_date = ? WHERE chat_id = ? AND message_id = ?").run(
+	db.query("UPDATE messages SET text = ?, caption = ?, entities = ?, rich_message = ?, reply_to_sender_id = COALESCE(?, reply_to_sender_id), edit_date = ? WHERE chat_id = ? AND message_id = ?").run(
 		m.text,
 		m.caption,
 		m.entities ? JSON.stringify(m.entities) : null,
 		m.rich_message,
+		m.reply_to_sender_id,
 		m.edit_date,
 		m.chat_id,
 		m.message_id,

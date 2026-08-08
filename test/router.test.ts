@@ -11,7 +11,9 @@ import {
 	routingValue,
 	nameKeywordTrigger,
 	type BotIdentity,
+	type RoutingDecision,
 	type RoutingRuntime,
+	type RoutingTrigger,
 	type TriggerResult,
 	type TriggerSource,
 } from "../src/agent/router.ts";
@@ -37,9 +39,13 @@ function row(overrides: Partial<MessageRow>): MessageRow {
 		chat_id: CHAT, message_id: 1, date: 1754600000, thread_id: null,
 		sender_id: 111, display_name: "Alice", username: "alice", sender_tag: null,
 		is_bot: 0, text: "hello", caption: null, entities: null,
-		reply_to_message_id: null, quote: null, edit_date: null, media: null,
+		reply_to_message_id: null, reply_to_sender_id: null, quote: null, edit_date: null, media: null,
 		...overrides,
 	} as MessageRow;
+}
+
+function decision(target: string | "nobody", reason: RoutingDecision["reason"], messageId = 1): RoutingDecision {
+	return { target, reason, chatId: CHAT, messageId };
 }
 
 describe("routingValue", () => {
@@ -97,7 +103,7 @@ describe("routeMessage", () => {
 			entities: JSON.stringify([{ type: "mention", offset: 0, length: 14 }]),
 		});
 		expect(routeMessage(db, mentioned, bots, CFG)).toBe("A");
-		expect(routeMessageDecision(db, mentioned, bots, CFG)).toEqual({ target: "A", reason: "explicit" });
+		expect(routeMessageDecision(db, mentioned, bots, CFG)).toEqual(decision("A", "explicit", nobodyId));
 	});
 
 	test("decision reason distinguishes reply, name, probability, and nobody", () => {
@@ -105,14 +111,12 @@ describe("routeMessage", () => {
 			`INSERT INTO messages (chat_id, message_id, date, sender_id, display_name, is_bot, text, first_seen_by)
 			 VALUES (?, 900, 1754600000, ?, '小雪', 1, 'parent', 'A')`,
 		).run(CHAT, bots[0]!.userId);
-		expect(routeMessageDecision(db, row({ message_id: 901, reply_to_message_id: 900 }), bots, CFG)).toEqual({
-			target: "A",
-			reason: "reply",
-		});
-		expect(routeMessageDecision(db, row({ message_id: 902, text: "小雨你怎么看" }), bots, CFG)).toEqual({
-			target: "B",
-			reason: "name",
-		});
+		expect(routeMessageDecision(db, row({ message_id: 901, reply_to_message_id: 900 }), bots, CFG)).toEqual(
+			decision("A", "reply", 901),
+		);
+		expect(routeMessageDecision(db, row({ message_id: 902, text: "小雨你怎么看" }), bots, CFG)).toEqual(
+			decision("B", "name", 902),
+		);
 		let probabilityId = -1;
 		let nobodyId = -1;
 		for (let id = 1; id < 10_000 && (probabilityId < 0 || nobodyId < 0); id++) {
@@ -121,7 +125,24 @@ describe("routeMessage", () => {
 			if (decision.reason === "nobody") nobodyId = id;
 		}
 		expect(routeMessageDecision(db, row({ message_id: probabilityId }), bots, CFG).reason).toBe("probability");
-		expect(routeMessageDecision(db, row({ message_id: nobodyId }), bots, CFG)).toEqual({ target: "nobody", reason: "nobody" });
+		expect(routeMessageDecision(db, row({ message_id: nobodyId }), bots, CFG)).toEqual(decision("nobody", "nobody", nobodyId));
+	});
+
+	test("embedded reply sender routes without a canonical parent and bot senders remain inert", () => {
+		const direct = row({
+			message_id: 903,
+			reply_to_message_id: 12,
+			reply_to_sender_id: bots[1]!.userId,
+		});
+		expect(routeMessageDecision(db, direct, bots, { secret: SECRET, probs: [0, 0] })).toEqual(
+			decision("B", "reply", 903),
+		);
+		expect(routeMessageDecision(db, { ...direct, is_bot: 1 }, bots, { secret: SECRET, probs: [1, 0] })).toEqual(
+			decision("nobody", "nobody", 903),
+		);
+		expect(routeMessageDecision(db, { ...direct, reply_to_sender_id: 111 }, bots, { secret: SECRET, probs: [0, 0] })).toEqual(
+			decision("nobody", "nobody", 903),
+		);
 	});
 
 	test("name keyword beats probability", () => {
@@ -164,10 +185,10 @@ describe("routeMessage", () => {
 
 describe("probability dispatch policy (REQ-ROUTE-0001)", () => {
 	class FakeRuntime implements RoutingRuntime {
-		readonly calls: TriggerSource[] = [];
+		readonly calls: Array<{ source: TriggerSource; trigger: RoutingTrigger }> = [];
 		constructor(private result: TriggerResult) {}
-		trigger(source: TriggerSource): TriggerResult {
-			this.calls.push(source);
+		trigger(source: TriggerSource, trigger: RoutingTrigger): TriggerResult {
+			this.calls.push({ source, trigger });
 			return this.result;
 		}
 	}
@@ -176,11 +197,11 @@ describe("probability dispatch policy (REQ-ROUTE-0001)", () => {
 		const a = new FakeRuntime("skipped_busy");
 		const b = new FakeRuntime("started");
 		const result = dispatchRoutingDecision(
-			{ target: "A", reason: "probability" },
+			decision("A", "probability", 800),
 			new Map<string, RoutingRuntime>([["A", a], ["B", b]]),
 		);
 		expect(result.outcome).toBe("skipped_busy");
-		expect(a.calls).toEqual(["probability"]);
+		expect(a.calls).toEqual([{ source: "probability", trigger: { reason: "probability", chatId: CHAT, messageId: 800 } }]);
 		expect(b.calls).toEqual([]);
 	});
 
@@ -188,18 +209,18 @@ describe("probability dispatch policy (REQ-ROUTE-0001)", () => {
 		const a = new FakeRuntime("started");
 		const b = new FakeRuntime("started");
 		const runtimes = new Map<string, RoutingRuntime>([["A", a], ["B", b]]);
-		expect(dispatchRoutingDecision({ target: "A", reason: "probability" }, runtimes).outcome).toBe("started");
-		expect(dispatchRoutingDecision({ target: "B", reason: "probability" }, runtimes).outcome).toBe("started");
-		expect(a.calls).toEqual(["probability"]);
-		expect(b.calls).toEqual(["probability"]);
+		expect(dispatchRoutingDecision(decision("A", "probability", 801), runtimes).outcome).toBe("started");
+		expect(dispatchRoutingDecision(decision("B", "probability", 802), runtimes).outcome).toBe("started");
+		expect(a.calls).toEqual([{ source: "probability", trigger: { reason: "probability", chatId: CHAT, messageId: 801 } }]);
+		expect(b.calls).toEqual([{ source: "probability", trigger: { reason: "probability", chatId: CHAT, messageId: 802 } }]);
 	});
 
 	test("mention/reply/name dispatch through the explicit coalescing path", () => {
 		for (const reason of ["explicit", "reply", "name"] as const) {
 			const runtime = new FakeRuntime("coalesced");
-			const result = dispatchRoutingDecision({ target: "A", reason }, new Map([["A", runtime]]));
+			const result = dispatchRoutingDecision(decision("A", reason, 803), new Map([["A", runtime]]));
 			expect(result.outcome).toBe("coalesced");
-			expect(runtime.calls).toEqual(["explicit"]);
+			expect(runtime.calls).toEqual([{ source: "explicit", trigger: { reason, chatId: CHAT, messageId: 803 } }]);
 		}
 	});
 
@@ -210,17 +231,17 @@ describe("probability dispatch policy (REQ-ROUTE-0001)", () => {
 			bots,
 			{ secret: SECRET, probs: [0, 0] },
 		);
-		expect(decision).toEqual({ target: "B", reason: "name" });
+		expect(decision).toEqual({ target: "B", reason: "name", chatId: CHAT, messageId: 777 });
 
 		const busy = new FakeRuntime("coalesced");
 		expect(dispatchRoutingDecision(decision, new Map([["B", busy]]))).toEqual({
 			...decision,
 			outcome: "coalesced",
 		});
-		expect(busy.calls).toEqual(["explicit"]);
+		expect(busy.calls).toEqual([{ source: "explicit", trigger: { reason: "name", chatId: CHAT, messageId: 777 } }]);
 
 		const coolingDown = new FakeRuntime("started");
 		expect(dispatchRoutingDecision(decision, new Map([["B", coolingDown]])).outcome).toBe("started");
-		expect(coolingDown.calls).toEqual(["explicit"]);
+		expect(coolingDown.calls).toEqual([{ source: "explicit", trigger: { reason: "name", chatId: CHAT, messageId: 777 } }]);
 	});
 });

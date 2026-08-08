@@ -22,6 +22,9 @@ function migrate(db: Database): void {
 	if (!messageCols.includes("rich_message")) {
 		db.exec("ALTER TABLE messages ADD COLUMN rich_message TEXT");
 	}
+	if (!messageCols.includes("reply_to_sender_id")) {
+		db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender_id INTEGER");
+	}
 	const revisionCols = (db.query("PRAGMA table_info(message_revisions)").all() as { name: string }[]).map((c) => c.name);
 	if (!revisionCols.includes("rich_message")) {
 		db.exec("ALTER TABLE message_revisions ADD COLUMN rich_message TEXT");

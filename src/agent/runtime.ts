@@ -31,7 +31,13 @@ import { tinyFishSearch, formatSearchResults } from "../tools/search.ts";
 import { runJs } from "../tools/run-js.ts";
 import { ensureVision, fileIdForBot, type VisionUpdateSink } from "../media/vision.ts";
 import { ensureStickerCatalog, stickerCatalogBlock, preRecognizeCatalogVision } from "../media/sticker-catalog.ts";
-import type { TriggerResult, TriggerSource } from "./router.ts";
+import {
+	createReplyObligation,
+	listReplyObligations,
+	removeReplyObligations,
+	replyObligationCount,
+} from "../db/reply-obligations.ts";
+import type { RoutingTrigger, TriggerResult, TriggerSource } from "./router.ts";
 import type { AgentStreamFrame, AgentStreamToolCall } from "../ipc.ts";
 
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
@@ -571,7 +577,28 @@ export class BotRuntime {
 	}
 
 	/** Called by the scheduler when this bot gets a response opportunity. */
-	trigger(source: TriggerSource = "explicit"): TriggerResult {
+	trigger(source: TriggerSource = "explicit", routingTrigger?: RoutingTrigger): TriggerResult {
+		const isDirectReply = routingTrigger?.reason === "reply";
+		let directReplyPending = false;
+		let directReplyMessageId: number | null = null;
+		if (isDirectReply && !this.exposed.has(routingTrigger.messageId)) {
+			const created = createReplyObligation(
+				this.db,
+				this.bot.id,
+				routingTrigger.chatId,
+				routingTrigger.messageId,
+			);
+			directReplyPending = true;
+			directReplyMessageId = routingTrigger.messageId;
+			const alreadyRecorded = this.db
+				.query(
+					"SELECT 1 FROM agent_events WHERE bot_id = ? AND kind = 'reply_obligation_created' AND json_extract(payload, '$.message_id') = ? LIMIT 1",
+				)
+				.get(this.bot.id, routingTrigger.messageId);
+			if (created || !alreadyRecorded) {
+				this.recordEvent("reply_obligation_created", { message_id: routingTrigger.messageId });
+			}
+		}
 		const state = this.samplingState();
 		if (state === "stopping") return "skipped_stopping";
 		if (source === "probability" && state !== "idle") {
@@ -581,6 +608,9 @@ export class BotRuntime {
 			// re-entrant trigger while a flush is in flight (e.g. slow vision await):
 			// coalesce into pendingTrigger; the loop picks it up (burst merge, R1)
 			this.pendingTrigger = true;
+			if (directReplyPending && directReplyMessageId != null) {
+				this.recordEvent("reply_obligation_coalesced", { message_id: directReplyMessageId });
+			}
 			return "coalesced";
 		}
 		if (source === "probability") this.cooldownAfterFlush = true;
@@ -609,45 +639,75 @@ export class BotRuntime {
 
 	private async flushLoop(): Promise<void> {
 		try {
+			let moreReplies = false;
 			do {
 				this.pendingTrigger = false;
 				this.typingLease.start();
-				await this.flush();
-			} while (this.pendingTrigger && !this.stopping);
+				moreReplies = await this.flush();
+			} while ((this.pendingTrigger || moreReplies) && !this.stopping);
 		} finally {
 			this.typingLease.stop();
 		}
 	}
 
 	/** Serialize unexposed messages into a new context suffix and wake the agent. */
-	private async flush(): Promise<void> {
-		if (!this.session) return;
+	private async flush(): Promise<boolean> {
+		if (!this.session) return false;
 		const chatId = Number(`-100${this.config.groupPeerId}`);
+		let obligations = listReplyObligations(this.db, this.bot.id, chatId);
+		const alreadyExposed = obligations.filter((obligation) => this.exposed.has(obligation.messageId));
+		if (alreadyExposed.length > 0) {
+			removeReplyObligations(this.db, this.bot.id, alreadyExposed);
+			obligations = obligations.filter((obligation) => !this.exposed.has(obligation.messageId));
+		}
 		const rows = this.db
 			.query("SELECT * FROM messages WHERE chat_id = ? ORDER BY date, message_id")
 			.all(chatId) as MessageRow[];
 		const fresh = rows.filter((r) => !this.exposed.has(r.message_id));
-		if (fresh.length === 0) return;
+		if (fresh.length === 0) return false;
 
-		let batch = fresh;
-		let skipped: MessageRow[] = [];
-		if (fresh.length > MAX_CATCHUP_MESSAGES) {
-			skipped = fresh.slice(0, fresh.length - MAX_CATCHUP_MESSAGES);
-			batch = fresh.slice(-MAX_CATCHUP_MESSAGES);
-		}
+		const obligationIds = new Set(obligations.map((obligation) => obligation.messageId));
+		const mandatory = fresh.filter((row) => obligationIds.has(row.message_id));
+		const selectedMandatory = mandatory.slice(0, MAX_CATCHUP_MESSAGES);
+		const remainingCapacity = MAX_CATCHUP_MESSAGES - selectedMandatory.length;
+		const normal = fresh.filter((row) => !obligationIds.has(row.message_id));
+		const selectedNormal = remainingCapacity > 0 ? normal.slice(-remainingCapacity) : [];
+		const selectedIds = new Set([...selectedMandatory, ...selectedNormal].map((row) => row.message_id));
+		const batch = fresh.filter((row) => selectedIds.has(row.message_id));
+		const skipped = normal.filter((row) => !selectedIds.has(row.message_id));
 
 		const visibleIds = new Set(this.exposed);
 		await this.ensureBatchVision(batch);
 		const text = serializeMessages(this.db, batch, { visibleIds });
-		if (!text.trim()) return;
+		if (!text.trim()) return false;
 		const suffix = [text, this.stickerCandidatesBlock()].filter(Boolean).join("\n\n");
 		await this.session.sendUserMessage(suffix);
 		// mark exposed only after the batch actually entered context (R2): on send failure
 		// the ids stay unexposed and a later trigger re-serializes them
 		this.markExposed(batch.map((r) => r.message_id));
+		const delivered = obligations.filter((obligation) => selectedIds.has(obligation.messageId));
+		removeReplyObligations(this.db, this.bot.id, delivered);
+		for (const obligation of delivered) {
+			this.recordEvent("reply_obligation_delivered", { message_id: obligation.messageId });
+		}
 		// catchup overflow is deliberately dropped, but only once the batch landed —
 		// otherwise a failed send would silently lose the skipped messages too
 		if (skipped.length > 0) this.markExposed(skipped.map((r) => r.message_id));
+		return replyObligationCount(this.db, this.bot.id, chatId) > 0;
+	}
+
+	/** Schedule persisted direct replies after startup; exposed rows are reconciled idempotently. */
+	recoverReplyObligations(): TriggerResult | null {
+		const chatId = Number(`-100${this.config.groupPeerId}`);
+		const obligations = listReplyObligations(this.db, this.bot.id, chatId);
+		const alreadyExposed = obligations.filter((obligation) => this.exposed.has(obligation.messageId));
+		removeReplyObligations(this.db, this.bot.id, alreadyExposed);
+		const pending = obligations.filter((obligation) => !this.exposed.has(obligation.messageId));
+		if (pending.length === 0) return null;
+		for (const obligation of pending) {
+			this.recordEvent("reply_obligation_recovered", { message_id: obligation.messageId });
+		}
+		return this.trigger("explicit");
 	}
 
 	/** Lazy vision: resolve media descriptions only now that they enter this bot's context. */

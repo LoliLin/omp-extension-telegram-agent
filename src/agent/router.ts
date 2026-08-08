@@ -12,13 +12,21 @@ export type RoutingReason = "explicit" | "reply" | "name" | "probability" | "nob
 export interface RoutingDecision {
 	target: TriggerTarget;
 	reason: RoutingReason;
+	chatId: number;
+	messageId: number;
 }
 
 export type TriggerSource = "explicit" | "probability";
 export type TriggerResult = "started" | "coalesced" | "skipped_busy" | "skipped_cooldown" | "skipped_stopping";
 
+export interface RoutingTrigger {
+	reason: RoutingReason;
+	chatId: number;
+	messageId: number;
+}
+
 export interface RoutingRuntime {
-	trigger(source: TriggerSource): TriggerResult;
+	trigger(source: TriggerSource, trigger: RoutingTrigger): TriggerResult;
 }
 
 export interface DispatchResult extends RoutingDecision {
@@ -52,6 +60,7 @@ export function explicitTriggerReason(db: Database, row: MessageRow, bot: BotIde
 		}
 	}
 	if (row.reply_to_message_id != null) {
+		if (row.reply_to_sender_id === bot.userId) return "reply";
 		const parent = db
 			.query("SELECT sender_id FROM messages WHERE chat_id = ? AND message_id = ?")
 			.get(row.chat_id, row.reply_to_message_id) as { sender_id: number | null } | null;
@@ -87,23 +96,29 @@ export interface RoutingConfig {
 
 /** Full routing decision with an explicit reason for scheduler policy. */
 export function routeMessageDecision(db: Database, row: MessageRow, bots: BotIdentity[], config: RoutingConfig): RoutingDecision {
+	const makeDecision = (target: TriggerTarget, reason: RoutingReason): RoutingDecision => ({
+		target,
+		reason,
+		chatId: row.chat_id,
+		messageId: row.message_id,
+	});
 	// Bot messages are observed history, never triggers — single authority point (REQ-TEST-0001
 	// R3): a caller forgetting the is_bot pre-check cannot introduce bot↔bot trigger loops.
-	if (row.is_bot) return { target: "nobody", reason: "nobody" };
+	if (row.is_bot) return makeDecision("nobody", "nobody");
 	for (const bot of bots) {
 		const reason = explicitTriggerReason(db, row, bot);
-		if (reason) return { target: bot.id, reason };
+		if (reason) return makeDecision(bot.id, reason);
 	}
 	for (const bot of bots) {
-		if (nameKeywordTrigger(row, bot)) return { target: bot.id, reason: "name" };
+		if (nameKeywordTrigger(row, bot)) return makeDecision(bot.id, "name");
 	}
 	const u = routingValue(config.secret, row.chat_id, row.message_id);
 	let cumulative = 0;
 	for (let i = 0; i < bots.length; i++) {
 		cumulative += config.probs[i] ?? 0;
-		if (u < cumulative) return { target: bots[i]!.id, reason: "probability" };
+		if (u < cumulative) return makeDecision(bots[i]!.id, "probability");
 	}
-	return { target: "nobody", reason: "nobody" };
+	return makeDecision("nobody", "nobody");
 }
 
 /** Target-only compatibility wrapper; deterministic bucket assignment is unchanged. */
@@ -120,5 +135,12 @@ export function dispatchRoutingDecision(
 	const runtime = runtimes.get(decision.target);
 	if (!runtime) return { ...decision, outcome: "missing_runtime" };
 	const source: TriggerSource = decision.reason === "probability" ? "probability" : "explicit";
-	return { ...decision, outcome: runtime.trigger(source) };
+	return {
+		...decision,
+		outcome: runtime.trigger(source, {
+			reason: decision.reason,
+			chatId: decision.chatId,
+			messageId: decision.messageId,
+		}),
+	};
 }

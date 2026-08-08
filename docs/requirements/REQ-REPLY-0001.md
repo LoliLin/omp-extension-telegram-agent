@@ -1,6 +1,6 @@
 # REQ-REPLY-0001: 直接回复 Bot 的消息必须进入对应模型上下文
 
-- **Status:** Approved（2026-08-08 已按用户澄清调查，未实现）
+- **Status:** Implemented（2026-08-08 T10o；真实 A/B reply trace 留 T14 总验收）
 - **Priority:** P1
 - **Source:** 用户追加 `REQ-LIST`：「bot在被回复后百分百回复（不是说一定要给模型兜底，是要让模型保证看到）」
 - **依赖:** REQ-ROUTE-0001、REQ-SEND-0001、REQ-AGENT-0001

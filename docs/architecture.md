@@ -33,7 +33,7 @@
 ## Telegram ingestion
 
 - 每个 bot token 一个 getUpdates long-polling 循环（offset 持久化在 SQLite）
-- 每条 update：原样存 raw_updates（bot identity + update_id 唯一）→ normalize 成 canonical message（chat_id + message_id 唯一，多个 bot 收到的同一条群消息只存一条）→ edit 存 revision。`rich_message` 也走同一 normalize：canonical列只保存≤256 KiB source（超限为有界JSON诊断），`text`保存确定性plain projection；projector上限为16层、500 blocks、4096 nodes、32768 code points，未知metadata不泄露URL/file id。revision保留旧source/projection，IPC/Pi/provider只读取projection。
+- 每条 update：raw update→canonical message→direct-reply obligation在一个SQLite transaction提交，之后poller才推进offset；任一步失败整体回滚并重放。canonical以(chat_id,message_id)去重，second-bot副本可只补齐null `reply_to_sender_id`。`rich_message` 也走同一 normalize：canonical列只保存≤256 KiB source（超限为有界JSON诊断），`text`保存确定性plain projection；projector上限为16层、500 blocks、4096 nodes、32768 code points，未知metadata不泄露URL/file id。revision保留旧source/projection，IPC/Pi/provider只读取projection。
 - Bot 自己 send 成功后，Telegram 返回的 Message 立即落库（发送→DB→TUI 事务链）。agent `send.message` 走 `sendRichMessage {rich_message:{markdown}}`；只有 Telegram 明确拒绝 rich method/parse 且确认未创建消息的确定性 4xx 才 literal `sendMessage` 一次。timeout、非JSON、429/5xx/unknown outcome不降级，防止双发；`rich_sent`/`plain_fallback` event只记录message id。operator manual compose仍保持literal plain text，两条路径复用 `src/telegram/send.ts` 的 send→canonical persistence primitive。
 
 ## Routing（Phase 5，REQ-CONF-0001 泛型化）
@@ -41,9 +41,10 @@
 - deterministic：`u = HMAC(router_secret, chatId + ":" + messageId)` → 按配置数组顺序累积 `routing_p` 阈值：`u < p[0]` → bots[0]；`p[0] ≤ u < p[0]+p[1]` → bots[1]；…否则 nobody（Σp ≤ 1 启动期校验）
 - 优先级：明确 @mention > reply target > 名字关键词 > 概率 routing
 - Bot 消息不进 trigger（`routeMessage` 内部单一权威判断，REQ-TEST-0001 R3）
-- router 返回 target + reason；只有 `probability` 走 runtime availability gate。bucket 先按原 HMAC 决定，目标 busy/cooldown 时直接 skip，绝不改投其他 bot。
+- router 返回target + reason + chat/message id；reply先认canonical `reply_to_sender_id` snapshot、再查父行。只有 `probability` 走runtime availability gate；bucket先按原HMAC决定，目标busy/cooldown时直接skip，绝不改投其他bot。
 - 每 bot 的 probability run 完成后用 monotonic deadline 冷却 `sampling_cooldown_ms`（默认 2000 ms）；deadline 不设 timer、不补抽，之后只有新消息才重新采样。不同 bot 仍可并发。
 - mention/reply/name 是 explicit path：配置 `name` 在 text/caption 中字面命中（例如“小雨”命中“我叫小雨”）即使 `routing_p=0` 也成立；busy 时继续 pending coalesce，cooldown 中也可立即启动；shutdown 不等待 cooldown。
+- human direct reply在provider前已持久化per-bot obligation。flush每批仍≤40：所有pending reply优先、剩余槽位取最近普通消息并保持Telegram顺序；普通overflow可drop/expose，pending reply绝不drop，>40 replies自动按40+N继续normal flush。只有`session.sendUserMessage`成功后才expose并删除对应obligation；失败/stop保留，startup在session与IPC ready后按bot恢复。provider仍只看到原有动态serialization，没有hidden control/fallback文字或额外纠错模型调用。
 - accepted trigger 同步 acquire per-bot Telegram `typing` lease（REQ-TG-0002）：当前目标是 supergroup，只调用 `sendChatAction`，不调用 private-only message/rich draft。单个递归 timer每4秒续约且最多一个in-flight；组合send完整成功时release，沉默/异常/abort/flush settle/shutdown由finally兜底。第一条send清状态后，coalesced pending在下一轮flush重新acquire。side channel失败按streak脱敏告警，不写DB/IPC/exposure/provider context，也不改变routing/cooldown/send结果。
 
 ## Agent（Phase 3）

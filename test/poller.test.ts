@@ -46,6 +46,7 @@ function injectDbFault(db: Database, failOn: (sql: string) => boolean): Database
 			if (failOn(sql)) throw new Error("injected db fault");
 			return db.query(sql);
 		},
+		transaction: (callback: () => unknown) => db.transaction(callback),
 	} as unknown as Database;
 }
 

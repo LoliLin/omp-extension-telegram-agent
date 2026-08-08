@@ -415,3 +415,12 @@
 - Rich Markdown能力与HTML/raw block/remote media禁令只写在send tool schema，persona/system没有API教程；operator Pi compose仍是literal plain text。CACHE_SCHEMA_VERSION 4→5，只有tools hash变为`631bf05405d1`，其余cache golden不变。
 - rich outbound + data/manual/sticker/flush/tool/cache targeted 61 tests / 730 assertions；全量231 / 3704、typecheck与cache v5 golden通过。真实Bot API rich/reply smoke留T14。
 - Cache impact: **INTENTIONAL**——一次稳定tool description变更开启新epoch；不新增tool、参数、LLM调用或动态result token，raw rich JSON仍不进入provider。
+
+## 2026-08-08 (45) — 保证 direct reply 进入目标 Bot provider suffix
+
+- canonical新增nullable `reply_to_sender_id`，只取嵌入父消息的numeric sender/sender_chat id；snapshot缺失时router回查canonical父行。second-bot duplicate可只补null identity，edit/immediate sent均保留，不把父正文/object放入canonical、IPC或provider。
+- `reply_obligations`以(bot,chat,message)去重。生产poller把raw/canonical/obligation放在一个SQLite transaction，成功后才推进offset；故daemon在ingest后、route前退出仍有可恢复义务。reason/chat/message id穿过dispatch；bot sender、mention/name/probability不创建。
+- runtime在≤40消息硬上限内优先pending reply，再用最近普通历史补槽且最终保持Telegram顺序；普通overflow仍可drop，但reply不标exposed。>40 reply自动分批继续；只有`session.sendUserMessage`成功后才expose/delete，provider throw、busy、cooldown、stopping与shutdown均保留。
+- startup待session/IPC sink ready后逐bot恢复；file DB A/B隔离、already-exposed崩溃边界幂等清理。created/coalesced/recovered/delivered event只含message id；没有fixed Telegram fallback、Assistant偷发或额外纠错LLM。
+- targeted ingest/router/runtime/poller/cache 70 tests / 2680 assertions；全量246 / 3772、typecheck与cache v5 golden通过。真实A/B reply provider trace留T14。
+- Cache impact: **NONE**——稳定prefix/grammar/hash与正常burst call数不变；只有真实reply backlog>40才产生必要的有界normal flush。

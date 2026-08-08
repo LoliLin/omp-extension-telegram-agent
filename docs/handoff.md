@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：TG-0003 Rich Message收发/data plane/cache v5已实现；下一步做direct reply provider delivery，再做一键restart。
+2026-08-08：REPLY-0001 durable provider delivery已实现；下一步做deployment-wide一键restart，再做Telegram control plane。
 
 ## 已完成
 
@@ -12,7 +12,7 @@
 - `src/plugin/timeline.ts` 只保留 IPC、history cursor、dedupe、stats 与有界媒体读取；旧 `src/tui/engine.ts` 已删除。
 - `/tg attach [bot]`、显式 `/tg compose <bot|off>`、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]` 与 daemon commands 可用。
 - package manifest、项目 Pi launcher、fullscreen settings、native Image 和 Pi `FooterComponent` telemetry 已落地。
-- 全量验证：231 tests pass / 0 fail / 3704 assertions；`bun run check`、cache v5 golden通过；真实 Pi fullscreen TTY 已验证 attach/more/detach，Rich Message真实群smoke留T14。
+- 全量验证：246 tests pass / 0 fail / 3772 assertions；`bun run check`、cache v5 golden通过；真实 Pi fullscreen TTY 已验证 attach/more/detach，Rich/reply真实群trace留T14。
 
 ## 当前实施队列
 
@@ -30,12 +30,12 @@
 12. **已实现 `REQ-UI-0010`**：assistant start/update/end 经 bot-filtered ephemeral IPC更新同一原生卡片，thinking/text/tool args均有界；32 active/64 ended tombstone，断线清理且不落库。feed每次变化调用 Pi host render，`panel off` 后仍有效；75 targeted / 592 assertions + typecheck/cache通过，真实连续 partial留T14。
 13. **已实现 `REQ-TG-0002`**：Telegram 确有private draft Thinking但只接受目标私聊；当前supergroup accepted trigger立即`typing`、每4秒续约，单timer/in-flight。组合send成功、flush settle与shutdown幂等停止；failure streak脱敏且不影响主流程，draft调用恒为0。54 targeted / 2640 assertions通过，真实群长run留T14。
 14. **已实现 `REQ-TG-0003`**：T10k统一≤256 KiB source与有界projector；T10l把agent文字接到final `sendRichMessage`，确认parse/method拒绝才单次literal fallback，unknown outcome绝不重发。manual compose仍plain；tool-only说明触发cache 4→5，targeted 61/730通过，真实群留T14。
-15. **已调查 `REQ-REPLY-0001`**：用户明确不要runtime内容兜底；目标是direct reply无论父消息缺失、busy、>40 catch-up或daemon restart都进入对应bot provider suffix。需要持久reply parent sender/obligation，成功提交后才清除。
+15. **已实现 `REQ-REPLY-0001`**：只存嵌入父sender numeric id；canonical+obligation在offset前原子提交。reason/chat/message id穿过dispatch，reply优先占≤40 batch；45 reply按40+5提交，busy/cooldown/stopping/file reopen与A/B隔离已锁。provider成功才清，绝无内容兜底/额外纠错call；targeted 70/2680通过，真实trace留T14。
 16. **已调查 `REQ-OPS-0002`**：当前所有bot共享daemon，故一键操作定义为deployment-wide `/tg restart`；PID身份校验→graceful stop→资源释放→规范start/ready，并恢复调用前Pi feed filter，绝不热重建单runtime。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 
-建议顺序：direct reply delivery → 一键 restart → Telegram admin commands → PLAT provider/config → 参数化 e2e/composition → 平台/README 文档 → T14 总验收。
+建议顺序：一键 restart → Telegram admin commands → PLAT provider/config → 参数化 e2e/composition → 平台/README/新onboarding note调查与实现 → T14 总验收。
 
 ## 使用方式
 
@@ -53,4 +53,4 @@ attach 默认只读；仅显式 compose 时 interactive editor 发 Telegram，of
 - 本次 native UI 重写：Cache impact **NONE**，IPC/DB/provider grammar 未变。
 - 新的 UI-0005/UI-0006 设计也要求 NONE。
 - STICKER-0002 是 **INTENTIONAL** cache change：schema 已从 2 bump 到 3，golden 通过；daemon 下次受控重启会自动开新 epoch。
-- 原子提交规范已在 `c32d937` 固化；native transcript 重写已签名提交为 `19819c9`。剩余 7 个 PLAN task，按 `PLAN-20260808-complete-new-reqs` 逐项实现/提交。
+- 原子提交规范已在 `c32d937` 固化；native transcript 重写已签名提交为 `19819c9`。剩余6个既有PLAN task，另有用户刚写入REQ-LIST的clone→`bun run pi`→`/tg config` onboarding raw note待正式化；均会逐项实现/提交。

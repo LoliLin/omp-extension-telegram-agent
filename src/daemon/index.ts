@@ -85,6 +85,7 @@ function recordRouteMetric(metric: string, botId: string, messageId: number): vo
 // IPC server for TUI attach/detach
 const botNames = new Map(config.bots.map((b) => [b.id, b.name] as [string, string]));
 const botUserIds = new Map(identities.map((i) => [i.id, i.userId] as [string, number]));
+const replyBotTargets = new Map(identities.map((identity) => [identity.userId, identity.id] as const));
 let ipc!: IpcServer;
 const manualSend = new ManualSendService(
 	db,
@@ -117,6 +118,13 @@ for (const [botId, rt] of runtimes) {
 	rt.streamDemand = () => ipc.hasStreamListener(botId);
 }
 ipc.start();
+
+// Direct replies are durable response opportunities. Restore them only after each
+// session and observer sink is ready, before fresh polling can add more work.
+for (const [botId, rt] of runtimes) {
+	const outcome = rt.recoverReplyObligations();
+	if (outcome) console.log(`[route] recovered direct replies bot=${botId} outcome=${outcome}`);
+}
 
 // route an ingested group message to a bot per routing rules
 function route(result: { chatId?: number; messageId?: number }): void {
@@ -159,7 +167,7 @@ const pollers = config.bots.map(
 					.get(result.chatId, result.messageId) as MessageRow | null;
 				if (row) ipc.broadcast(ipc.msgToItem(row));
 			}
-		}),
+		}, replyBotTargets),
 );
 
 let stopping = false;

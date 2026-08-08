@@ -21,6 +21,7 @@ export interface CanonicalMessage {
 	/** Ephemeral normalization diagnostic; never persisted or serialized. */
 	rich_truncated: boolean;
 	reply_to_message_id: number | null;
+	reply_to_sender_id: number | null;
 	quote: unknown | null;
 	forward_origin: unknown | null;
 	edit_date: number | null;
@@ -61,6 +62,7 @@ export function normalizeMessage(msg: any, editDate: number | null = null): Cano
 		rich_message: rich?.source ?? null,
 		rich_truncated: Boolean(rich?.truncated || rich?.rawTruncated),
 		reply_to_message_id: msg.reply_to_message?.message_id ?? null,
+		reply_to_sender_id: msg.reply_to_message?.from?.id ?? msg.reply_to_message?.sender_chat?.id ?? null,
 		quote: msg.quote ?? null,
 		forward_origin: msg.forward_origin ?? null,
 		edit_date: editDate ?? msg.edit_date ?? null,

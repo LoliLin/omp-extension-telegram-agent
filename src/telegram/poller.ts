@@ -18,15 +18,24 @@ export class Poller {
 	private db: Database;
 	private groupPeerId: number;
 	private onMessage: MessageHandler | null;
+	private replyBotTargets: ReadonlyMap<number, string> | undefined;
 	private stopped = false;
 	running = false;
 
-	constructor(db: Database, botId: string, token: string, groupPeerId: number, onMessage: MessageHandler | null = null) {
+	constructor(
+		db: Database,
+		botId: string,
+		token: string,
+		groupPeerId: number,
+		onMessage: MessageHandler | null = null,
+		replyBotTargets?: ReadonlyMap<number, string>,
+	) {
 		this.db = db;
 		this.botId = botId;
 		this.api = new BotApi(token);
 		this.groupPeerId = groupPeerId;
 		this.onMessage = onMessage;
+		this.replyBotTargets = replyBotTargets;
 	}
 
 	private offset(): number {
@@ -75,12 +84,12 @@ export class Poller {
 				if (this.stopped) break;
 				const updateId = (update as { update_id: number }).update_id;
 				try {
-					const result = ingestUpdate(this.db, this.botId, update, this.groupPeerId);
+					const result = ingestUpdate(this.db, this.botId, update, this.groupPeerId, this.replyBotTargets);
 					// advance the offset only after the update is durably ingested; on failure the
 					// next getUpdates re-pulls it and raw_updates dedupe keeps the replay idempotent
 					setBotState(this.db, this.botId, OFFSET_KEY, String(updateId + 1));
 					ingestFailures = 0;
-					if (result.kind === "inserted" || result.kind === "edited") {
+					if (result.kind === "inserted" || result.kind === "edited" || result.kind === "enriched") {
 						this.onMessage?.(result, update, this.botId);
 					}
 				} catch (err) {

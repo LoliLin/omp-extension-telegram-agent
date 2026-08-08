@@ -18,6 +18,7 @@ export interface MessageRow {
 	entities: string | null;
 	rich_message?: string | null;
 	reply_to_message_id: number | null;
+	reply_to_sender_id?: number | null;
 	quote: string | null;
 	edit_date: number | null;
 	media: string | null;

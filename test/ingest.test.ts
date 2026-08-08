@@ -2,7 +2,8 @@
 
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { ingestUpdate } from "../src/telegram/ingest.ts";
+import { replyObligationCount } from "../src/db/reply-obligations.ts";
+import { ingestUpdate, insertSentMessage } from "../src/telegram/ingest.ts";
 import { normalizeMessage, isTargetChat } from "../src/telegram/normalize.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -72,6 +73,82 @@ describe("ingestUpdate", () => {
 		expect(db.query("SELECT COUNT(*) c FROM raw_updates").get()).toEqual({ c: 2 });
 	});
 
+	test("reply sender snapshot is persisted and a duplicate copy can enrich a missing identity", () => {
+		const withoutSender = makeMessage({
+			message_id: 101,
+			reply_to_message: { message_id: 50 },
+		});
+		expect(ingestUpdate(db, "A", makeUpdate(12, withoutSender), GROUP).kind).toBe("inserted");
+		expect(db.query("SELECT reply_to_message_id, reply_to_sender_id FROM messages WHERE message_id = 101").get()).toEqual({
+			reply_to_message_id: 50,
+			reply_to_sender_id: null,
+		});
+
+		const withSender = makeMessage({
+			message_id: 101,
+			reply_to_message: { message_id: 50, from: { id: 7776264871, is_bot: true, first_name: "小雪" } },
+		});
+		expect(ingestUpdate(db, "B", makeUpdate(13, withSender), GROUP).kind).toBe("enriched");
+		expect(db.query("SELECT reply_to_message_id, reply_to_sender_id FROM messages WHERE message_id = 101").get()).toEqual({
+			reply_to_message_id: 50,
+			reply_to_sender_id: 7776264871,
+		});
+		expect(ingestUpdate(db, "A", makeUpdate(14, withSender), GROUP).kind).toBe("duplicate");
+	});
+
+	test("an immediately persisted sent reply keeps only the bounded parent identity", () => {
+		const canonical = insertSentMessage(db, "A", makeMessage({
+			message_id: 103,
+			from: { id: 7776264871, is_bot: true, first_name: "小雪" },
+			reply_to_message: {
+				message_id: 52,
+				from: { id: 111, is_bot: false, first_name: "Alice" },
+				text: "embedded parent body must not become a canonical column",
+			},
+		}));
+		expect(canonical.reply_to_sender_id).toBe(111);
+		expect(db.query("SELECT reply_to_message_id, reply_to_sender_id FROM messages WHERE message_id = 103").get()).toEqual({
+			reply_to_message_id: 52,
+			reply_to_sender_id: 111,
+		});
+		expect(JSON.stringify(db.query("SELECT * FROM messages WHERE message_id = 103").get())).not.toContain("embedded parent body");
+	});
+
+	test("canonical ingestion atomically creates the target bot obligation before routing", () => {
+		const targets = new Map([[7776264871, "A"]]);
+		const direct = makeMessage({
+			message_id: 104,
+			reply_to_message: { message_id: 53, from: { id: 7776264871, is_bot: true, first_name: "小雪" } },
+		});
+		expect(ingestUpdate(db, "B", makeUpdate(15, direct), GROUP, targets).kind).toBe("inserted");
+		expect(replyObligationCount(db, "A", SUPERGROUP)).toBe(1);
+
+		const botSender = makeMessage({
+			message_id: 105,
+			from: { id: 8734564920, is_bot: true, first_name: "小雨" },
+			reply_to_message: { message_id: 54, from: { id: 7776264871, is_bot: true, first_name: "小雪" } },
+		});
+		ingestUpdate(db, "A", makeUpdate(16, botSender), GROUP, targets);
+		expect(replyObligationCount(db, "A", SUPERGROUP)).toBe(1);
+	});
+
+	test("reply obligation failure rolls raw and canonical ingestion back together", () => {
+		db.exec(`
+			CREATE TRIGGER fail_reply_obligation
+			BEFORE INSERT ON reply_obligations
+			BEGIN SELECT RAISE(ABORT, 'injected obligation failure'); END;
+		`);
+		const direct = makeMessage({
+			message_id: 106,
+			reply_to_message: { message_id: 55, from: { id: 7776264871, is_bot: true, first_name: "小雪" } },
+		});
+		expect(() => ingestUpdate(db, "B", makeUpdate(17, direct), GROUP, new Map([[7776264871, "A"]]))).toThrow(
+			/injected obligation failure/,
+		);
+		expect(db.query("SELECT COUNT(*) AS count FROM raw_updates WHERE update_id = 17").get()).toEqual({ count: 0 });
+		expect(db.query("SELECT COUNT(*) AS count FROM messages WHERE message_id = 106").get()).toEqual({ count: 0 });
+	});
+
 	test("message from another chat is ignored", () => {
 		const r = ingestUpdate(db, "A", makeUpdate(20, makeMessage({ chat: { id: 999, type: "private" } })), GROUP);
 		expect(r.kind).toBe("ignored");
@@ -93,6 +170,25 @@ describe("ingestUpdate", () => {
 		expect(row.edit_date).toBe(1754600100);
 		const rev = db.query("SELECT text FROM message_revisions WHERE message_id = 100").get() as Record<string, unknown>;
 		expect(rev.text).toBe("hello");
+	});
+
+	test("an edit preserves or enriches the bounded reply sender identity", () => {
+		ingestUpdate(db, "A", makeUpdate(47, makeMessage({
+			message_id: 102,
+			reply_to_message: { message_id: 51 },
+		})), GROUP);
+		ingestUpdate(db, "A", {
+			update_id: 48,
+			edited_message: makeMessage({
+				message_id: 102,
+				text: "edited reply",
+				edit_date: 1754600300,
+				reply_to_message: { message_id: 51, from: { id: 8734564920, is_bot: true, first_name: "小雨" } },
+			}),
+		}, GROUP);
+		expect(db.query("SELECT reply_to_sender_id FROM messages WHERE message_id = 102").get()).toEqual({
+			reply_to_sender_id: 8734564920,
+		});
 	});
 
 	test("two consecutive edits keep the full revision chain (REQ-TG-0001 AC1)", () => {

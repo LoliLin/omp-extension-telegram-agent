@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	entities TEXT, -- JSON array, raw telegram entities
 	rich_message TEXT, -- bounded JSON source; text contains deterministic plain projection
 	reply_to_message_id INTEGER,
+	reply_to_sender_id INTEGER, -- bounded snapshot from reply_to_message.from/sender_chat
 	quote TEXT, -- JSON, selected quote if any
 	forward_origin TEXT, -- JSON
 	edit_date INTEGER,
@@ -103,6 +104,16 @@ CREATE TABLE IF NOT EXISTS bot_state (
 	value TEXT NOT NULL,
 	PRIMARY KEY (bot_id, key)
 );
+
+-- Human direct replies that must enter a specific bot's next provider suffix.
+CREATE TABLE IF NOT EXISTS reply_obligations (
+	bot_id TEXT NOT NULL,
+	chat_id INTEGER NOT NULL,
+	message_id INTEGER NOT NULL,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (bot_id, chat_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_reply_obligations_bot ON reply_obligations(bot_id, created_at, message_id);
 
 CREATE TABLE IF NOT EXISTS aliases (
 	chat_id INTEGER NOT NULL,

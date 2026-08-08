@@ -69,11 +69,12 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | Pi feed 即时刷新与 assistant stream（REQ-UI-0010 T10i） | ✅ unit / ⏳ real smoke | 2026-08-08 flush/IPC/timeline/extension/cache targeted 75 pass / 592 assertions：start/update/end不落库、无matching listener不构造snapshot、thinking/text/tool-only args完整快照、A/B filter、pre-hello不推送、update-before-start、32 active/64 tombstone bounds、ANSI/OSC、end/disconnect、单 anchor entry，以及 `panel off` 后每次 feed change仍调用 host render；typecheck/cache v4 golden通过。真实首个 partial/连续刷新留 T14。 |
 | Telegram response typing lease（REQ-TG-0002 T10j） | ✅ unit / ⏳ real smoke | 2026-08-08 activity/flush/sticker/router/cache 54 targeted pass / 2640 assertions：立即调用与0/4/8/12秒上界、per-bot隔离、单timer/in-flight、stop/restart、failure streak恢复/脱敏、accepted/skip/coalesce、text/sticker/组合send、pending reacquire、flush/stop清理、负数group payload与private draft=0均覆盖；typecheck/cache v4 golden通过。真实>5秒run与send/沉默自然清除留T14。 |
 | Rich Message 收发（REQ-TG-0003 T10k/T10l） | ✅ unit / ⏳ real smoke | 2026-08-08 data plane覆盖nested inline、list/table/details/media/unknown、bounds、migration/edit/echo与projection-only；outbound targeted 61 pass / 730 assertions覆盖精确`sendRichMessage` payload、heading/list/code/table/quote、reply、canonical/broadcast/exposure、确定性400/404单次plain fallback、timeout/429/5xx/non-JSON/persistence不重发、manual compose保持plain与private draft=0。typecheck/cache v5 golden通过。真实rich/reply留T14。 |
+| Direct reply provider delivery（REQ-REPLY-0001 T10o） | ✅ unit / ⏳ real trace | 2026-08-08 ingest/router/runtime/poller/cache targeted 70 pass / 2680 assertions：embedded parent sender/canonical fallback、bot sender隔离、reason+id dispatch、canonical+obligation transaction rollback、idle/busy/cooldown/stopping、provider failure retry、45 normal+1 reply首批、45 replies 40+5、A/B file reopen recovery、already-exposed reconciliation、legacy migration、无Telegram fallback与cache v5逐字节不变。真实群分别reply A/B并核对provider `#id`留T14。 |
 | compaction（threshold→summary→epoch） | ✅ | 2026-08-07 e2e-compaction 强制触发，epoch 持久化+重启恢复；REQ-AGENT-0001 后补 e2e-compaction-manual：成功路径 epoch 4→5、kept tail 41 条精确重标（N≠40），失败路径（Nothing to compact）epoch 不动 + error 落库 |
 | cache regression（prefix hash 稳定） | ✅ | 2026-08-07 golden 3/3（bun test 强制 UTC，测试内 pin TZ） |
 | threshold 分析脚本 | ✅ | 2026-08-07 50 runs 回放，hit ratio 90.0%，当前规模下各候选均不触发 compaction |
 | 长运行 smoke | ⏳ Phase 9 | - |
-| 当前全量回归 | ✅ | 2026-08-08 `bun test`：231 pass / 0 fail / 3704 assertions；`bun run check` 通过；cache v5 golden 6/6 |
+| 当前全量回归 | ✅ | 2026-08-08 `bun test`：246 pass / 0 fail / 3772 assertions；`bun run check` 通过；cache v5 golden 6/6 |
 
 ## 已知 flaky
 
