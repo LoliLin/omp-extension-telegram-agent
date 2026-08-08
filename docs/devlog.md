@@ -432,3 +432,11 @@
 - 新用户主配置固定为 ignored `telegram.config.ts` + tracked typed example，legacy JSON继续兼容。配置contract是内存全量验证、同目录原子rename、existing-file deny-by-default；已有TS只做validate、Pi editor原文编辑或备份后替换，不声称能安全merge任意表达式。secret只进mode 0600 `.env`。
 - persona只从后续HEAD退出并改用通用中英模板；既有Git历史仍含旧文件，未经用户单独授权不做history rewrite。双语mdBook各用独立book root，Pages PR只验证、默认分支最小权限部署。
 - Cache impact: **NONE（docs/research only）**。后续bootstrap/wizard/docs/repo hygiene同样不改变provider grammar或正常turn token；persona/provider变化是用户显式配置。
+
+## 2026-08-08 (47) — 调查 Pi 原生聊天卡片展示优化（文档）
+
+- 用户的“继续复用Pi、信息右对齐、适量补信息、不要过度设计/增加代码量”raw note已正式化为`REQ-UI-0011`，没有把它扩张成新UI框架或数据需求。
+- 调查确认当前card已用Pi `Box/Text/Image`，真正缺口是message/event/stream三套header字符串布局重复且metadata全部靠leading。当前Pi已原生导出`HStack/VStack`的grow/shrink/viewport visibility以及CJK/emoji-aware visible width，无需自绘terminal compositor。
+- 实现边界固定为共享native header：身份leading，message id/time/state trailing；窄宽度metadata退到次行且身份/正文优先。只补显示已有botId/username/status，raw payload/file/chat id不进入card。
+- `better-ui`与`better-layout`约束落实为保留宿主theme/density、共享边缘、按重要性排序、高频卡片不动画。production card rendering LOC净增必须≤0，通过删除重复header formatting抵消布局glue。
+- Cache impact: **NONE（docs/research only）**。后续也只重排TUI现有字符串/媒体，DB/IPC/provider grammar、LLM/vision/network调用与每turn token增量均为0。

@@ -33,6 +33,7 @@
 - [ ] [REQ-TG-0003](REQ-TG-0003.md) 支持 Telegram Rich Messages 的收发与持久化（P1，收发/data plane/cache v5已实现，待真实群总验收勾选）
 - [ ] [REQ-REPLY-0001](REQ-REPLY-0001.md) 直接回复 bot 的消息保证进入对应模型上下文（P1，durable provider-delivery已实现，待真实 A/B trace 后勾选）
 - [ ] [REQ-OPS-0002](REQ-OPS-0002.md) 从 Pi 一键受控重启全部 bot 服务（P1，已调查/未实现）
+- [ ] [REQ-UI-0011](REQ-UI-0011.md) 用 Pi 原生 stack 优化聊天卡片信息层级、trailing 对齐与窄终端退化（P2，已调查/未实现）
 
 
 ## Bug
@@ -64,6 +65,7 @@
 - REQ-UI-0008 使用 Pi `registerCommand.getArgumentCompletions`；命令树需吸收 UI-0005/0007 新增/调整的子命令
 - REQ-UI-0009 固化 UI-0003/0007 的 lifetime 范围，并补齐 Pi 原生 cache-write 与 `/tg status` 详情；不得退回第三行或自绘 footer
 - REQ-UI-0010 复用 Pi AgentSession `message_update` 与宿主 `TUI.requestRender()`；流式帧只存在于 IPC/TUI 内存，不写 DB/Pi session/provider context
+- REQ-UI-0011 只重组 UI-0001/0006/0010 的现有卡片数据，复用 Pi `HStack/VStack` 与 theme；不新增生产渲染 LOC、依赖、数据字段或provider字节
 - REQ-TG-0002 承认 private draft 原生 Thinking；当前 supergroup 使用 `typing` lease 每 4 秒续约，绝不误发 trigger sender 私聊；send 成功或 flush settle 后停止
 - REQ-TG-0003 用现有 `send.message` 承载 Rich Markdown，incoming/outgoing rich structure持久化后只把有界纯文本投影交给 Pi/provider；group 不调用 private draft
 - REQ-REPLY-0001 保证 direct reply 的原始消息进入对应 bot provider suffix，不提供 runtime 内容兜底；嵌套父 sender、busy/catch-up 与 restart 都不得丢 obligation

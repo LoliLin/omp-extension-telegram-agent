@@ -1,7 +1,7 @@
 # PLAN-20260808-complete-new-reqs: 逐项实现并提交 REQ-LIST 剩余需求
 
 - **Status:** Active
-- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-PLAT-0001, REQ-DOC-0001, REQ-ONBOARD-0001
+- **Requirements:** REQ-STICKER-0002, REQ-ROUTE-0001, REQ-SEND-0001, REQ-CMD-0001, REQ-TG-0002, REQ-TG-0003, REQ-REPLY-0001, REQ-OPS-0002, REQ-UI-0005, REQ-UI-0006, REQ-UI-0007, REQ-UI-0008, REQ-UI-0009, REQ-UI-0010, REQ-UI-0011, REQ-PLAT-0001, REQ-DOC-0001, REQ-ONBOARD-0001
 - **Source:** 2026-08-08 用户授权：文档完成后逐项开发直到清单完成，并做小粒度原子签名提交
 
 ## 结果
@@ -44,6 +44,8 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T10l** — 将 agent `send.message` 接到 `sendRichMessage` Rich Markdown、确定性 plain fallback并 bump cache epoch；validates: TG-0003 AC1–AC3/AC7/AC8；commit: rich outbound contract
 - [x] **T10o** — 持久化 reply parent identity/obligation并保证 busy、overflow、restart 后进入目标 bot suffix；validates: REPLY-0001 AC1–AC8；commit: reply provider delivery
 - [x] **T10q** — 调查并正式化 fresh-clone `/tg config`、TypeScript 本机配置、提示词隐私、双语 mdBook/Pages 与成本设计概览；validates: ONBOARD-0001 documented scope/AC；commit: docs/research only
+- [x] **T10r** — 调查并正式化 Pi native card hierarchy、trailing metadata 与 narrow-width退化；validates: UI-0011 documented scope/AC；commit: docs/research only
+- [ ] **T10s** — 共享 Pi native header stack，统一message/event/stream层级并锁多宽度/零净LOC；validates: UI-0011 AC1–AC7；commit: native card presentation
 - [ ] **T10p** — 增加串行 graceful CLI/Pi restart 与原 filter feed重连；validates: OPS-0002 AC1–AC7；commit: daemon restart workflow
 - [ ] **T10m** — 增加 Telegram `/tg` deterministic command service、public status、admin allowlist、持久 routing/cooldown override 与安全 manual compact；validates: CMD-0001 AC1–AC8；commit: Telegram control plane
 - [ ] **T11** — 泛型化 per-bot provider/model/auth lookup并保持现有 DeepSeek deployment bytes不变；validates: PLAT-0001 AC4/AC5；commit: provider config
@@ -88,6 +90,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - T10l: **INTENTIONAL**；send tool description声明 Rich Markdown，参数/顺序不变但稳定 prefix需 bump schema/new epoch；不新增 tool/LLM call。
 - T10n: **NONE（docs only）**；T10o只保证真实direct reply进入既有动态suffix、不改grammar且无fallback LLM；T10p只做进程/UI控制。
 - T10o: **NONE**；reply identity/obligation属于确定性data plane，正常burst不新增call，只有超过batch上限的真实reply backlog才有必要分批。
+- T10r/T10s: **NONE**；只用Pi native stack重排已有TUI文字/媒体，IPC/DB/provider bytes与调用数不变。
 - T10p: **NONE**；restart不改provider/session协议或epoch，不新增LLM call/token。
 - T10m: **NONE**；Telegram control command 与回复均由 deterministic control plane 消费，不进入 provider context；只有显式 compact 使用既有 summary 调用。
 - T11–T13f: 现有 deployment **NONE**；provider/persona choice 是显式配置边界，bootstrap/wizard/docs 不进入 provider context，现有 golden 必须不变。
@@ -104,6 +107,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - onboarding 覆盖半份配置或泄露 secret：内存校验、同目录原子 rename、existing-file deny-by-default、脱敏 transcript fixture。
 - TypeScript config 执行不一致或被误认为沙箱：Node/Pi + Bun 双 runtime fixture，文档明确只加载受信本地代码；legacy JSON 保持兼容。
 - 双语文档漂移：schema examples/link checker做机械 gate，两个 book 同一 CI；用户概览只链接内部权威细节。
+- native card 右对齐在窄/CJK终端溢出：40/60/80/120列visible-width tests，身份/正文优先，metadata次行退化；禁止自绘compositor。
 
 ## 完成记录
 
