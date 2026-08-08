@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：UI-0010、TG-0002 与 TG-0003 已完成调查；下一步先恢复 Pi 原生流式 feed，再实现群内 typing lease、Rich Messages 与 CMD-0001。
+2026-08-08：UI-0010 原生流式 feed 已实现并通过定向验证；下一步实现群内 typing lease，再做 Rich Messages 与 CMD-0001。
 
 ## 已完成
 
@@ -12,7 +12,7 @@
 - `src/plugin/timeline.ts` 只保留 IPC、history cursor、dedupe、stats 与有界媒体读取；旧 `src/tui/engine.ts` 已删除。
 - `/tg attach [bot]`、显式 `/tg compose <bot|off>`、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]` 与 daemon commands 可用。
 - package manifest、项目 Pi launcher、fullscreen settings、native Image 和 Pi `FooterComponent` telemetry 已落地。
-- 全量验证：149 tests pass / 0 fail / 2821 assertions；`bun run check`、cache golden、diff check 通过；真实 Pi fullscreen TTY 验证 attach/more/detach。
+- 全量验证：206 tests pass / 0 fail / 3547 assertions；`bun run check`、cache golden、diff check 通过；真实 Pi fullscreen TTY 验证 attach/more/detach。
 
 ## 当前实施队列
 
@@ -27,13 +27,13 @@
 9. **已实现 `REQ-SEND-0001`**：唯一 send schema 拥有全部用法，persona/protocol 共去掉 8,859 bytes 重复；显式点名不再被 silence 覆盖；固定 `ok` + terminate 保证一次 provider call；tools hash 含 description，cache schema 3→4。
 10. **已调查 `REQ-DOC-0001`**：README 需从内部索引改为 prerequisites→配置→启动/Pi→扩 bot→排障的用户旅程；等 provider schema 完成后在 T13 写最终示例。
 11. **已调查 `REQ-CMD-0001`**：Telegram `/tg` 由 deterministic control service 消费；help/bots/status 公开，compact/set/reset deny-by-default。allowlist 支持 id/`@username`，当前 ignored deployment 最终只配 `@aac6fef`。
-12. **已调查 `REQ-UI-0010`**：runtime 丢弃 Pi `message_update`，feed 变更也未请求宿主重绘。方案是 additive、有界、不持久的 assistant stream snapshot + Pi `TUI.requestRender()`；cache/token impact NONE。
+12. **已实现 `REQ-UI-0010`**：assistant start/update/end 经 bot-filtered ephemeral IPC更新同一原生卡片，thinking/text/tool args均有界；32 active/64 ended tombstone，断线清理且不落库。feed每次变化调用 Pi host render，`panel off` 后仍有效；75 targeted / 592 assertions + typecheck/cache通过，真实连续 partial留T14。
 13. **已调查 `REQ-TG-0002`**：Telegram 确有 private draft Thinking，但 draft method 只接受目标私聊；当前 supergroup 使用 `typing` 立即显示、每 4 秒续约，send 成功/flush settle/shutdown 停止，绝不偷发 trigger sender 私聊。
 14. **已调查 `REQ-TG-0003`**：final `sendRichMessage` 支持群聊；现有 `send.message` 作为 Rich Markdown 唯一入口，收发 rich source 有界持久化并统一投影为纯文本，private rich draft 不用于群。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 
-建议顺序：UI-0010 native stream → TG-0002 typing lease → TG-0003 rich data/outbound → Telegram admin commands → PLAT provider/config → 参数化 e2e/composition → 平台/README 文档 → T14 总验收。
+建议顺序：TG-0002 typing lease → TG-0003 rich data/outbound → Telegram admin commands → PLAT provider/config → 参数化 e2e/composition → 平台/README 文档 → T14 总验收。
 
 ## 使用方式
 
@@ -51,4 +51,4 @@ attach 默认只读；仅显式 compose 时 interactive editor 发 Telegram，of
 - 本次 native UI 重写：Cache impact **NONE**，IPC/DB/provider grammar 未变。
 - 新的 UI-0005/UI-0006 设计也要求 NONE。
 - STICKER-0002 是 **INTENTIONAL** cache change：schema 已从 2 bump 到 3，golden 通过；daemon 下次受控重启会自动开新 epoch。
-- 原子提交规范已在 `c32d937` 固化；native transcript 重写已签名提交为 `19819c9`。剩余 9 个 PLAN task 按 `PLAN-20260808-complete-new-reqs` 逐项实现/提交。
+- 原子提交规范已在 `c32d937` 固化；native transcript 重写已签名提交为 `19819c9`。剩余 8 个 PLAN task 按 `PLAN-20260808-complete-new-reqs` 逐项实现/提交。

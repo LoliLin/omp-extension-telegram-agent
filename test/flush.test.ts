@@ -16,6 +16,7 @@ import { BotRuntime } from "../src/agent/runtime.ts";
 import { getBotState } from "../src/db/db.ts";
 import type { AppConfig, BotConfig } from "../src/config.ts";
 import type { MessageRow } from "../src/agent/serialize.ts";
+import type { AgentStreamFrame } from "../src/ipc.ts";
 
 const GROUP = 4402809405;
 const CHAT = Number(`-100${GROUP}`);
@@ -107,6 +108,65 @@ function errorEvents(): { stage: string; error?: string }[] {
 }
 
 describe("flush state machine (REQ-AGENT-0001)", () => {
+	test("REQ-UI-0010 streams bounded assistant snapshots without persisting partial rows", async () => {
+		const rt = makeRuntime();
+		const fake = attachFakeSession(rt);
+		const frames: AgentStreamFrame[] = [];
+		rt.streamSink = (frame) => frames.push(frame);
+		const base = {
+			role: "assistant",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			stopReason: "pending",
+			timestamp: 1,
+		};
+
+		fake.listener?.({ type: "message_start", message: { ...base, content: [] } });
+		fake.listener?.({
+			type: "message_update",
+			message: { ...base, content: [{ type: "thinking", thinking: `思考${"x".repeat(5000)}` }] },
+			assistantMessageEvent: { type: "thinking_delta" },
+		});
+		fake.listener?.({
+			type: "message_update",
+			message: {
+				...base,
+				content: [
+					{ type: "thinking", thinking: "先检查" },
+					{ type: "toolCall", id: "tc-1", name: "send", arguments: { message: `你好${"y".repeat(3000)}` } },
+				],
+			},
+			assistantMessageEvent: { type: "toolcall_delta" },
+		});
+		fake.listener?.({
+			type: "message_end",
+			message: { ...base, stopReason: "toolUse", content: [{ type: "toolCall", id: "tc-1", name: "send", arguments: { message: "你好" } }] },
+		});
+
+		expect(frames.map((frame) => frame.phase)).toEqual(["start", "update", "update", "end"]);
+		expect(new Set(frames.map((frame) => frame.streamId)).size).toBe(1);
+		const updates = frames.filter((frame): frame is Extract<AgentStreamFrame, { phase: "update" }> => frame.phase === "update");
+		expect(updates[0]!.thinking.length).toBeLessThanOrEqual(4096);
+		expect(updates[1]!.text).toBe("");
+		expect(updates[1]!.toolCalls).toHaveLength(1);
+		expect(updates[1]!.toolCalls[0]!.arguments.length).toBeLessThanOrEqual(2048);
+		expect(db.query("SELECT COUNT(*) n FROM agent_events").get()).toEqual({ n: 0 });
+
+		rt.streamDemand = () => false;
+		fake.listener?.({ type: "message_start", message: { ...base, content: [] } });
+		fake.listener?.({ type: "message_update", message: { ...base, content: [{ type: "toolCall", id: "hidden", name: "send", arguments: { message: "not serialized for IPC" } }] }, assistantMessageEvent: { type: "toolcall_delta" } });
+		expect(frames.at(-1)?.phase).toBe("end");
+		rt.streamDemand = () => true;
+		fake.listener?.({ type: "message_update", message: { ...base, content: [{ type: "text", text: "listener joined mid-stream" }] }, assistantMessageEvent: { type: "text_delta" } });
+		fake.listener?.({ type: "agent_end", messages: [], willRetry: false });
+		fake.listener?.({ type: "agent_settled" });
+		expect(frames.slice(-2).map((frame) => frame.phase)).toEqual(["update", "end"]);
+		await rt.stop();
+		expect(frames.at(-1)?.phase).toBe("end");
+	});
+
 	test("REQ-UI-0009 persists and pushes complete provider usage telemetry", () => {
 		const rt = makeRuntime();
 		(rt as any).runStartTs = 1000;

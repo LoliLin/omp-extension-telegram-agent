@@ -372,3 +372,12 @@
 - 用户新增 Rich Messages 已正式化为 `REQ-TG-0003`：群内 final message 使用 `sendRichMessage`，保留唯一 `send.message` Rich Markdown入口；incoming/edit/sent/echo 共用有界 source storage与 deterministic plain projector，Pi/provider不接收 raw rich JSON。
 - fallback 仅允许确认未发送的确定性 4xx；unknown outcome不降级，避免双发。private rich draft不冒充 group streaming。后续拆成 data plane与 outbound contract两个原子任务。
 - Cache impact: **NONE（本条纯文档）**。未来 rich data plane 为 NONE；`send.message` description 改为 Rich Markdown 时为 **INTENTIONAL**，需 bump schema/new epoch，但不新增 tool或 LLM call。
+
+## 2026-08-08 (40) — 恢复 Pi 原生 feed 即时刷新与流式卡片
+
+- BotRuntime 现在把 Pi assistant `message_start/update/end` 映射为有界完整展示快照；thinking/text各 4096 字符、最多4个tool call且args各2048字符。stream帧先end再发布既有final event，不写`agent_events`、snapshot/history、Pi session或exposure。
+- daemon新增additive `agent_stream` push并按A/B listener filter发送；无listener/无匹配listener时不编码。timeline只转发，旧daemon/client继续靠最终持久event兼容。
+- Pi feed用同一张原生`Container`/`Box`/`Text`卡片原位替换，tool-only `send` partial也立即可见。active最多32、ended tombstone最多64；update-before-start自愈，迟到update/end、abort、disconnect和shutdown均幂等清理，ANSI/OSC继续sanitize。
+- `setFooter` factory提供的session TUI render handle独立于footer presentation保存；append/prepend/vision/stats/status/stream/disconnect每次都请求host render，`panel off`后feed仍即时刷新，Pi继续拥有约16ms合帧。
+- flush/IPC/timeline/extension/cache 75 targeted tests、592 assertions；全量206 tests、3547 assertions与`bun run check`通过。真实Pi首个partial与连续生成刷新留T14。
+- Cache impact: **NONE**——provider request、system/tool/message/summary grammar与schema v4 golden逐字节不变；不新增LLM call或token，partial只存在于有界本地IPC/TUI内存。

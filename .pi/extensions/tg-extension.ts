@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import * as Tui from "@earendil-works/pi-tui";
 import { loadConfig, type BotConfig } from "../../src/config.ts";
-import type { BotStats, EvtItem, TimelineItem } from "../../src/ipc.ts";
+import type { AgentStreamFrame, BotStats, EvtItem, TimelineItem } from "../../src/ipc.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
 	readMediaImage,
@@ -23,6 +23,8 @@ import {
 
 const ENTRY_TYPE = "telegram-chat";
 const MIN_PI_VERSION = "0.84.1";
+const MAX_ACTIVE_STREAMS = 32;
+const MAX_ENDED_STREAMS = 64;
 
 type TimelineFactory = (filter: string | null, hooks: TimelineHooks) => TimelinePort;
 type ProcessRunner = typeof spawnSync;
@@ -261,6 +263,21 @@ export function itemComponent(item: TimelineItem, theme: Theme): Tui.Component {
 	return box;
 }
 
+function streamComponent(stream: Extract<AgentStreamFrame, { phase: "update" }>, theme: Theme): Tui.Component {
+	const box = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
+	box.addChild(new Tui.Text(
+		theme.bold(theme.fg("warning", `${sanitize(stream.botName)} · STREAMING`)) + theme.fg("dim", `  ${fmtClock(stream.ts)}`),
+		0,
+		0,
+	));
+	if (stream.thinking) box.addChild(new Tui.Text(theme.fg("muted", `thinking · ${sanitize(stream.thinking)}`), 0, 0));
+	if (stream.text) box.addChild(new Tui.Text(theme.fg("customMessageText", sanitize(stream.text)), 0, 0));
+	for (const tool of stream.toolCalls) {
+		box.addChild(new Tui.Text(theme.fg("accent", `${sanitize(tool.name)} · ${sanitize(tool.arguments)}`), 0, 0));
+	}
+	return box;
+}
+
 type FooterBot = Pick<BotConfig, "id" | "model" | "reasoningEffort">;
 type FooterHost = Pick<ExtensionContext, "sessionManager" | "modelRegistry" | "model" | "thinkingLevel">;
 
@@ -383,7 +400,10 @@ export class TelegramFooterTelemetry {
 export class TelegramFeed extends Tui.Container {
 	readonly client: TimelinePort;
 	private readonly content = new Tui.Container();
+	private readonly streamContent = new Tui.Container();
 	private readonly items: TimelineItem[] = [];
+	private readonly streams = new Map<string, Extract<AgentStreamFrame, { phase: "update" }>>();
+	private readonly endedStreams = new Set<string>();
 	private statsValue: Record<string, BotStats> = {};
 	private statusValue = "connecting...";
 	private closed = false;
@@ -401,6 +421,7 @@ export class TelegramFeed extends Tui.Container {
 		this.addChild(header);
 		this.addChild(new Tui.Spacer(1));
 		this.addChild(this.content);
+		this.addChild(this.streamContent);
 		this.client = factory(filter, { onEvent: (event) => this.onEvent(event) });
 	}
 
@@ -413,6 +434,7 @@ export class TelegramFeed extends Tui.Container {
 		if (this.closed) return;
 		this.closed = true;
 		this.client.dispose();
+		this.clearStreams();
 		this.setStatus(reason);
 	}
 
@@ -436,9 +458,12 @@ export class TelegramFeed extends Tui.Container {
 				updated = true;
 			}
 			if (updated) this.rebuildItems();
+		} else if (event.type === "stream") {
+			this.applyStream(event.stream);
 		} else if (event.type === "status") {
 			this.setStatus(event.text);
 		} else {
+			this.clearStreams();
 			this.setStatus(event.reason);
 		}
 		this.changed(event, this);
@@ -458,6 +483,48 @@ export class TelegramFeed extends Tui.Container {
 	private rebuildItems(): void {
 		this.content.clear();
 		this.appendItems(this.items);
+	}
+
+	private applyStream(stream: AgentStreamFrame): void {
+		const key = `${stream.botId}:${stream.streamId}`;
+		if (stream.phase === "end") {
+			this.streams.delete(key);
+			this.rememberEnded(key);
+			this.rebuildStreams();
+			return;
+		}
+		if (this.endedStreams.has(key)) return;
+		if (!this.streams.has(key) && this.streams.size >= MAX_ACTIVE_STREAMS) {
+			const oldest = this.streams.keys().next().value as string | undefined;
+			if (oldest) this.streams.delete(oldest);
+		}
+		this.streams.delete(key);
+		this.streams.set(key, stream.phase === "start" ? { ...stream, phase: "update", thinking: "", text: "", toolCalls: [] } : stream);
+		this.rebuildStreams();
+	}
+
+	private rememberEnded(key: string): void {
+		this.endedStreams.delete(key);
+		this.endedStreams.add(key);
+		while (this.endedStreams.size > MAX_ENDED_STREAMS) {
+			const oldest = this.endedStreams.keys().next().value as string | undefined;
+			if (!oldest) break;
+			this.endedStreams.delete(oldest);
+		}
+	}
+
+	private rebuildStreams(): void {
+		this.streamContent.clear();
+		for (const stream of this.streams.values()) {
+			this.streamContent.addChild(streamComponent(stream, this.theme));
+			this.streamContent.addChild(new Tui.Spacer(1));
+		}
+	}
+
+	private clearStreams(): void {
+		if (this.streams.size === 0) return;
+		this.streams.clear();
+		this.rebuildStreams();
 	}
 
 	private setStatus(value: string): void {
@@ -491,6 +558,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	let sending = false;
 	let lastUi: ExtensionContext["ui"] | null = null;
 	let completionBots: TgBotChoice[] | undefined;
+	let requestHostRender: (() => void) | null = null;
 	const getCompletionBots = (): TgBotChoice[] => {
 		if (completionBots) return completionBots;
 		try {
@@ -525,7 +593,10 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		const telemetry = new TelegramFooterTelemetry(bots, filter, ctx);
 		footerTelemetry = telemetry;
 		footerOwner = owner;
-		ctx.ui.setFooter((tui, _theme, footerData) => telemetry.mount(tui, footerData));
+		ctx.ui.setFooter((tui, _theme, footerData) => {
+			requestHostRender = () => tui.requestRender();
+			return telemetry.mount(tui, footerData);
+		});
 	};
 	const resolveBot = (arg: string | undefined, ui: ExtensionContext["ui"]): BotConfig | undefined => {
 		if (!arg) {
@@ -562,6 +633,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		clearStatsFooter();
 		for (const feed of feeds.values()) feed.dispose();
 		active = null;
+		requestHostRender = null;
 	});
 
 	pi.on("input", async (event, ctx) => {
@@ -663,6 +735,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				pending = {
 					data,
 					changed: (event, feed) => {
+						requestHostRender?.();
 						if (footerOwner === "feed" && active === feed && event.type === "stats") footerTelemetry?.update(feed.stats);
 						if (event.type === "disconnected" && active === feed) {
 							closeCompose(ctx.ui);

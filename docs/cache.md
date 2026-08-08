@@ -87,5 +87,6 @@ bot、model、provider、timestamp、context epoch、context tokens、cache read
 - 2026-08-07 REQ-STICKER-0001：CACHE_SCHEMA_VERSION 1→2，固定 sticker 目录进入 system prompt（systemA/B 无目录 hash 不变、带目录新 golden 锁定）；daemon 启动检测 schema 版本变化全员开新 epoch；sticker 相关 cache 对比方法：llm_runs 里 system_hash 变化即目录变更，`analyze-context-window.ts` 按 epoch 同步模拟
 - 2026-08-08 REQ-STICKER-0002：CACHE_SCHEMA_VERSION 2→3；stable catalog 与 dynamic candidates 都按当前 bot 的 file_id mapping 过滤。合法目录的 hash 不变，已有跨 bot 泄漏行会从 prefix 消失；daemon 下次启动自动为所有 bot 开新 epoch。
 - 2026-08-08 REQ-SEND-0001：CACHE_SCHEMA_VERSION 3→4；send 调用知识从 persona/protocol 收口到 tool schema、显式点名不再被 persona silence 覆盖、成功 result 固定最小 ACK、tools hash 补 description。daemon 下次受控重启为所有 bot 开新 epoch。
+- 2026-08-08 REQ-UI-0010：**NONE**；只消费 Pi 已产生的 assistant partial并推送到 TUI-only ephemeral IPC/card，不写 session/DB、不改 provider request、tool/system/message/summary grammar。cache schema仍为 4，golden逐字节不变，LLM call/token增量 0。
 - cache golden（test/cache.test.ts）：CACHE_SCHEMA_VERSION=4、systemA/B hash、serialize hash、**tools hash（含 description/schema/order）、compaction summary prompt hash** 与 per-bot catalog filter 全部锁定；**注意 bun test 强制 UTC，测试 pin TZ=Asia/Singapore 与生产一致**
 - 分析脚本（REQ-TEST-0001 R5）：llm_runs 的 epoch/compaction 列与 >30% context 回落都被视为真实 compaction 并同步模拟 context；60 runs 回放识别 3 次真实 compaction（e2e 遗留 epoch 1→4），幻影触发 0

@@ -5,6 +5,7 @@
 //   C->S {type:"send_message", requestId,...} S->C {type:"send_result", requestId, ok,...}
 //   (push)                                    S->C {type:"append", item: TimelineItem}
 //   (push)                                    S->C {type:"vision_update", fileUniqueId, text}
+//   (push)                                    S->C {type:"agent_stream", stream: AgentStreamFrame}
 //
 // Pagination uses a composite cursor (ts, rank, id): rank 0 = agent event (id = agent_events.id),
 // rank 1 = chat message (id = message_id). Merged timeline order is by (ts, rank, id), so
@@ -103,6 +104,25 @@ export interface VisionUpdate {
 	text: string;
 }
 
+export interface AgentStreamToolCall {
+	name: string;
+	arguments: string;
+}
+
+interface AgentStreamBase {
+	streamId: string;
+	botId: string;
+	botName: string;
+	ts: number;
+}
+
+/** Ephemeral assistant display state. It is never persisted or replayed in snapshots. */
+export type AgentStreamFrame = AgentStreamBase & (
+	| { phase: "start" }
+	| { phase: "update"; thinking: string; text: string; toolCalls: AgentStreamToolCall[] }
+	| { phase: "end" }
+);
+
 export type SendMessageErrorCode =
 	| "invalid_request"
 	| "unknown_bot"
@@ -150,6 +170,7 @@ export type ServerMessage =
 	| { type: "append"; item: TimelineItem }
 	| { type: "usage"; run: UsageRun }
 	| ({ type: "vision_update" } & VisionUpdate)
+	| { type: "agent_stream"; stream: AgentStreamFrame }
 	| ({ type: "send_result" } & SendMessageResult);
 
 export function encodeFrame(msg: unknown): string {

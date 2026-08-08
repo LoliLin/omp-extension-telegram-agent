@@ -31,10 +31,26 @@ import { runJs } from "../tools/run-js.ts";
 import { ensureVision, fileIdForBot, type VisionUpdateSink } from "../media/vision.ts";
 import { ensureStickerCatalog, stickerCatalogBlock, preRecognizeCatalogVision } from "../media/sticker-catalog.ts";
 import type { TriggerResult, TriggerSource } from "./router.ts";
+import type { AgentStreamFrame, AgentStreamToolCall } from "../ipc.ts";
 
 const MAX_CATCHUP_MESSAGES = 40; // per trigger; older unexposed messages are skipped
 const EXPOSED_KEY = "exposed_ids";
 const EPOCH_KEY = "context_epoch";
+const STREAM_TEXT_MAX = 4096;
+const STREAM_TOOL_ARGS_MAX = 2048;
+const STREAM_TOOLS_MAX = 4;
+
+function boundedDisplay(value: string, max: number): string {
+	return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function displayJson(value: unknown): string {
+	try {
+		return JSON.stringify(value ?? {}) ?? "{}";
+	} catch {
+		return "[unserializable arguments]";
+	}
+}
 
 export class BotRuntime {
 	private db: Database;
@@ -60,6 +76,8 @@ export class BotRuntime {
 	private runStartTs = 0;
 	private systemHash = "";
 	private toolsHash = "";
+	private streamSequence = 0;
+	private activeStreamId: string | null = null;
 	/** Optional sink for TUI/live broadcasting of agent events. */
 	eventSink: ((kind: string, payload: unknown) => void) | null = null;
 	/** Optional sink for messages this bot sent (poller echo dedupes them, so TUI needs this path). */
@@ -82,6 +100,10 @@ export class BotRuntime {
 	}) => void) | null = null;
 	/** Optional sink for newly persisted media descriptions (REQ-UI-0006). */
 	visionSink: VisionUpdateSink | null = null;
+	/** Ephemeral Pi-feed assistant snapshots; never persisted (REQ-UI-0010). */
+	streamSink: ((frame: AgentStreamFrame) => void) | null = null;
+	/** Lets the daemon avoid building snapshots when no matching listener completed hello. */
+	streamDemand: (() => boolean) | null = null;
 
 	constructor(
 		db: Database,
@@ -254,9 +276,19 @@ export class BotRuntime {
 					this.running = true;
 					this.runStartTs = now;
 					break;
+				case "message_start":
+					if (event.message.role === "assistant") {
+						this.beginAssistantStream(now);
+						this.updateAssistantStream(event.message, now);
+					}
+					break;
+				case "message_update":
+					if (event.message.role === "assistant") this.updateAssistantStream(event.message, now);
+					break;
 				case "message_end": {
 					const msg = event.message;
 					if (msg.role === "assistant") {
+						this.endAssistantStream(now);
 						const text = msg.content
 							.filter((c) => c.type === "text")
 							.map((c) => (c as { text: string }).text)
@@ -271,6 +303,9 @@ export class BotRuntime {
 					}
 					break;
 				}
+				case "agent_end":
+					this.endAssistantStream(now);
+					break;
 				case "tool_execution_start":
 					this.recordEvent("tool_call", { tool: event.toolName, args: event.args });
 					break;
@@ -279,6 +314,7 @@ export class BotRuntime {
 					break;
 				case "agent_settled":
 					this.running = false;
+					this.endAssistantStream(now);
 					// no flush re-trigger here: the flush loop owns pendingTrigger (REQ-AGENT-0001 R1)
 					break;
 				case "compaction_end":
@@ -286,6 +322,74 @@ export class BotRuntime {
 					break;
 			}
 		});
+	}
+
+	private beginAssistantStream(now: number): void {
+		this.endAssistantStream(now);
+		const streamId = `${this.bot.id}-${++this.streamSequence}`;
+		this.activeStreamId = streamId;
+		if (!this.wantsAssistantStream()) return;
+		this.streamSink?.({
+			phase: "start",
+			streamId,
+			botId: this.bot.id,
+			botName: this.bot.name,
+			ts: now,
+		});
+	}
+
+	private updateAssistantStream(
+		message: Extract<AgentSessionEvent, { type: "message_update" }>["message"],
+		now: number,
+	): void {
+		if (message.role !== "assistant") return;
+		if (!this.activeStreamId) this.beginAssistantStream(now);
+		const streamId = this.activeStreamId;
+		if (!streamId || !this.wantsAssistantStream()) return;
+		const text = message.content
+			.filter((content) => content.type === "text")
+			.map((content) => content.text)
+			.join("\n");
+		const thinking = message.content
+			.filter((content) => content.type === "thinking")
+			.map((content) => content.thinking)
+			.join("\n");
+		const toolCalls: AgentStreamToolCall[] = message.content
+			.filter((content) => content.type === "toolCall")
+			.slice(0, STREAM_TOOLS_MAX)
+			.map((content) => ({
+				name: boundedDisplay(content.name, 80),
+				arguments: boundedDisplay(displayJson(content.arguments), STREAM_TOOL_ARGS_MAX),
+			}));
+		if (!text && !thinking && toolCalls.length === 0) return;
+		this.streamSink?.({
+			phase: "update",
+			streamId,
+			botId: this.bot.id,
+			botName: this.bot.name,
+			ts: now,
+			text: boundedDisplay(text, STREAM_TEXT_MAX),
+			thinking: boundedDisplay(thinking, STREAM_TEXT_MAX),
+			toolCalls,
+		});
+	}
+
+	private endAssistantStream(now = Date.now()): void {
+		const streamId = this.activeStreamId;
+		if (!streamId) return;
+		this.activeStreamId = null;
+		if (!this.wantsAssistantStream()) return;
+		this.streamSink?.({
+			phase: "end",
+			streamId,
+			botId: this.bot.id,
+			botName: this.bot.name,
+			ts: now,
+		});
+	}
+
+	private wantsAssistantStream(): boolean {
+		return this.streamSink != null && (this.streamDemand?.() ?? true);
 	}
 
 	/**
@@ -655,6 +759,7 @@ export class BotRuntime {
 
 	async stop(): Promise<void> {
 		this.stopping = true;
+		this.endAssistantStream();
 		// Bounded wait for an in-flight flush so exposure isn't left half-written;
 		// the timeout only guards a wedged run (markExposed follows sendUserMessage
 		// immediately, so the normal window is tiny).

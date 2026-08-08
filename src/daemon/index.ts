@@ -113,6 +113,8 @@ for (const [botId, rt] of runtimes) {
 	};
 	rt.usageSink = (run) => ipc.broadcastUsage(run);
 	rt.visionSink = (fileUniqueId, text) => ipc.broadcastVision({ fileUniqueId, text });
+	rt.streamSink = (stream) => ipc.broadcastStream(stream);
+	rt.streamDemand = () => ipc.hasStreamListener(botId);
 }
 ipc.start();
 

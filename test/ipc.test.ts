@@ -298,6 +298,35 @@ describe("manual send IPC (REQ-UI-0005)", () => {
 });
 
 describe("per-bot filter + stats (REQ-UI-0002/0003)", () => {
+	test("ephemeral assistant streams honor listener bot filters", () => {
+		const streamServer = new IpcServer(
+			db,
+			"/tmp/nonexistent-stream-ipc-test.sock",
+			new Map([["A", "小雪"], ["B", "小雨"]]),
+			new Map([["A", 777], ["B", 888]]),
+		);
+		const aFrames: unknown[] = [];
+		const bFrames: unknown[] = [];
+		const globalFrames: unknown[] = [];
+		const preHelloFrames: unknown[] = [];
+		const socketA = fakeSocket(() => 1 << 20, (frame) => aFrames.push(frame));
+		const socketB = fakeSocket(() => 1 << 20, (frame) => bFrames.push(frame));
+		const socketGlobal = fakeSocket(() => 1 << 20, (frame) => globalFrames.push(frame));
+		const socketPreHello = fakeSocket(() => 1 << 20, (frame) => preHelloFrames.push(frame));
+		for (const socket of [socketA, socketB, socketGlobal, socketPreHello]) attach(streamServer, socket);
+		(streamServer as any).filters.set(socketA, "A");
+		(streamServer as any).filters.set(socketB, "B");
+		(streamServer as any).filters.set(socketGlobal, null);
+
+		streamServer.broadcastStream({ phase: "start", streamId: "s-a", botId: "A", botName: "小雪", ts: 1 });
+		streamServer.broadcastStream({ phase: "update", streamId: "s-b", botId: "B", botName: "小雨", ts: 2, thinking: "", text: "hi", toolCalls: [] });
+
+		expect(aFrames).toEqual([{ type: "agent_stream", stream: { phase: "start", streamId: "s-a", botId: "A", botName: "小雪", ts: 1 } }]);
+		expect(bFrames).toEqual([{ type: "agent_stream", stream: { phase: "update", streamId: "s-b", botId: "B", botName: "小雨", ts: 2, thinking: "", text: "hi", toolCalls: [] } }]);
+		expect(globalFrames).toHaveLength(2);
+		expect(preHelloFrames).toEqual([]);
+	});
+
 	test("hello filter: events filtered daemon-side; broadcast/usage filtered; stats aggregates match DB", () => {
 		const server = makeServer();
 		const chatId = -1004402809405;

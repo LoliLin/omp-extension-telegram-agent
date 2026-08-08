@@ -64,6 +64,21 @@ function allItems(log: EventLog) {
 }
 
 describe("Pi plugin timeline client", () => {
+	test("additive agent stream frames become timeline events", () => {
+		const log = new EventLog();
+		const client = new TimelineClient(sockPath, null, { onEvent: (event) => log.events.push(event) });
+		(client as any).handleFrame({
+			type: "agent_stream",
+			stream: { phase: "update", streamId: "stream-1", botId: "A", botName: "小雪", ts: 1, thinking: "想", text: "答", toolCalls: [] },
+		});
+
+		expect(log.events).toEqual([{
+			type: "stream",
+			stream: { phase: "update", streamId: "stream-1", botId: "A", botName: "小雪", ts: 1, thinking: "想", text: "答", toolCalls: [] },
+		}]);
+		client.dispose();
+	});
+
 	test("manual send resolves the matching daemon acknowledgement", async () => {
 		server.stop();
 		const requests: SendMessageRequest[] = [];

@@ -4,6 +4,7 @@ import {
 	encodeFrame,
 	FrameDecoder,
 	type BotStats,
+	type AgentStreamFrame,
 	type MsgItem,
 	type SendMessageFailure,
 	type SendMessageResult,
@@ -51,6 +52,7 @@ export type TimelineEvent =
 	| { type: "prepend"; items: TimelineItem[] }
 	| { type: "stats"; stats: Record<string, BotStats> }
 	| { type: "vision"; fileUniqueId: string; text: string }
+	| { type: "stream"; stream: AgentStreamFrame }
 	| { type: "status"; text: string }
 	| { type: "disconnected"; reason: string };
 
@@ -257,6 +259,8 @@ export class TimelineClient implements TimelinePort {
 			this.emitStats();
 		} else if (message.type === "vision_update") {
 			this.receiveVisionUpdate(message.fileUniqueId, message.text);
+		} else if (message.type === "agent_stream") {
+			this.hooks.onEvent({ type: "stream", stream: message.stream });
 		}
 	}
 

@@ -12,6 +12,7 @@ import type {
 	StatsSnapshot,
 	UsageRun,
 	VisionUpdate,
+	AgentStreamFrame,
 	SendMessageRequest,
 	SendMessageResult,
 } from "../ipc.ts";
@@ -133,7 +134,6 @@ export class IpcServer {
 					this.listeners.add(socket);
 					this.decoders.set(socket, new FrameDecoder());
 					this.outQueues.set(socket, { chunks: [], total: 0 });
-					this.filters.set(socket, null);
 				},
 				data: (socket, chunk) => {
 					try {
@@ -200,6 +200,28 @@ export class IpcServer {
 		if (this.listeners.size === 0 || !update.fileUniqueId || !update.text.trim()) return;
 		const frame = encodeFrame({ type: "vision_update", ...update } satisfies ServerMessage);
 		for (const socket of this.listeners) this.writeFrame(socket, frame);
+	}
+
+	/** Push an ephemeral assistant snapshot only to listeners observing its bot. */
+	broadcastStream(stream: AgentStreamFrame): void {
+		if (this.listeners.size === 0) return;
+		const targets = [...this.listeners].filter((socket) => {
+			if (!this.filters.has(socket)) return false;
+			const filter = this.filters.get(socket) ?? null;
+			return !filter || filter === stream.botId;
+		});
+		if (targets.length === 0) return;
+		const frame = encodeFrame({ type: "agent_stream", stream } satisfies ServerMessage);
+		for (const socket of targets) this.writeFrame(socket, frame);
+	}
+
+	hasStreamListener(botId: string): boolean {
+		for (const socket of this.listeners) {
+			if (!this.filters.has(socket)) continue;
+			const filter = this.filters.get(socket) ?? null;
+			if (!filter || filter === botId) return true;
+		}
+		return false;
 	}
 
 	private handleRequest(socket: SocketLike, req: ClientRequest): void {

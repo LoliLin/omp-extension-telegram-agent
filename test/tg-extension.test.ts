@@ -333,6 +333,75 @@ describe("native Pi Telegram extension", () => {
 		expect(host.widgetInputs).toHaveLength(0);
 	});
 
+	test("every feed change requests a host render even after panel off", async () => {
+		const host = makeHost();
+		await host.command("attach A");
+		const beforeFirst = host.renderRequests.count;
+		host.clients[0]!.emit({ type: "append", items: [message] });
+		expect(host.renderRequests.count).toBe(beforeFirst + 1);
+
+		await host.command("panel off");
+		const beforeSecond = host.renderRequests.count;
+		host.clients[0]!.emit({ type: "append", items: [{ ...message, messageId: 6, ts: message.ts + 1 }] });
+		expect(host.renderRequests.count).toBe(beforeSecond + 1);
+	});
+
+	test("assistant partials replace one native streaming card and expose tool arguments", async () => {
+		const host = makeHost();
+		await host.command("attach A");
+		const streamBase = { streamId: "s1", botId: "A", botName: "小雪", ts: message.ts };
+		host.clients[0]!.emit({ type: "stream", stream: { ...streamBase, phase: "start" } });
+		host.clients[0]!.emit({
+			type: "stream",
+			stream: { ...streamBase, phase: "update", thinking: "先想\x1b]52;c;bad\x07", text: "旧文本", toolCalls: [] },
+		});
+		host.clients[0]!.emit({
+			type: "stream",
+			stream: { ...streamBase, phase: "update", thinking: "先想", text: "", toolCalls: [{ name: "send", arguments: `${JSON.stringify({ message: "你好" })}\x1b[31m` }] },
+		});
+
+		const rendered = host.entries[0]!.component.render(80).join("\n");
+		expect(rendered.match(/STREAMING/g)).toHaveLength(1);
+		expect(rendered).toContain("thinking · 先想");
+		expect(rendered).toContain('send · {"message":"你好"}');
+		expect(rendered).not.toContain("旧文本");
+		expect(rendered).not.toContain("\x1b]52");
+		expect(rendered).not.toContain("\x1b[31m");
+		expect(host.entries).toHaveLength(1);
+
+		host.clients[0]!.emit({ type: "stream", stream: { ...streamBase, phase: "end" } });
+		host.clients[0]!.emit({ type: "append", items: [{ kind: "evt", ts: message.ts + 1, evtId: 9, botId: "A", botName: "小雪", evtKind: "tool_call", payload: JSON.stringify({ tool: "send", args: {} }) }] });
+		const final = host.entries[0]!.component.render(80).join("\n");
+		expect(final).not.toContain("STREAMING");
+		expect(final.match(/send · \{\}/g)).toHaveLength(1);
+	});
+
+	test("stream updates self-heal without start and remain bounded across stale/end/disconnect", async () => {
+		const host = makeHost();
+		await host.command("attach");
+		for (let index = 0; index < 33; index++) {
+			host.clients[0]!.emit({
+				type: "stream",
+				stream: { phase: "update", streamId: `s-${index}`, botId: index % 2 ? "B" : "A", botName: `bot-${index}`, ts: index, thinking: "", text: `text-${index}`, toolCalls: [] },
+			});
+		}
+		let rendered = host.entries[0]!.component.render(100).join("\n");
+		expect(rendered.match(/STREAMING/g)).toHaveLength(32);
+		expect(rendered).not.toContain("text-0");
+		expect(rendered).toContain("text-32");
+
+		host.clients[0]!.emit({ type: "stream", stream: { phase: "end", streamId: "s-32", botId: "A", botName: "bot-32", ts: 34 } });
+		host.clients[0]!.emit({ type: "stream", stream: { phase: "update", streamId: "s-32", botId: "A", botName: "bot-32", ts: 35, thinking: "", text: "stale", toolCalls: [] } });
+		rendered = host.entries[0]!.component.render(100).join("\n");
+		expect(rendered).not.toContain("stale");
+		expect(rendered.match(/STREAMING/g)).toHaveLength(31);
+
+		host.clients[0]!.emit({ type: "disconnected", reason: "daemon disconnected" });
+		rendered = host.entries[0]!.component.render(100).join("\n");
+		expect(rendered).not.toContain("STREAMING");
+		expect(host.entries).toHaveLength(1);
+	});
+
 	test("a restored attach anchor renders detached without opening a socket", () => {
 		const host = makeHost();
 		const restored = host.restore({ instanceId: "old-feed", filter: "A" });
