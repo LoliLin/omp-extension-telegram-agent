@@ -281,11 +281,11 @@ describe("send from catalog (R3)", () => {
 		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never, { chatActionSender: async () => true });
 		const calls: Array<{ kind: string; chatId: number; payload: string; replyTo?: number }> = [];
 		(rt as any).api = {
-			sendRichMessage: async (chatId: number, text: string, replyTo?: number) => {
-				calls.push({ kind: "rich", chatId, payload: text, replyTo });
+			sendMessageWithEntities: async (chatId: number, text: string, _entities: unknown, replyTo?: number) => {
+				calls.push({ kind: "formatted", chatId, payload: text, replyTo });
 				return {
 					chat: { id: CHAT }, message_id: 901, from: { id: 1, is_bot: true, first_name: "小雪" },
-					date: 1754600000, rich_message: { blocks: [{ type: "paragraph", text }] },
+					date: 1754600000, text,
 				};
 			},
 			sendMessage: async () => { throw new Error("plain fallback must not run"); },
@@ -303,7 +303,7 @@ describe("send from catalog (R3)", () => {
 		const result = await (rt as any).executeSend({ message: "收到", sticker: "s8", reply_to: 42 });
 
 		expect(calls).toEqual([
-			{ kind: "rich", chatId: CHAT, payload: "收到", replyTo: 42 },
+			{ kind: "formatted", chatId: CHAT, payload: "收到", replyTo: 42 },
 			{ kind: "sticker", chatId: CHAT, payload: "fid-combined", replyTo: 42 },
 		]);
 		expect(result).toEqual({
@@ -326,14 +326,14 @@ describe("send from catalog (R3)", () => {
 		expect(networkCalls).toBe(0);
 	});
 
-	test("a confirmed rich rejection emits one observable plain fallback", async () => {
+	test("a confirmed entity rejection emits one observable plain fallback", async () => {
 		const rt = new BotRuntime(db, makeBot(), makeConfig(), null as never, { chatActionSender: async () => true });
 		const calls: string[] = [];
 		const broadcasts: unknown[] = [];
 		(rt as any).api = {
-			sendRichMessage: async () => {
-				calls.push("rich");
-				throw new TelegramApiError(400, "Bad Request: can't parse markdown");
+			sendMessageWithEntities: async () => {
+				calls.push("formatted");
+				throw new TelegramApiError(400, "Bad Request: can't parse entities");
 			},
 			sendMessage: async (_chatId: number, text: string) => {
 				calls.push("plain");
@@ -347,7 +347,7 @@ describe("send from catalog (R3)", () => {
 
 		await (rt as any).executeSend({ message: "# 未闭合" });
 
-		expect(calls).toEqual(["rich", "plain"]);
+		expect(calls).toEqual(["formatted", "plain"]);
 		expect(broadcasts).toHaveLength(1);
 		expect(db.query("SELECT kind, payload FROM agent_events ORDER BY id").all()).toEqual([
 			{ kind: "plain_fallback", payload: JSON.stringify({ message_id: 903 }) },
@@ -361,7 +361,7 @@ describe("send from catalog (R3)", () => {
 		const rt = new BotRuntime(db, makeBot({ id: "A" }), makeConfig(), null as never);
 		let networkCalls = 0;
 		(rt as any).api = {
-			sendRichMessage: async () => { networkCalls++; },
+			sendMessageWithEntities: async () => { networkCalls++; },
 			sendMessage: async () => { networkCalls++; },
 			sendSticker: async () => { networkCalls++; },
 		};

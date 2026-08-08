@@ -68,7 +68,7 @@ When top-level model fields are omitted, every bot inherits Pi's merged default 
 
 `tools` controls:
 
-- `send`: Telegram Rich Message and sticker delivery;
+- `send`: Markdown text converted locally to Telegram message entities, plus sticker delivery; ordinary prose keeps ordinary weight;
 - `search`: enables bounded TinyFish search and single-page retrieval through one tool; it requires the TinyFish key selected by `tinyfish_key_env` in `.env`;
 - `run_js`: constrained deterministic computation.
 

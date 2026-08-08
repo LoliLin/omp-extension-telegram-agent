@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：TinyFish已完成且自动测试永久断网。新增raw notes已调查：UI-0005重开为attach直发/多bot Pi原生select；TG-0004用Markdown→Telegram entities退役出站RichMessage paragraph。下一步T13o/T13p逐项实现，再做T14真实总验收。
+2026-08-08：全部需求行为已实现，自动测试永久断网。UI-0005现为attach直发/多bot Pi原生select；TG-0004已用Markdown→classic Telegram entities退役出站RichMessage paragraph并bump cache v7。下一步只剩T14全量/docs build/真实Pi与Telegram总验收，再逐项勾选REQ-LIST。
 
 ## 已完成
 
@@ -12,7 +12,7 @@
 - `src/plugin/timeline.ts` 只保留 IPC、history cursor、dedupe、stats 与有界媒体读取；旧 `src/tui/engine.ts` 已删除。
 - `/tg config`、attach即直发的`/tg attach [bot]`、`/tg compose [bot|off]` override、`/tg more`、`/tg detach`、`/tg panel [bot|off]`、`/tg status [bot]`与daemon commands可用。
 - package manifest、项目 Pi launcher、fullscreen settings、native Image 和 Pi `FooterComponent` telemetry 已落地。
-- 全量验证：372 tests pass / 0 fail / 4836 assertions；`bun run check`、cache v5 golden、双mdBook 18 Markdown/98 links与21 HTML/608 links通过；真实 Pi fullscreen TTY 已验证attach/restart/filter+footer重连/live stream，Telegram群control及Kitty/Ghostty媒体、Rich/reply/组合发送trace留T14。
+- 当前离线全量：424 tests pass / 0 fail / 5059 assertions；`bun run check`、cache v7 golden通过且全局外网guard生效。双mdBook最终重建与真实Pi/Telegram总验收留T14。
 
 ## 当前实施队列
 
@@ -45,6 +45,7 @@
 27. **已完成 `REQ-VISION-0001`（`f4ff63b` + `6efd768` + `8b2d410`）**：动态media在首次provider提交前最多两路完成同一次Luna low识别，catalog保持后台且当前session prefix不变；匿名photo/static-sticker真实gate通过并且reasoning=0。
 28. **已实现 `REQ-UI-0014`（`50eec13`）**：poller durable/broadcast后排photo，最多2 active/128 pending，启动最新100；precache与vision共享一次下载，≤1 MiB文件hash命名、0600原子安装。`media_ready`经owner socket只重建匹配Pi卡片，失败保留label且无身份/path日志。真实群新photo留T14。
 29. **已完成 `REQ-SEARCH-0001`（`0c450cd`）**：保留三tool顺序，`search`严格query/url二选一；Fetch只接受public HTTP(S)，50秒/1 MiB/8,000字符和untrusted boundary固定，event不含query/path/body/key。29个local tests与一次性真实shape smoke通过；脚手架已删除，test preload即使有`.env`也只放行loopback。cache schema 5→6。
+30. **已实现 `REQ-TG-0004`**：复用Pi公开Marked lexer；plain paragraph为0 entity，显式Markdown本地生成UTF-16 entities；只对entity-specific确定性400做一次无entities fallback，unknown/持久化失败不重发。API/runtime/组合send/cache v7 targeted通过，真实格式smoke留T14。
 
 UI-0003 用户原始 note 已吸收到正式 R/AC；`19819c9` 仍是 transcript 实现证据，T9b 的新 behavior commit 才是 UI-0003/0007 完成证据。
 

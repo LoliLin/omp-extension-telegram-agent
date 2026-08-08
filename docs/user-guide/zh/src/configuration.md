@@ -68,7 +68,7 @@ export default defineConfig({
 
 `tools`：
 
-- `send`：允许 agent 发 Telegram Rich Message / sticker；
+- `send`：允许agent发送本地转换为Telegram message entities的Markdown文字与sticker；普通正文保持普通字重；
 - `search`：启用同一个TinyFish工具的有界网页检索与单页读取，需要 `.env` 中由 `tinyfish_key_env` 指定的TinyFish key；
 - `run_js`：启用受限的确定性计算工具。
 

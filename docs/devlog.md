@@ -721,3 +721,11 @@
 - 将TinyFish fetch已经覆盖的HTTP(S)、userinfo、localhost/local、IPv4/IPv6 private/link-local/CGNAT/documentation/multicast判断机械移动到`src/net/public-url.ts`；共享函数只解析literal，不做DNS或网络。
 - `src/tools/search.ts`继续导出同名validator并把null折叠为原有`TinyFishClientError("invalid_url")`，现有请求、错误、telemetry和provider输出不变。这个最小共享边界供下一项Markdown `text_link`安全复用，避免Telegram层反向依赖tool模块或复制约百行网络地址规则。
 - Cache impact: **NONE**——纯机械职责移动；tool schema、TinyFish wire、system/messages/summary、context epoch、调用与token逐字节不变。
+
+## 2026-08-08 (84) — 将Agent Markdown确定性映射为Telegram entities
+
+- 新增`src/telegram/markdown.ts`，复用Pi TUI公开`Marked` lexer，把plain/bold/italic/strike/code/pre/public link/heading/list/blockquote/simple table渲染为有界text与UTF-16 entities。普通paragraph产生0个style entity；raw HTML只作literal，image只留alt，链接复用共享public HTTP(S) literal校验且不联网。
+- agent出站退役`sendRichMessage`，改用classic `sendMessage {text,entities?}`。只在Telegram明确400拒绝entity/format时对同一生成text做一次无entities fallback；timeout/429/5xx/non-JSON/network与canonical persistence failure仍不远端重试。incoming RichMessage data plane保持不变。
+- converter固定4096 code points、4096 token nodes和100 entities；空/超限/复杂/非法错误在网络前以固定category拒绝且不含source。组合message+sticker+reply、terminating ACK、tool顺序与provider call数不变；event改记`markdown_sent`或`plain_fallback`且不含正文/URL/entities。
+- 目标Markdown/send/sticker/cache 42 pass / 200 assertions；全量424 pass / 5059 assertions与typecheck通过。真实群plain/bold/list/code/reply smoke并入T14；自动测试由全局network guard保持0真实Telegram/TinyFish调用。
+- Cache impact: **INTENTIONAL**——只更新既有send说明并增加message 4096 schema约束，`CACHE_SCHEMA_VERSION` 6→7、tools hash`09d2e154259d`→`280868a5b3a9`；systemA/B、serialization、summary、catalog、tool项/顺序、LLM调用与dynamic token不变。

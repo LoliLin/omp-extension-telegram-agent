@@ -90,9 +90,12 @@ describe("send tool contract (REQ-SEND-0001)", () => {
 		expect(Object.keys(TOOL_DEFS[0].parameters.properties)).toEqual(["message", "sticker", "reply_to"]);
 		expect(TOOL_DEFS[0].description).toContain("唯一的公开输出通道");
 		expect(TOOL_DEFS[0].description).toContain("唯一一次最终 send 调用");
-		expect(TOOL_DEFS[0].description).toContain("Rich Markdown");
-		expect((TOOL_DEFS[0].parameters.properties.message as { description?: string }).description).toContain("标题、列表、代码块、表格和引用");
-		expect((TOOL_DEFS[0].parameters.properties.message as { description?: string }).description).toContain("不得使用 HTML");
+		expect(TOOL_DEFS[0].description).toContain("Markdown");
+		const messageSchema = TOOL_DEFS[0].parameters.properties.message as { description?: string; maxLength?: number };
+		expect(messageSchema.description).toContain("标题、列表、表格和引用");
+		expect(messageSchema.description).toContain("不要使用 HTML 或图片");
+		expect(messageSchema.description).toContain("不要为了样式包裹整段粗体");
+		expect(messageSchema.maxLength).toBe(4096);
 		expect((TOOL_DEFS[0].parameters.properties.reply_to as { description?: string }).description).toContain("当前可见消息行");
 		expect((TOOL_DEFS[0].parameters.properties.sticker as { description?: string }).description).toContain("Available stickers");
 	});

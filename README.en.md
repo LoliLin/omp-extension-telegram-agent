@@ -20,7 +20,7 @@ Read [Installation and first setup](docs/user-guide/en/src/getting-started.md) f
 
 - Raw Telegram Bot API long polling, canonical SQLite history, and isolated sessions for 1..N agents.
 - Mention, reply, configured-name, and deterministic probability routing with availability and cooldown gates.
-- Telegram Rich Messages, stickers, on-demand media vision, optional search, and constrained JavaScript computation.
+- Telegram-native Markdown formatting via classic message entities, stickers, on-demand media vision, optional search, and constrained JavaScript computation.
 - Pi-native transcript, image components, footer telemetry, hierarchical command completion, and editor compose; the plugin does not implement its own viewport or terminal protocol.
 - Append-only provider context, a stable cached prefix, bounded suffixes, and compaction to avoid unnecessary calls and repeated tokens.
 

@@ -27,7 +27,7 @@ import {
 	localFailureCategory,
 	persistSentMessageWithRetry,
 	retrySqliteBusy,
-	sendRichTextAndPersist,
+	sendMarkdownTextAndPersist,
 	SentMessagePersistenceError,
 	type SentMessageTransport,
 } from "../telegram/send.ts";
@@ -637,7 +637,7 @@ export class BotRuntime {
 				await runLocalEffect(
 					component,
 					"event_failed",
-					() => this.recordEvent(transport === "rich" ? "rich_sent" : "plain_fallback", { message_id: messageId }),
+					() => this.recordEvent(transport === "formatted" ? "markdown_sent" : "plain_fallback", { message_id: messageId }),
 					true,
 				);
 			}
@@ -704,7 +704,7 @@ export class BotRuntime {
 
 		if (params.message) {
 			try {
-				const { raw, canonical, transport } = await sendRichTextAndPersist(
+				const { raw, canonical, transport } = await sendMarkdownTextAndPersist(
 					this.db,
 					this.api,
 					this.bot.id,

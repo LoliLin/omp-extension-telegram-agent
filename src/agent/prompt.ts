@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 6; // v6: search tool supports bounded TinyFish page fetches
+export const CACHE_SCHEMA_VERSION = 7; // v7: send tool uses bounded Markdown mapped to Telegram entities
 
 // Fixed shared protocol block, appended after the persona. Never reorder.
 const PROTOCOL = `

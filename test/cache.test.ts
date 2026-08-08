@@ -19,11 +19,11 @@ import { toolsHash } from "../src/agent/tools.ts";
 import { stickerCatalogBlock } from "../src/media/sticker-catalog.ts";
 
 const GOLDEN = {
-	schemaVersion: 6,
+	schemaVersion: 7,
 	systemZhTemplate: "d2429abc25aa",
 	systemEnTemplate: "8a5eb2679620",
 	serialize: "68a17d6e5c05",
-	tools: "09d2e154259d",
+	tools: "280868a5b3a9",
 	compactionPrompt: "045a5241fdd7",
 	systemZhTemplateWithCatalog: "319085c72d6b",
 };

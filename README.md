@@ -20,7 +20,7 @@
 
 - Telegram raw Bot API 长轮询、SQLite canonical history 与 1..N 个隔离 agent session。
 - mention / reply / 配置名称触发，以及有冷却和可用性 gate 的确定性概率 routing。
-- Telegram Rich Message、sticker、按需媒体视觉理解、可选 search 与受限 JavaScript 计算。
+- Telegram Markdown 原生格式（classic message entities）、sticker、按需媒体视觉理解、可选 search 与受限 JavaScript 计算。
 - Pi 原生 transcript、图片组件、footer telemetry、分级命令补全和 editor compose；插件不自绘 viewport 或终端协议。
 - append-only provider context、stable prefix cache、bounded suffix 与 compaction，避免无意义调用和重复 token。
 

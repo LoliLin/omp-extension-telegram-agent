@@ -1,6 +1,6 @@
 # REQ-TG-0004: 将 Agent Markdown 映射为 Telegram 文本 entities
 
-- **Status:** Approved
+- **Status:** Implemented（2026-08-08；offline unit/integration/cache/typecheck 已验证，真实群格式 smoke 留 T14 后勾选）
 - **Priority:** P1
 - **Source:** 用户反馈「加入 rich text 后 bot 永远在写粗体字；让 bot 用 Markdown 语法自动格式化成为 Telegram 支持的 rich text」
 - **依赖:** REQ-TG-0003、REQ-SEND-0001、REQ-SEND-0002

@@ -88,7 +88,7 @@ REQ-LIST 当前新增项全部实现、验证并以 commit 标注勾选；Telegr
 - [x] **T13n** — 脱敏审计现有send参数与RichMessage blocks，重开UI-0005并正式化Markdown entities修复；validates: UI-0005/TG-0004 documented scope/AC；commit: docs/research only
 - [x] **T13o** — attach默认进入scope compose，多bot提交复用Pi原生select，并保留sticky/off/unknown边界；validates: UI-0005 AC1–AC8；commit: native editor behavior
 - [x] **T13p0** — 将TinyFish已经验证的public HTTP(S) literal validator机械提到共享模块，供Markdown link复用；validates: behavior unchanged；commit: mechanical refactor
-- [ ] **T13p** — 复用Pi公开Marked lexer把agent Markdown转为Telegram text/entities，退役出站RichMessage paragraph并bump cache v7；validates: TG-0004 AC1–AC8；commit: Markdown transport behavior
+- [x] **T13p** — 复用Pi公开Marked lexer把agent Markdown转为Telegram text/entities，退役出站RichMessage paragraph并bump cache v7；validates: TG-0004 AC1–AC8；commit: Markdown transport behavior
 - [ ] **T14** — 全量验证、真实 Pi/Telegram smoke、逐篇更新 REQ completion/commit、devlog/handoff，并将计划移 completed；validates: all ACs；commit: completion record
 
 ## 每个 commit 的固定流程

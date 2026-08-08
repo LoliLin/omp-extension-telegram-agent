@@ -3,17 +3,27 @@
 import type { Database } from "bun:sqlite";
 import { TelegramApiError } from "./api.ts";
 import { insertSentMessage } from "./ingest.ts";
+import {
+	formatTelegramMarkdown,
+	TelegramMarkdownError,
+	type TelegramMessageEntity,
+} from "./markdown.ts";
 import type { CanonicalMessage } from "./normalize.ts";
 
 export interface TextSendApi {
 	sendMessage(chatId: number, text: string, replyToMessageId?: number): Promise<Record<string, unknown>>;
 }
 
-export interface RichTextSendApi extends TextSendApi {
-	sendRichMessage(chatId: number, markdown: string, replyToMessageId?: number): Promise<Record<string, unknown>>;
+export interface MarkdownTextSendApi extends TextSendApi {
+	sendMessageWithEntities(
+		chatId: number,
+		text: string,
+		entities: readonly TelegramMessageEntity[],
+		replyToMessageId?: number,
+	): Promise<Record<string, unknown>>;
 }
 
-export type SentMessageTransport = "plain" | "rich" | "plain_fallback" | "sticker";
+export type SentMessageTransport = "plain" | "formatted" | "plain_fallback" | "sticker";
 
 export class SentMessagePersistenceError extends Error {
 	constructor(
@@ -49,7 +59,7 @@ export function localFailureCategory(error: unknown): "sqlite_busy" | "sqlite_cl
 
 export interface TelegramCreateFailure {
 	outcome: "rejected" | "unknown";
-	category: "telegram_4xx" | "rate_limited" | "timeout" | "server_error" | "non_json" | "network_error";
+	category: "invalid_request" | "telegram_4xx" | "rate_limited" | "timeout" | "server_error" | "non_json" | "network_error";
 }
 
 /**
@@ -57,6 +67,7 @@ export interface TelegramCreateFailure {
  * Everything else crosses an unknown commit boundary and must not be retried.
  */
 export function classifyTelegramCreateFailure(error: unknown): TelegramCreateFailure {
+	if (error instanceof TelegramMarkdownError) return { outcome: "rejected", category: "invalid_request" };
 	if (error instanceof TelegramApiError) {
 		const description = error.description.toLowerCase();
 		if (description.includes("non-json")) return { outcome: "unknown", category: "non_json" };
@@ -111,32 +122,28 @@ export async function sendTextAndPersist(
 }
 
 /**
- * True only when Telegram has deterministically rejected the rich request before
+ * True only when Telegram has deterministically rejected the entity request before
  * creating a message. Unknown outcomes must never be retried as plain text.
  */
-export function isDeterministicRichRejection(error: unknown): error is TelegramApiError {
+export function isDeterministicEntityRejection(error: unknown): error is TelegramApiError {
 	if (!(error instanceof TelegramApiError)) return false;
 	const description = error.description.toLowerCase();
-	if (description.includes("non-json")) return false;
-	if (error.code === 404) {
-		return description === "not found"
-			|| description.includes("method not found")
-			|| description.includes("sendrichmessage");
-	}
-	if (error.code !== 400) return false;
+	if (description.includes("non-json") || error.code !== 400) return false;
 	return description.includes("can't parse")
 		|| description.includes("cannot parse")
 		|| description.includes("failed to parse")
 		|| description.includes("parse error")
-		|| description.includes("unsupported start tag")
-		|| description.includes("rich message is not supported")
-		|| description.includes("rich messages are not supported");
+		|| description.includes("message entity")
+		|| description.includes("message entities")
+		|| description.includes("entity offset")
+		|| description.includes("entity length")
+		|| description.includes("entities are not valid");
 }
 
-/** Agent rich send with one safe literal fallback and exactly-once persistence. */
-export async function sendRichTextAndPersist(
+/** Agent Markdown send with one safe entity-free fallback and exactly-once persistence. */
+export async function sendMarkdownTextAndPersist(
 	db: Database,
-	api: RichTextSendApi,
+	api: MarkdownTextSendApi,
 	botId: string,
 	chatId: number,
 	markdown: string,
@@ -144,16 +151,17 @@ export async function sendRichTextAndPersist(
 ): Promise<{
 	raw: Record<string, unknown>;
 	canonical: CanonicalMessage;
-	transport: "rich" | "plain_fallback";
+	transport: "formatted" | "plain_fallback";
 }> {
+	const formatted = formatTelegramMarkdown(markdown);
 	let raw: Record<string, unknown>;
-	let transport: "rich" | "plain_fallback" = "rich";
+	let transport: "formatted" | "plain_fallback" = "formatted";
 	try {
-		raw = await api.sendRichMessage(chatId, markdown, replyToMessageId);
+		raw = await api.sendMessageWithEntities(chatId, formatted.text, formatted.entities, replyToMessageId);
 	} catch (error) {
-		if (!isDeterministicRichRejection(error)) throw error;
+		if (!isDeterministicEntityRejection(error)) throw error;
 		transport = "plain_fallback";
-		raw = await api.sendMessage(chatId, markdown, replyToMessageId);
+		raw = await api.sendMessage(chatId, formatted.text, replyToMessageId);
 	}
 	return { raw, canonical: await persistSentMessageWithRetry(db, botId, raw, transport), transport };
 }

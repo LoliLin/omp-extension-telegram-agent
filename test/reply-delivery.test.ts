@@ -92,7 +92,7 @@ describe("durable direct reply delivery (REQ-REPLY-0001)", () => {
 		let telegramSends = 0;
 		(rt as any).api = {
 			sendMessage: async () => { telegramSends++; },
-			sendRichMessage: async () => { telegramSends++; },
+			sendMessageWithEntities: async () => { telegramSends++; },
 		};
 
 		expect(rt.trigger("explicit", replyTrigger(10))).toBe("started");

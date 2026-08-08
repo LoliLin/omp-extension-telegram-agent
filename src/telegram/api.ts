@@ -1,6 +1,8 @@
 // Minimal Telegram Bot API client over fetch. No third-party SDK.
 // Docs: https://core.telegram.org/bots/api
 
+import type { TelegramMessageEntity } from "./markdown.ts";
+
 const API_BASE = "https://api.telegram.org";
 const CALL_TIMEOUT_MS = 10_000;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
@@ -98,14 +100,16 @@ export class BotApi {
 		});
 	}
 
-	sendRichMessage(
+	sendMessageWithEntities(
 		chatId: number,
-		markdown: string,
+		text: string,
+		entities: readonly TelegramMessageEntity[],
 		replyToMessageId?: number,
 	): Promise<Record<string, unknown>> {
-		return this.call("sendRichMessage", {
+		return this.call("sendMessage", {
 			chat_id: chatId,
-			rich_message: { markdown },
+			text,
+			...(entities.length > 0 ? { entities } : {}),
 			...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {}),
 		});
 	}

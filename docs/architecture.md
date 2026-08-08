@@ -35,7 +35,7 @@
 - 每个 bot token 一个 getUpdates long-polling 循环（offset 持久化在 SQLite）
 - 每条 update：raw update→canonical message→direct-reply obligation在一个SQLite transaction提交，之后poller才推进offset；任一步失败整体回滚并重放。canonical以(chat_id,message_id)去重，second-bot副本可只补齐null `reply_to_sender_id`。`rich_message` 也走同一 normalize：canonical列只保存≤256 KiB source（超限为有界JSON诊断），`text`保存确定性plain projection；projector上限为16层、500 blocks、4096 nodes、32768 code points，未知metadata不泄露URL/file id。revision保留旧source/projection，IPC/Pi/provider只读取projection。
 - Telegram create 是不可回滚的 commit boundary。Bot API 返回 Message 后先按 25/100/250 ms 有界重试 canonical SQLite projection，再做 exposure、broadcast、event 与 typing cleanup；这些后置副作用任一失败都只能返回 terminal `committed/no_retry` 并写脱敏 `send_degraded`，绝不把整次 tool call 抛回模型。timeout、断线、非JSON、429/5xx 等无法证明未创建的结果直接 terminal `unknown/no_retry`；message 已提交后 sticker 失败则是 `partial/no_retry`。poller echo 继续以 `(chat_id,message_id)` 完成本地幂等恢复。
-- agent `send.message` 走 `sendRichMessage {rich_message:{markdown}}`；只有 Telegram 明确拒绝 rich method/parse 且确认未创建消息的确定性 4xx 才 literal `sendMessage` 一次。operator manual compose仍保持literal plain text，两条路径复用 `src/telegram/send.ts` 的 send→canonical persistence primitive。
+- agent `send.message` 先由Pi TUI公开的`Marked` lexer和本地有界renderer转换为classic `sendMessage {text,entities?}`；普通paragraph没有style entity，显式Markdown才产生格式。只有Telegram明确以确定性400拒绝entity/format且确认未创建消息时，才对同一生成text做一次无entities fallback。operator manual compose仍保持literal plain text，两条路径复用`src/telegram/send.ts`的send→canonical persistence primitive；incoming RichMessage normalize/raw persistence/projection继续保留。
 
 ## Routing（Phase 5，REQ-CONF-0001 泛型化）
 
@@ -57,7 +57,7 @@
 - 触发/flush 是 BotRuntime 本地持有的串行状态机（REQ-AGENT-0001）：`idle →(trigger) flushing →(drain) idle`；`flushing` 在进入 flush 时同步置位（不等 SDK 事件），在途期间的 trigger 只合并为 `pendingTrigger`，flush 循环结束后统一再跑一轮（burst 合并）；flush 全链路 try/catch，失败只落 agent_events `error`（stage=flush + 固定provider category，不保存上游body），消息保持未曝光由后续 trigger 重试；消息只在 `sendUserMessage` 成功后 markExposed；daemon shutdown 时 `stop()` 有界（30s）等待在途 flush 再 dispose
 - 唤醒：`session.sendUserMessage(serialized)`，一次 flush 一批（burst 由 pendingTrigger 合并，不走 SDK 队列）
 - 群消息序列化为固定紧凑 grammar（见 docs/cache.md），append-only
-- tools 固定为 `send`、`search`、`run_js`（Phase 6 起），禁用 coding agent 默认文件工具。`src/agent/tools.ts` 是 provider-facing 用法唯一权威；persona/protocol 不复制参数。`send(message?,sticker?,reply_to?)` 是唯一公开通道，`message` 为 Telegram Rich Markdown（普通文本是其子集，首版禁止HTML/raw block/remote media）；完整成功返回固定 `ok`，远端 committed/partial/unknown 的退化路径返回固定 `no_retry`，两者都用 `terminate:true` 阻止 follow-up provider call，sent ids 只留本地 details/event。
+- tools 固定为 `send`、`search`、`run_js`（Phase 6 起），禁用 coding agent 默认文件工具。`src/agent/tools.ts` 是 provider-facing 用法唯一权威；persona/protocol 不复制参数。`send(message?,sticker?,reply_to?)` 是唯一公开通道，`message` 为自然Markdown；本地仅映射bold/italic/strike/code/public link/heading/list/blockquote/simple table等固定子集，不启用HTML/MarkdownV2 parser或远程图片。完整成功返回固定 `ok`，远端 committed/partial/unknown 的退化路径返回固定 `no_retry`，两者都用 `terminate:true` 阻止 follow-up provider call，sent ids 只留本地 details/event。
 - `search(query?|url?)`复用同一TinyFish tool且强制二选一：query只发送现行`query`并在本地保留≤5条短结果；url只允许≤2048字符的public HTTP(S)，本机不做DNS/GET，提交一个URL到Fetch API。fetch请求、响应和provider正文分别固定为一页、≤1 MiB、≤8,000字符/50秒，结果套固定untrusted boundary；网页正文不获得指令权。事件只记录stage、hostname、hits/chars/truncated与固定错误category，不记录query、URL path/query/fragment、正文或key。群消息不会触发eager fetch。
 - local assistant text（未调 send）→ agent_events + TUI，不进群
 

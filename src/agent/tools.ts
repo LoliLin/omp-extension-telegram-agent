@@ -42,11 +42,12 @@ export const TOOL_DEFS = [
 		name: "send",
 		label: "Send",
 		description:
-			"Telegram 群唯一的公开输出通道。人类 @你、回复你或用配置名称点名时必须公开回应；其他场景可按人设沉默。先完成搜索或计算，再把 Rich Markdown 文字、贴纸和引用合并成唯一一次最终 send 调用，不能拆开发送。message 或 sticker 至少填一个；成功会立即结束本轮，不要再输出或调用工具。普通 Assistant 文本只在本地可见。",
+			"Telegram 群唯一的公开输出通道。人类 @你、回复你或用配置名称点名时必须公开回应；其他场景可按人设沉默。先完成搜索或计算，再把 Markdown 文字、贴纸和引用合并成唯一一次最终 send 调用，不能拆开发送。message 或 sticker 至少填一个；成功会立即结束本轮，不要再输出或调用工具。普通 Assistant 文本只在本地可见。",
 		parameters: Type.Object({
 			message: Type.Optional(Type.String({
+				maxLength: 4096,
 				description:
-					"按 Telegram Rich Markdown 渲染的群消息；普通文本也是合法输入。可使用标题、列表、代码块、表格和引用；不得使用 HTML、raw blocks 或远程媒体。可与 sticker 和 reply_to 合并；仅发贴纸时省略。",
+					"自然 Markdown 群消息；普通正文不要为了样式包裹整段粗体。支持显式粗体、斜体、删除线、行内/块代码、公共 HTTP(S) 链接、标题、列表、表格和引用；不要使用 HTML 或图片。可与 sticker 和 reply_to 合并；仅发贴纸时省略。",
 			})),
 			sticker: Type.Optional(
 				Type.String({ description: "可选贴纸；只能填 Sticker 目录或 Available stickers 中真实出现的 id，不得编造。" }),

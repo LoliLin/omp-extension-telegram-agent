@@ -122,7 +122,7 @@ describe("Telegram create commit boundary (REQ-SEND-0002)", () => {
 		let createCalls = 0;
 		let broadcasts = 0;
 		(runtime as any).api = {
-			sendRichMessage: async () => {
+			sendMessageWithEntities: async () => {
 				createCalls++;
 				return raw;
 			},
@@ -189,7 +189,7 @@ describe("Telegram create commit boundary (REQ-SEND-0002)", () => {
 		const runtime = makeRuntime(db, path);
 		let createCalls = 0;
 		(runtime as any).api = {
-			sendRichMessage: async () => {
+			sendMessageWithEntities: async () => {
 				createCalls++;
 				return textMessage(19615);
 			},
@@ -255,7 +255,7 @@ describe("Telegram create commit boundary (REQ-SEND-0002)", () => {
 			const runtime = makeRuntime(db);
 			const calls: string[] = [];
 			(runtime as any).api = {
-				sendRichMessage: async () => { calls.push("message"); return textMessage(19617); },
+				sendMessageWithEntities: async () => { calls.push("message"); return textMessage(19617); },
 				sendMessage: async () => { calls.push("plain"); return textMessage(19618); },
 				sendSticker: async () => { calls.push("sticker"); throw error; },
 			};
@@ -280,7 +280,7 @@ describe("Telegram create commit boundary (REQ-SEND-0002)", () => {
 		const runtime = makeRuntime(db);
 		const calls: string[] = [];
 		(runtime as any).api = {
-			sendRichMessage: async () => {
+			sendMessageWithEntities: async () => {
 				calls.push("message");
 				return { chat: { id: CHAT }, from: { id: 777, is_bot: true }, date: 1754600000 };
 			},
@@ -319,14 +319,14 @@ describe("Telegram create commit boundary (REQ-SEND-0002)", () => {
 		for (const [error, category] of cases) {
 			const db = makeDb();
 			const runtime = makeRuntime(db);
-			let richCalls = 0;
+			let formattedCalls = 0;
 			let plainCalls = 0;
 			(runtime as any).api = {
-				sendRichMessage: async () => { richCalls++; throw error; },
+				sendMessageWithEntities: async () => { formattedCalls++; throw error; },
 				sendMessage: async () => { plainCalls++; return textMessage(1); },
 			};
 			const { result, warnings } = await captureWarnings(() => (runtime as any).executeSend({ message: "secret-text-must-not-leak" }));
-			expect(richCalls).toBe(1);
+			expect(formattedCalls).toBe(1);
 			expect(plainCalls).toBe(0);
 			expect(result).toMatchObject({
 				content: [{ type: "text", text: SEND_NO_RETRY_ACK }],
@@ -352,7 +352,7 @@ describe("Telegram create commit boundary (REQ-SEND-0002)", () => {
 		const runtime = makeRuntime(db);
 		let createCalls = 0;
 		(runtime as any).api = {
-			sendRichMessage: async () => { createCalls++; return textMessage(19619); },
+			sendMessageWithEntities: async () => { createCalls++; return textMessage(19619); },
 			sendMessage: async () => { throw new Error("plain fallback must not run"); },
 		};
 		(runtime as any).markExposed = () => { throw new Error("exposure secret-text-must-not-leak"); };
@@ -383,7 +383,7 @@ describe("Telegram create commit boundary (REQ-SEND-0002)", () => {
 		const runtime = makeRuntime(db);
 		let networkCalls = 0;
 		(runtime as any).api = {
-			sendRichMessage: async () => { networkCalls++; return textMessage(1); },
+			sendMessageWithEntities: async () => { networkCalls++; return textMessage(1); },
 			sendMessage: async () => { networkCalls++; return textMessage(1); },
 			sendSticker: async () => { networkCalls++; return stickerMessage(2); },
 		};
