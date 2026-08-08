@@ -334,3 +334,10 @@
 - README 调查确认顶部已有平台简介，但主内容仍以内部文档目录为主；T13 等 provider schema 稳定后按 prerequisites→配置→运行/Pi→扩 bot→排障重写，并明确单 deployment 单群。
 - Telegram command 调查确认当前没有 control plane；canonical identity/entity、Poller 接收 bot id、Pi `session.compact()` 与内存 routing config 足够实现。首版命令固定为 public help/bots/status 与 admin compact/set/reset；allowlist deny-by-default，实现时让 ignored deployment 只配 `@aac6fef`，命令不进 provider context。
 - Cache impact: **NONE（本条纯文档）**。SEND-0001 实现是 **INTENTIONAL**：稳定 prefix 去重与 tool description/hash 修正需 bump schema/new epoch，预期 persona prefix 净缩短；ROUTE 精确测试、Telegram control plane 与 README 为 NONE。
+
+## 2026-08-08 (35) — 锁定配置名称的显式路由语义
+
+- 新回归直接用用户例子“我叫小雨”：即使 `routing_p=[0,0]`，仍得到 `{target:"B", reason:"name"}`，不会落入 probability/nobody。
+- 同一 decision 在 busy runtime 映射为 explicit coalesce，在 cooldown runtime 映射为 explicit started；与真实 BotRuntime 的 explicit coalesce/cooldown bypass fake-clock test 组成完整边界证据。
+- routing/flush/config/cache 共 46 tests、2564 assertions 通过；`bun run check` 与 diff check 通过。算法无需修改，新增测试防未来调度重构把 name 错归 probability。
+- Cache impact: **NONE**——只补回归与事实文档，router provider payload、system/tool/message grammar、run 数和每 turn token 均不变。

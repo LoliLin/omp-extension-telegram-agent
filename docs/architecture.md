@@ -43,7 +43,7 @@
 - Bot 消息不进 trigger（`routeMessage` 内部单一权威判断，REQ-TEST-0001 R3）
 - router 返回 target + reason；只有 `probability` 走 runtime availability gate。bucket 先按原 HMAC 决定，目标 busy/cooldown 时直接 skip，绝不改投其他 bot。
 - 每 bot 的 probability run 完成后用 monotonic deadline 冷却 `sampling_cooldown_ms`（默认 2000 ms）；deadline 不设 timer、不补抽，之后只有新消息才重新采样。不同 bot 仍可并发。
-- mention/reply/name 是 explicit path：busy 时继续 pending coalesce，cooldown 中也可立即启动；shutdown 不等待 cooldown。
+- mention/reply/name 是 explicit path：配置 `name` 在 text/caption 中字面命中（例如“小雨”命中“我叫小雨”）即使 `routing_p=0` 也成立；busy 时继续 pending coalesce，cooldown 中也可立即启动；shutdown 不等待 cooldown。
 
 ## Agent（Phase 3）
 

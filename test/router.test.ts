@@ -202,4 +202,25 @@ describe("probability dispatch policy (REQ-ROUTE-0001)", () => {
 			expect(runtime.calls).toEqual(["explicit"]);
 		}
 	});
+
+	test("configured name is explicit at p=0 and bypasses busy/cooldown sampling gates", () => {
+		const decision = routeMessageDecision(
+			db,
+			row({ message_id: 777, text: "我叫小雨" }),
+			bots,
+			{ secret: SECRET, probs: [0, 0] },
+		);
+		expect(decision).toEqual({ target: "B", reason: "name" });
+
+		const busy = new FakeRuntime("coalesced");
+		expect(dispatchRoutingDecision(decision, new Map([["B", busy]]))).toEqual({
+			...decision,
+			outcome: "coalesced",
+		});
+		expect(busy.calls).toEqual(["explicit"]);
+
+		const coolingDown = new FakeRuntime("started");
+		expect(dispatchRoutingDecision(decision, new Map([["B", coolingDown]])).outcome).toBe("started");
+		expect(coolingDown.calls).toEqual(["explicit"]);
+	});
 });

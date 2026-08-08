@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-08-08：UI-0009 已提交；REQ-LIST 最新 notes 已调查为 ROUTE-0001 精确验收、SEND-0001、CMD-0001 与 DOC-0001。下一步按 T10d/T10e/T10f 逐项实现，再继续平台 provider/config。
+2026-08-08：ROUTE-0001 精确 name regression 已完成；下一步实现 SEND-0001 的 tool-local/terminating contract，再做 CMD-0001 Telegram control plane。
 
 ## 已完成
 
@@ -17,7 +17,7 @@
 ## 当前实施队列
 
 1. **已实现 `REQ-STICKER-0002`**：fixed/dynamic catalog 只暴露当前 bot 有 file_id mapping 的 short id；A `s241–s244` / B `s144` 回归已锁，cache schema 2→3。真实群各 bot 发送 smoke 留到总验收。
-2. **已实现 `REQ-ROUTE-0001`**：probability 命中 busy/cooldown target 时 fast-skip 且不改投；默认 2 秒 monotonic deadline；explicit trigger 保留 pending/bypass。44 个 routing/flush/config/cache 测试通过。
+2. **已实现 `REQ-ROUTE-0001`**：probability 命中 busy/cooldown target 时 fast-skip 且不改投；默认 2 秒 monotonic deadline；`routing_p=0` 的“我叫小雨”仍以 name explicit 在 busy/cooldown coalesce/bypass。46 个 targeted tests 通过。
 3. **已实现 `REQ-UI-0005`**：daemon request-id send→DB→broadcast + Pi interactive `handled` compose 全链完成；footer 唯一身份、附件/失败恢复、ACK unknown/no-retry 与 lifecycle cleanup 共 39 个 plugin/IPC targeted tests 通过。真实发送 smoke 留 T14。
 4. **已实现 `REQ-UI-0006`**：T7/T8 完成 identity update、256-entry/10-minute 乱序缓存、多引用/older page/重复幂等合并，以及 `视觉理解` native card 原位刷新与 sanitize；真实 media smoke 留 T14。
 5. **已实现 `REQ-UI-0003/0007`**：删除 stats widget；`setFooter` 直接返回 Pi `FooterComponent`，IPC stats 只做内存 read view，完整明细保留 `/tg status`。targeted 53 tests/typecheck/cache golden 通过，真实 TTY footer 留 T14。

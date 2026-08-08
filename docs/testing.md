@@ -47,7 +47,7 @@ bun run scripts/e2e-compaction-manual.ts  # 手动 compact() 验证 compaction_e
 | local assistant 不进群 | ✅ | e2e：assistant_text/thinking 只进 agent_events |
 | Pi 原生 Telegram attach/detach | ✅ | 2026-08-08 项目 Pi 真实 fullscreen TTY：`/tg attach A` 显示 #19061–#19063，`/tg more` prepend 到 #18961，`/tg detach` 断开后内容保留；退出 Pi 不影响 daemon |
 | deterministic routing property tests | ✅ | 2026-08-07 33/33 + 真实群双 bot 实况 |
-| probability busy/cooldown scheduler（REQ-ROUTE-0001） | ✅ | 2026-08-08 fake monotonic clock + 100-message burst：A/B 独立并发、busy/cooldown fast-skip、不改投、不设 pending、不补抽、1999/2000 ms deadline、explicit coalesce/bypass、0ms override；routing distribution 与 cache golden 不变。 |
+| probability busy/cooldown scheduler（REQ-ROUTE-0001） | ✅ | 2026-08-08 46 targeted：fake monotonic clock + 100-message burst；A/B 独立并发、busy/cooldown fast-skip、不改投、不设 pending、不补抽、1999/2000 ms deadline、explicit coalesce/bypass、0ms override；另锁 `routing_p=[0,0]` 的“我叫小雨”→B/name→explicit busy/cooldown path；cache golden 不变。 |
 | run_js sandbox isolation | ✅ | 2026-08-07 REQ-SEC-0001 加固后 66/66（含逃逸回归向量）+ 真实 TinyFish 调用 |
 | flush/compaction 状态机（REQ-AGENT-0001） | ✅ | 2026-08-07 test/flush.test.ts + test/search.test.ts：慢 vision 并发触发不重复序列化、send 失败不标 exposed 可重试、compaction 失败/中止/空摘要不错切 epoch、exposure 与 kept tail（N≠40）对齐、search 10s 超时与响应护栏、send 先校验后发 |
 | ingestion/poller 可靠性（REQ-TG-0001） | ✅ | 2026-08-07 test/ingest.test.ts + test/poller.test.ts：二次编辑 revision 全链（v1 按原始 date、v2 按首次 edit_date 作 key）、ingest 失败不推进 offset 且重放无重复、setBotState 失败走 backoff poller 存活、stop 发生在长轮询期间则丢弃返回批次、401 fail-fast |
