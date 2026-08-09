@@ -19,6 +19,7 @@
 - `engineering/documentation-guide.md` — 文档写作规范
 - `engineering/debugging-guide.md` — **结构化日志、只读诊断与新功能 Debug impact 规范**
 - `dev/req-investigation.md` — 2026-08-09 界面显示与 Telegram 状态消息调查、边界和验收标准
+- `dev/media-motion-investigation.md` — 2026-08-09 动态贴纸、视频视觉与 compaction 后媒体回收调查
 - `testing.md` — 测试策略、规范命令、当前状态
 - `runbooks/` — 可重复操作流程（daemon 运维）
 
