@@ -25,7 +25,7 @@ bun run status                     # 状态（pid 校验：cmdline 必须是本�
 bun run stop                       # SIGTERM 优雅停止
 ```
 
-- 配置了sticker sets时，首次Telegram catalog拉取可能延长启动；以后复用本地DB。vision默认关闭，只有显式启用（或legacy配置明确写辅助视觉模型）才会产生视觉工作。`start`会在60秒内等socket；超时但child仍存活时只报告starting，并提示用`status` / `daemon.log`确认。
+- 配置了sticker sets时，首次Telegram catalog拉取可能延长启动；以后复用本地DB。vision默认关闭，只有显式`vision.enabled: true`才会产生视觉工作。`start`会在60秒内等socket；超时但child仍存活时只报告starting，并提示用`status` / `daemon.log`确认。
 - daemon启动会把历史`media.local_path`按basename迁到当前deployment的`data/media`；static photo/sticker恢复可显示状态，video source恢复为lazy抽帧输入，缺失项清空。启动backfill最多恢复100个仍被当前配置bot上下文、未消费event或reply obligation引用的static缺口，不会重新下载compaction已回收的无引用历史。该过程不调用vision或聊天provider。
 - 视频识别要求PATH中同时存在`ffmpeg`与`ffprobe`。macOS可用`brew install ffmpeg`，Arch Linux可用`sudo pacman -S ffmpeg`，Debian/Ubuntu可用`sudo apt install ffmpeg`。缺失时`start`/`restart`/`status`会说明它只用于视频抽帧并建议安装，但命令与daemon readiness不因此失败；聊天、图片vision和static/animated/video sticker发送都继续工作。视频识别在Telegram下载前直接跳过，不消耗vision budget/provider token，也不向群里告警；`bun run debug`会输出带固定impact/action的`video_transcoder_unavailable`。安装后restart即可启用。
 - 每 bot 启动日志的 `sticker-catalog` 行会报告 `catalog/sendable/missing_file_id`；`missing_file_id>0` 的条目不会暴露给该 bot。检查 set 名/token 权限或 Telegram `getStickerSet` 失败，不要复制另一个 bot 的 file_id。

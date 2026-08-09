@@ -36,7 +36,7 @@ const config = loadConfig(rootDir);
 // (REQ-OPS-0001 R4). Released on shutdown; stale pid files are taken over.
 const pidFd = acquirePidLock(config.dataDir);
 const videoTranscoder = inspectVideoTranscoder();
-if (config.vision?.enabled && (!videoTranscoder.ffmpeg || !videoTranscoder.ffprobe)) {
+if (config.vision.enabled && (!videoTranscoder.ffmpeg || !videoTranscoder.ffprobe)) {
 	log.warn("media_transcoder", "tools_unavailable", {
 		ffmpeg: videoTranscoder.ffmpeg,
 		ffprobe: videoTranscoder.ffprobe,
@@ -46,7 +46,7 @@ if (config.vision?.enabled && (!videoTranscoder.ffmpeg || !videoTranscoder.ffpro
 		blocking: false,
 	});
 }
-const visualModel = config.vision?.enabled ? parsePiModelReference(config.auxiliaryVisualModel)! : null;
+const visualModel = config.vision.enabled ? parsePiModelReference(config.auxiliaryVisualModel)! : null;
 const chatModels = config.bots.map((bot) => ({
 	provider: bot.provider,
 	model: bot.model,
@@ -54,7 +54,7 @@ const chatModels = config.bots.map((bot) => ({
 	purpose: `bot:${bot.id}`,
 }));
 const compactionModels = config.bots.map((bot) => ({
-	...parsePiModelReference(bot.compactionModel ?? config.auxiliaryVisualModel)!,
+	...parsePiModelReference(bot.compactionModel)!,
 	purpose: `compaction:${bot.id}`,
 }));
 const { sharedModelRuntime, sharedVisionExecutor } = await (async () => {
@@ -72,20 +72,15 @@ const { sharedModelRuntime, sharedVisionExecutor } = await (async () => {
 		throw error;
 	}
 })();
-const visionScheduler = config.vision?.enabled ? new VisionScheduler(config.vision.concurrency) : null;
+const visionScheduler = config.vision.enabled ? new VisionScheduler(config.vision.concurrency) : null;
 const db = openDb(config.dbPath);
 const mediaDir = join(config.dataDir, "media");
 const mediaPathReconciliation = reconcileMediaCachePaths(db, mediaDir);
 if (mediaPathReconciliation.migrated > 0 || mediaPathReconciliation.invalidated > 0) {
 	log.info("media_cache", "paths_reconciled", mediaPathReconciliation);
 }
-const retentionConfig = config.retention ?? {
-	telemetryDays: 90,
-	rawUpdateDays: 30,
-	messageEventDays: 365,
-};
 function runRetentionMaintenance(): void {
-	const retention = applyRetention(db, retentionConfig);
+	const retention = applyRetention(db, config.retention);
 	if (Object.values(retention).some((count) => count > 0)) {
 		log.info("daemon", "retention_pruned", {
 			agent_events: retention.agentEvents,

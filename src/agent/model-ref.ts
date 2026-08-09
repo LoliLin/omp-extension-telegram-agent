@@ -32,8 +32,6 @@ export function parsePiModelReference(value: string): PiModelReference | null {
 	};
 }
 
-/** Normalize the one historical deployment spelling without exposing it to new examples/runtime. */
-export function normalizeAuxiliaryVisualModel(value: string): string | null {
-	if (value === "gpt-5.6-luna-low") return DEFAULT_AUXILIARY_VISUAL_MODEL;
+export function canonicalPiModelReference(value: string): string | null {
 	return parsePiModelReference(value)?.canonical ?? null;
 }

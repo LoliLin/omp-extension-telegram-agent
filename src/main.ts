@@ -17,7 +17,7 @@ function report(result: DaemonControlResult): void {
 function reportAdvisory(): void {
 	try {
 		const config = loadConfig(rootDir);
-		const advisory = videoTranscoderAdvisory(config.vision?.enabled ?? false, inspectVideoTranscoder());
+		const advisory = videoTranscoderAdvisory(config.vision.enabled, inspectVideoTranscoder());
 		if (advisory) console.warn(advisory);
 	} catch {
 		// Daemon startup owns config failures; an optional capability hint must never mask or block it.

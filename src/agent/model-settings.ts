@@ -39,23 +39,11 @@ export function loadPiModelDefaults(
 		throw new PiSettingsConfigurationError([...new Set(loadErrors.map((error) => error.scope))]);
 	}
 
-	const rawProvider = settings.getDefaultProvider() as unknown;
-	const rawModel = settings.getDefaultModel() as unknown;
-	const rawThinking = settings.getDefaultThinkingLevel() as unknown;
-	if (
-		(rawProvider !== undefined && (typeof rawProvider !== "string" || !rawProvider.trim())) ||
-		(rawModel !== undefined && (typeof rawModel !== "string" || !rawModel.trim())) ||
-		(rawThinking !== undefined &&
-			(typeof rawThinking !== "string" || !THINKING_LEVELS.has(rawThinking as ThinkingLevel)))
-	) {
-		throw new PiSettingsConfigurationError(["global", "project"]);
-	}
-
 	return {
-		provider: typeof rawProvider === "string" ? rawProvider.trim() : undefined,
-		model: typeof rawModel === "string" ? rawModel.trim() : undefined,
+		provider: settings.getDefaultProvider(),
+		model: settings.getDefaultModel(),
 		// This is Pi's own SDK fallback when defaultThinkingLevel is absent.
-		thinkingLevel: typeof rawThinking === "string" ? (rawThinking as ThinkingLevel) : "medium",
+		thinkingLevel: settings.getDefaultThinkingLevel() ?? "medium",
 	};
 }
 

@@ -91,6 +91,10 @@ describe("Telegram rich control status", () => {
 			reasoningEffort: "low",
 			compactionThreshold: 128_000,
 			compactionKeepRecent: 16_000,
+			compactionModel: "openai-codex/gpt-5.6-luna:low",
+			cacheRetention: "short",
+			maxSuffixTokens: 12_000,
+			maxMessageTokens: 4_096,
 			tools: { send: true, search: false, runJs: false },
 			stickerSets: [],
 		} satisfies BotConfig;

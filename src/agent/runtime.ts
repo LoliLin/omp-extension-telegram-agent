@@ -195,7 +195,6 @@ export class BotRuntime {
 	private providerCallsInRun = 0;
 	private lastLlmRunId: number | null = null;
 	private readonly visionScheduler: VisionScheduler | null;
-	private readonly visionEnabled: boolean;
 	private readonly typingLease: TelegramTypingLease;
 	private readonly videoTranscoder: VideoTranscoderAvailability | undefined;
 	/** Optional sink for TUI/live broadcasting of agent events. */
@@ -236,7 +235,6 @@ export class BotRuntime {
 		this.visionExecutor = options.visionExecutor ?? null;
 		this.visionScheduler = options.visionScheduler ?? null;
 		this.videoTranscoder = options.videoTranscoder;
-		this.visionEnabled = config.vision?.enabled ?? options.visionExecutor != null;
 		this.monotonicNow = options.monotonicNow ?? (() => performance.now());
 		this.api = options.api ?? new BotApi(bot.token);
 		this.botApis = options.botApis ?? new Map([[bot.id, this.api]]);
@@ -317,7 +315,7 @@ export class BotRuntime {
 		const model = this.modelRuntime.getModel(this.bot.provider, this.bot.model);
 		if (!model) throw new Error(`model not found: ${this.bot.provider}/${this.bot.model}`);
 		this.model = model;
-		const compactionSelection = parsePiModelReference(this.bot.compactionModel ?? this.config.auxiliaryVisualModel);
+		const compactionSelection = parsePiModelReference(this.bot.compactionModel);
 		if (!compactionSelection) throw new Error("invalid compaction_model; expected provider/model:effort");
 		const compactionModel = this.modelRuntime.getModel(compactionSelection.provider, compactionSelection.model);
 		if (!compactionModel) {
@@ -346,7 +344,7 @@ export class BotRuntime {
 			api: model.api,
 			model: this.bot.model,
 			reasoningEffort: this.bot.reasoningEffort,
-			cacheRetention: this.bot.cacheRetention ?? "short",
+			cacheRetention: this.bot.cacheRetention,
 			cacheSchemaVersion: CACHE_SCHEMA_VERSION,
 			commonPromptSha256: sha256(SHARED_PROTOCOL),
 			personaSha256: sha256(persona),
@@ -431,7 +429,7 @@ export class BotRuntime {
 		this.session = session;
 		const streamFunction = session.agent.streamFunction;
 		session.agent.streamFunction = (requestModel, context, options) =>
-			streamFunction(requestModel, context, { ...options, cacheRetention: this.bot.cacheRetention ?? "short" });
+			streamFunction(requestModel, context, { ...options, cacheRetention: this.bot.cacheRetention });
 		const sessionFile = session.sessionFile;
 		if (!sessionFile) throw new Error(`persistent session file unavailable for bot ${this.bot.id}`);
 		setSessionManifest(this.db, {
@@ -1334,7 +1332,7 @@ export class BotRuntime {
 
 	/** Lazy vision: bounded per turn, with direct-reply events ordered before ordinary catch-up. */
 	private async ensureBatchVision(batch: readonly MessageEvent[], obligationIds: ReadonlySet<number>): Promise<void> {
-		if (!this.visionEnabled || (this.config.vision?.foregroundMediaLimit ?? 2) <= 0) return;
+		if (!this.config.vision.enabled || this.config.vision.foregroundMediaLimit <= 0) return;
 		const pending: string[] = [];
 		const seen = new Set<string>();
 		const prioritized = [...batch].sort(
@@ -1355,7 +1353,7 @@ export class BotRuntime {
 			} | null;
 			if (existing?.vision) continue; // persistent cache hit, shared by both bots
 			pending.push(media.file_unique_id);
-			if (pending.length >= (this.config.vision?.foregroundMediaLimit ?? 2)) break;
+			if (pending.length >= this.config.vision.foregroundMediaLimit) break;
 		}
 
 		let next = 0;
@@ -1473,7 +1471,7 @@ export class BotRuntime {
 				this.bot.provider,
 				this.model?.api ?? null,
 				sessionIdHash,
-				this.bot.cacheRetention ?? "short",
+				this.bot.cacheRetention,
 				observation?.fullPayloadHash ?? null,
 				observation?.firstDivergentSegment ?? null,
 				observation?.firstDivergentMessageIndex ?? null,

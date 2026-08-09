@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import { createJiti } from "jiti";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isPiThinkingLevel, loadPiModelDefaults, type PiModelDefaults } from "./agent/model-settings.ts";
-import { DEFAULT_AUXILIARY_VISUAL_MODEL, normalizeAuxiliaryVisualModel } from "./agent/model-ref.ts";
+import { canonicalPiModelReference, DEFAULT_AUXILIARY_VISUAL_MODEL } from "./agent/model-ref.ts";
 
 export interface TelegramToolsConfigInput {
 	send?: boolean;
@@ -120,10 +120,10 @@ export interface BotConfig {
 	reasoningEffort: ThinkingLevel;
 	compactionThreshold: number;
 	compactionKeepRecent: number;
-	compactionModel?: string;
-	cacheRetention?: "none" | "short" | "long";
-	maxSuffixTokens?: number;
-	maxMessageTokens?: number;
+	compactionModel: string;
+	cacheRetention: "none" | "short" | "long";
+	maxSuffixTokens: number;
+	maxMessageTokens: number;
 	tools: BotToolsConfig;
 	/** Telegram sticker set names pinned as this bot's stable identity + format catalog. */
 	stickerSets: string[];
@@ -148,8 +148,8 @@ export interface AppConfig {
 	bots: BotConfig[];
 	tinyfishApiKey: string;
 	auxiliaryVisualModel: string;
-	vision?: VisionConfig;
-	retention?: RetentionConfig;
+	vision: VisionConfig;
+	retention: RetentionConfig;
 	routerSecret: string | null; // generated+persisted by daemon if absent
 	telegramAdmins: TelegramAdmin[]; // deny-by-default deterministic control allowlist
 }
@@ -278,7 +278,7 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>, conf
 	}
 	if (
 		raw.auxiliary_visual_model !== undefined &&
-		(typeof raw.auxiliary_visual_model !== "string" || !normalizeAuxiliaryVisualModel(raw.auxiliary_visual_model))
+		(typeof raw.auxiliary_visual_model !== "string" || !canonicalPiModelReference(raw.auxiliary_visual_model))
 	) {
 		errors.push(
 			`[config] auxiliary_visual_model: expected provider/model:effort, got ${JSON.stringify(raw.auxiliary_visual_model)}`,
@@ -286,7 +286,7 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>, conf
 	}
 	if (
 		raw.compaction_model !== undefined &&
-		(typeof raw.compaction_model !== "string" || !normalizeAuxiliaryVisualModel(raw.compaction_model))
+		(typeof raw.compaction_model !== "string" || !canonicalPiModelReference(raw.compaction_model))
 	) {
 		errors.push(
 			`[config] compaction_model: expected provider/model:effort, got ${JSON.stringify(raw.compaction_model)}`,
@@ -354,7 +354,7 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>, conf
 		}
 		if (
 			b.compaction_model !== undefined &&
-			(typeof b.compaction_model !== "string" || !normalizeAuxiliaryVisualModel(b.compaction_model))
+			(typeof b.compaction_model !== "string" || !canonicalPiModelReference(b.compaction_model))
 		) {
 			errors.push(
 				`[config] ${at}.compaction_model: expected provider/model:effort, got ${JSON.stringify(b.compaction_model)}`,
@@ -521,7 +521,7 @@ export function loadDebugDeploymentIdentity(rootDir: string): DebugDeploymentIde
 	const rawBots = Array.isArray(raw.bots) ? (raw.bots as RawBotConfig[]) : [];
 	const defaultCompactionModel =
 		typeof raw.compaction_model === "string"
-			? normalizeAuxiliaryVisualModel(raw.compaction_model)!
+			? canonicalPiModelReference(raw.compaction_model)!
 			: DEFAULT_AUXILIARY_VISUAL_MODEL;
 	const bots = rawBots.map((bot) => {
 		const id = typeof bot.id === "string" ? bot.id.trim() : "";
@@ -541,7 +541,7 @@ export function loadDebugDeploymentIdentity(rootDir: string): DebugDeploymentIde
 						: null,
 			compactionModel:
 				typeof bot.compaction_model === "string"
-					? normalizeAuxiliaryVisualModel(bot.compaction_model)!
+					? canonicalPiModelReference(bot.compaction_model)!
 					: defaultCompactionModel,
 			cacheRetention:
 				typeof bot.cache_retention === "string"
@@ -551,7 +551,7 @@ export function loadDebugDeploymentIdentity(rootDir: string): DebugDeploymentIde
 						: "short",
 			tools: {
 				send: tools.send !== false,
-				search: tools.search !== false,
+				search: tools.search === true,
 				runJs: tools.run_js === true,
 			},
 			stickerSets: Array.isArray(bot.sticker_sets)
@@ -573,10 +573,9 @@ export function loadDebugDeploymentIdentity(rootDir: string): DebugDeploymentIde
 		bots,
 		auxiliaryVisualModel:
 			typeof raw.auxiliary_visual_model === "string"
-				? normalizeAuxiliaryVisualModel(raw.auxiliary_visual_model)!
+				? canonicalPiModelReference(raw.auxiliary_visual_model)!
 				: DEFAULT_AUXILIARY_VISUAL_MODEL,
-		visionEnabled:
-			typeof rawVision?.enabled === "boolean" ? rawVision.enabled : raw.auxiliary_visual_model !== undefined,
+		visionEnabled: rawVision?.enabled === true,
 	};
 }
 
@@ -638,7 +637,7 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 	const defaultKeepRecent = num("compaction_keep_recent", 20000, 1, Number.MAX_SAFE_INTEGER);
 	const defaultCompactionModel =
 		typeof raw.compaction_model === "string"
-			? normalizeAuxiliaryVisualModel(raw.compaction_model)!
+			? canonicalPiModelReference(raw.compaction_model)!
 			: DEFAULT_AUXILIARY_VISUAL_MODEL;
 	const defaultCacheRetention = (["none", "short", "long"] as const).includes(raw.cache_retention as never)
 		? (raw.cache_retention as "none" | "short" | "long")
@@ -689,7 +688,7 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 			compactionKeepRecent: typeof b.compaction_keep_recent === "number" ? b.compaction_keep_recent : defaultKeepRecent,
 			compactionModel:
 				typeof b.compaction_model === "string"
-					? normalizeAuxiliaryVisualModel(b.compaction_model)!
+					? canonicalPiModelReference(b.compaction_model)!
 					: defaultCompactionModel,
 			cacheRetention: (["none", "short", "long"] as const).includes(b.cache_retention as never)
 				? (b.cache_retention as "none" | "short" | "long")
@@ -698,10 +697,7 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 			maxMessageTokens: typeof b.max_message_tokens === "number" ? b.max_message_tokens : defaultMaxMessageTokens,
 			tools: {
 				send: toolsRaw.send !== false,
-				// Compatibility: deployments created before typed onboarding omitted this
-				// field because search was enabled by default. New generated configs write
-				// search:false explicitly, so omission must retain the legacy capability.
-				search: toolsRaw.search !== false,
+				search: toolsRaw.search === true,
 				runJs: toolsRaw.run_js === true,
 			},
 			stickerSets: Array.isArray(b.sticker_sets) ? (b.sticker_sets as string[]) : [],
@@ -733,10 +729,10 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 		tinyfishApiKey,
 		auxiliaryVisualModel:
 			typeof raw.auxiliary_visual_model === "string"
-				? normalizeAuxiliaryVisualModel(raw.auxiliary_visual_model)!
+				? canonicalPiModelReference(raw.auxiliary_visual_model)!
 				: DEFAULT_AUXILIARY_VISUAL_MODEL,
 		vision: {
-			enabled: typeof visionRaw.enabled === "boolean" ? visionRaw.enabled : raw.auxiliary_visual_model !== undefined,
+			enabled: visionRaw.enabled === true,
 			foregroundMediaLimit: visionNumber("foreground_media_limit", 2, 16),
 			concurrency: Math.max(1, visionNumber("concurrency", 2, 16)),
 		},

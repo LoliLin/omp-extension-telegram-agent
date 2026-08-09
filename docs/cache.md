@@ -97,7 +97,7 @@ tools: [{ name, description, parameters }] in fixed order
 
 ## Vision 与 provider boundary
 
-Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确提供 `auxiliary_visual_model` 的兼容路径，才会执行。
+Vision 默认关闭；只有显式 `vision.enabled: true` 才会执行。`auxiliary_visual_model` 只选择任务模型，不隐式开启功能。
 
 - foreground 每轮默认最多 2 个 media、deployment并发 2。图片在provider边界占slot；视频在Telegram下载前预留同一个全局slot，并一直持有到本地抽帧和单次vision请求结束，避免多bot并行放大FFmpeg负载。scheduler只有一个FIFO并发门，不维护重启即丢失的小时/每日计数。
 - persistent media identity cache 在 bots 间复用。新的非空结果只追加 `media_update` event，不改写旧 message entry。

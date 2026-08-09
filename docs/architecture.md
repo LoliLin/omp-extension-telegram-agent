@@ -109,10 +109,10 @@
 
 ## Vision
 
-- 默认关闭；显式`vision.enabled: true`才启用，旧配置明确提供`auxiliary_visual_model`时兼容启用。图片落库即可显示，UI不触发vision。
+- 默认关闭；只有显式`vision.enabled: true`才启用；`auxiliary_visual_model`只选择任务模型。图片落库即可显示，UI不触发vision。
 - 识别结果按 media identity 持久化，所有配置 bot 共享（vision cache）
 - photo、static sticker、video与video sticker使用各自prompt语义；视频输入包括`video`、`animation`、`video_note`、video MIME document与video sticker。TGS只保证可发送，不进入视觉下载或渲染。
-- daemon在任何Telegram调用前把视觉选择与所有聊天模型一起交给唯一Pi `ModelRuntime`做catalog/auth预检；视觉默认/示例为`openai-codex/gpt-5.6-luna:low`，历史`gpt-5.6-luna-low`仅在loader边界归一化，不进入runtime。模型缺失、未认证或不支持image input均按固定category终止启动，项目不读取credential。
+- daemon在任何Telegram调用前把视觉选择与所有聊天模型一起交给唯一Pi `ModelRuntime`做catalog/auth预检；视觉默认/示例为严格的`provider/model:effort`引用`openai-codex/gpt-5.6-luna:low`，不接受旧拼写别名。模型缺失、未认证或不支持image input均按固定category终止启动，项目不读取credential。
 - JPEG/PNG原样作为Pi `ImageContent`发送；静态WebP/GIF先走Pi公开`convertToPng()`。视频用`ffprobe`读取时长：1帧取50%，2帧取33%/67%，3帧取20%/50%/80%，再由`ffmpeg`生成≤1280×1280 JPEG；极短视频降为1-2帧。全部帧和有界位置标签进入**一次**`completeSimple()`，临时目录随后删除。provider请求固定256 output tokens、90秒timeout、retry 0。
 - daemon启动时只读检查`ffmpeg`与`ffprobe`。缺失任一工具时，视频链路在Telegram下载和provider调用之前立即返回`video_transcoder_unavailable`；不阻止daemon ready、聊天、static image vision或三种sticker发送，也不持久化terminal vision cache。`start`/`restart`/`status`给operator一条用途与安装建议，startup log和`bun run debug`提供固定action；不向群内用户发故障消息。安装工具并restart后即可重试。probe/抽帧失败不记录stderr/path。
 - production vision event只含kind、frames、providerCalled、source/converted bytes bucket、latency、input/output/reasoning token、cost与outcome；不含media identity/path/prompt/response。deployment scheduler是默认并发2的单FIFO门，每轮foreground最多2。图片只在provider调用时占scheduler；视频在下载前占用同一个deployment-wide slot，直到抽帧与单次provider调用结束，因此所有bot合计最多同时运行`vision.concurrency`条视频流水线。direct reply媒体优先；失败或unsupported使用确定性fallback。
