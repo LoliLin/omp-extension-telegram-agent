@@ -227,7 +227,12 @@ describe("unified usage telemetry", () => {
 				videoTranscoder: { required: true, ffmpeg: false, ffprobe: true },
 			});
 			expect(report.video_transcoder).toEqual({ required: true, ffmpeg: false, ffprobe: true });
-			expect(report.findings).toContainEqual({ code: "video_transcoder_unavailable", bot_id: "deployment" });
+			expect(report.findings).toContainEqual({
+				code: "video_transcoder_unavailable",
+				bot_id: "deployment",
+				impact: "video_recognition_disabled",
+				action: "install_ffmpeg_and_restart",
+			});
 		} finally {
 			db.close();
 		}

@@ -65,7 +65,7 @@ bun run pi --version
 
 ## 视频没有视觉描述
 
-先运行`bun run debug`。`video_transcoder_unavailable`表示主机缺少`ffmpeg`或`ffprobe`；安装同一FFmpeg发行包后restart即可，之前的这个失败不会永久缓存。`video_probe_failed`或`video_frame_extraction_failed`表示文件无法由本机工具读取；检查是否超过20 MiB和格式支持。日志不会包含文件path、stderr或视频内容。
+先运行`bun run debug`。`video_transcoder_unavailable`表示主机缺少`ffmpeg`或`ffprobe`；`start`/`restart`/`status`也会说明它只用于视频抽帧并给出安装建议。这个告警不阻塞daemon，不会发到群里；视频会在Telegram下载和provider调用前跳过，因此不占vision budget/token，聊天、图片vision和三种sticker发送保持正常。安装同一FFmpeg发行包后restart即可，之前的失败不会永久缓存。`video_probe_failed`或`video_frame_extraction_failed`表示文件无法由本机工具读取；检查是否超过20 MiB和格式支持。日志不会包含文件path、stderr或视频内容。
 
 ## 搜索或网页读取失败
 

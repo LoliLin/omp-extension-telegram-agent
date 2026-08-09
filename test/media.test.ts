@@ -21,7 +21,12 @@ import {
 	type TimelineItem,
 	type UsageRun,
 } from "../src/ipc.ts";
-import { ensureLocalMedia, reconcileMediaCachePaths, type MediaDownloadApi } from "../src/media/local-cache.ts";
+import {
+	ensureLocalMedia,
+	isVisionMedia,
+	reconcileMediaCachePaths,
+	type MediaDownloadApi,
+} from "../src/media/local-cache.ts";
 import { MediaCacheQueue } from "../src/media/media-cache.ts";
 import { pruneUnreferencedMediaCache } from "../src/media/lifecycle.ts";
 import { ensureStickerCatalog } from "../src/media/sticker-catalog.ts";
@@ -31,7 +36,13 @@ import {
 	type VisionDescribeInput,
 	type VisionExecutor,
 } from "../src/media/vision.ts";
-import { extractVideoFrames, sampleVideoFrameFractions, type VideoCommandRunner } from "../src/media/video-frames.ts";
+import { VisionScheduler } from "../src/media/vision-scheduler.ts";
+import {
+	extractVideoFrames,
+	sampleVideoFrameFractions,
+	type VideoCommandRunner,
+	videoTranscoderAdvisory,
+} from "../src/media/video-frames.ts";
 import { setLogSink } from "../src/observability/log.ts";
 import { readMediaImage, TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
 import { BotApi } from "../src/telegram/api.ts";
@@ -158,6 +169,8 @@ describe("cross-bot media acquisition", () => {
 			});
 		expect(telegramMessage({ is_animated: true }).media?.mime).toBe("application/x-tgsticker");
 		expect(telegramMessage({ is_video: true }).media?.mime).toBe("video/webm");
+		expect(isVisionMedia("sticker", "application/x-tgsticker")).toBe(false);
+		expect(isVisionMedia("sticker", "video/webm")).toBe(true);
 		const note = normalizeMessage({
 			chat: { id: -1001 },
 			message_id: 2,
@@ -357,9 +370,16 @@ describe("cross-bot media acquisition", () => {
 	test("does not persist a missing transcoder as a terminal video result", async () => {
 		const directory = temporaryDirectory("tg-video-transcoder-retry-");
 		const db = openDb(join(directory, "agent.db"));
+		let telegramCalls = 0;
 		const api: MediaDownloadApi = {
-			getFile: async () => ({ file_path: "videos/retry.mp4" }),
-			downloadFile: async () => new Uint8Array([0, 1, 2, 3]),
+			getFile: async () => {
+				telegramCalls++;
+				return { file_path: "videos/retry.mp4" };
+			},
+			downloadFile: async () => {
+				telegramCalls++;
+				return new Uint8Array([0, 1, 2, 3]);
+			},
 		};
 		let extractionAttempts = 0;
 		let describeCalls = 0;
@@ -380,6 +400,7 @@ describe("cross-bot media acquisition", () => {
 			).run();
 			const options = {
 				cacheDir: join(directory, "media"),
+				videoTranscoder: { ffmpeg: false, ffprobe: false },
 				extractFrames: async () => {
 					extractionAttempts++;
 					return { ok: false as const, outcome: "video_transcoder_unavailable" as const };
@@ -387,12 +408,163 @@ describe("cross-bot media acquisition", () => {
 			};
 			expect(await ensureVision(db, api as never, "A", "retry-video", executor, options)).toBeNull();
 			expect(await ensureVision(db, api as never, "A", "retry-video", executor, options)).toBeNull();
-			expect(extractionAttempts).toBe(2);
+			expect(telegramCalls).toBe(0);
+			expect(extractionAttempts).toBe(0);
 			expect(describeCalls).toBe(0);
 			expect(
 				(db.query("SELECT vision FROM media WHERE file_unique_id = 'retry-video'").get() as { vision: string | null })
 					.vision,
 			).toBeNull();
+		} finally {
+			db.close();
+		}
+	});
+
+	test("globally gates each video pipeline before download and extraction", async () => {
+		const directory = temporaryDirectory("tg-video-global-gate-");
+		const db = openDb(join(directory, "agent.db"));
+		const scheduler = new VisionScheduler({ concurrency: 1, perChatHourlyLimit: 10, dailyLimit: 10 });
+		const started: string[] = [];
+		let active = 0;
+		let peak = 0;
+		let releaseFirst!: () => void;
+		let firstEntered!: () => void;
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const entered = new Promise<void>((resolve) => {
+			firstEntered = resolve;
+		});
+		const telegramCalls: string[] = [];
+		const api: MediaDownloadApi = {
+			getFile: async (fileId) => {
+				telegramCalls.push(`get:${fileId}`);
+				return { file_path: `videos/${fileId}.mp4` };
+			},
+			downloadFile: async (filePath) => {
+				telegramCalls.push(`download:${filePath}`);
+				return new Uint8Array([0, 1, 2, 3]);
+			},
+		};
+		const executor: VisionExecutor = {
+			modelRef: "test/vision:off",
+			provider: "test",
+			model: "vision",
+			readinessFailure: null,
+			describe: async (input) => ({
+				text: `description-${input.images[0]?.position}`,
+				telemetry: {
+					kind: "video",
+					sourceBytesBucket: "lt_32_kib",
+					convertedBytesBucket: "lt_32_kib",
+					latencyMs: 1,
+					inputTokens: 1,
+					outputTokens: 1,
+					reasoningTokens: 0,
+					cost: 0,
+					outcome: "ok",
+					frames: 1,
+				},
+			}),
+		};
+		try {
+			for (const id of ["video-one", "video-two"]) {
+				db.query("INSERT INTO media (file_unique_id, kind, mime) VALUES (?, 'video', 'video/mp4')").run(id);
+				db.query("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', ?, ?)").run(
+					`${id}-file`,
+					id,
+				);
+			}
+			const options = {
+				cacheDir: join(directory, "media"),
+				scheduler,
+				chatId: -1001,
+				foreground: true,
+				videoTranscoder: { ffmpeg: true, ffprobe: true },
+				extractFrames: async (input: { fileUniqueId: string }) => {
+					started.push(input.fileUniqueId);
+					active++;
+					peak = Math.max(peak, active);
+					if (input.fileUniqueId === "video-one") {
+						firstEntered();
+						await firstGate;
+					}
+					active--;
+					return {
+						ok: true as const,
+						durationSeconds: 1,
+						frames: [
+							{ bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), mimeType: "image/jpeg" as const, position: 0.5 },
+						],
+					};
+				},
+			};
+			const first = ensureVision(db, api as never, "A", "video-one", executor, options);
+			await entered;
+			const second = ensureVision(db, api as never, "A", "video-two", executor, options);
+			await new Promise<void>((resolve) => queueMicrotask(resolve));
+			expect(started).toEqual(["video-one"]);
+			expect(telegramCalls).toEqual(["get:video-one-file", "download:videos/video-one-file.mp4"]);
+			releaseFirst();
+			expect(await Promise.all([first, second])).toEqual(["description-0.5", "description-0.5"]);
+			expect(started).toEqual(["video-one", "video-two"]);
+			expect(telegramCalls).toEqual([
+				"get:video-one-file",
+				"download:videos/video-one-file.mp4",
+				"get:video-two-file",
+				"download:videos/video-two-file.mp4",
+			]);
+			expect(peak).toBe(1);
+		} finally {
+			releaseFirst();
+			db.close();
+		}
+	});
+
+	test("rejects an exhausted video budget before Telegram or FFmpeg work", async () => {
+		const directory = temporaryDirectory("tg-video-budget-preflight-");
+		const db = openDb(join(directory, "agent.db"));
+		let localWork = 0;
+		const api: MediaDownloadApi = {
+			getFile: async () => {
+				localWork++;
+				return { file_path: "videos/budget.mp4" };
+			},
+			downloadFile: async () => {
+				localWork++;
+				return new Uint8Array([0, 1, 2, 3]);
+			},
+		};
+		const executor: VisionExecutor = {
+			modelRef: "test/vision:off",
+			provider: "test",
+			model: "vision",
+			readinessFailure: null,
+			describe: async () => {
+				localWork++;
+				throw new Error("provider must not run");
+			},
+		};
+		try {
+			db.query("INSERT INTO media (file_unique_id, kind, mime) VALUES ('budget-video', 'video', 'video/mp4')").run();
+			db.query(
+				"INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', 'budget-file', 'budget-video')",
+			).run();
+			const outcomes: string[] = [];
+			expect(
+				await ensureVision(db, api as never, "A", "budget-video", executor, {
+					cacheDir: join(directory, "media"),
+					scheduler: new VisionScheduler({ concurrency: 1, perChatHourlyLimit: 0, dailyLimit: 0 }),
+					videoTranscoder: { ffmpeg: true, ffprobe: true },
+					extractFrames: async () => {
+						localWork++;
+						throw new Error("extractor must not run");
+					},
+					onTelemetry: (telemetry) => outcomes.push(telemetry.outcome),
+				}),
+			).toBeNull();
+			expect(localWork).toBe(0);
+			expect(outcomes).toEqual(["budget_exceeded"]);
 		} finally {
 			db.close();
 		}
@@ -535,6 +707,14 @@ describe("cross-bot media acquisition", () => {
 });
 
 describe("video frame sampling", () => {
+	test("gives operators a non-blocking installation advisory", () => {
+		expect(videoTranscoderAdvisory(false, { ffmpeg: false, ffprobe: false })).toBeNull();
+		expect(videoTranscoderAdvisory(true, { ffmpeg: true, ffprobe: true })).toBeNull();
+		expect(videoTranscoderAdvisory(true, { ffmpeg: false, ffprobe: true })).toBe(
+			"warning: video recognition is disabled because ffmpeg is unavailable; install the FFmpeg package and restart (it is used only to sample video frames; chat, image vision, and sticker sending continue normally)",
+		);
+	});
+
 	test("uses deterministic truncated-normal positions centered on the middle", () => {
 		const first = sampleVideoFrameFractions("same-video", 3);
 		expect(sampleVideoFrameFractions("same-video", 3)).toEqual(first);

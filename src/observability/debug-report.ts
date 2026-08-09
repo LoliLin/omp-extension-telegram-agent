@@ -47,6 +47,8 @@ export interface DebugFinding {
 	requested?: string;
 	effective?: string;
 	supported?: string[];
+	impact?: "video_recognition_disabled";
+	action?: "install_ffmpeg_and_restart";
 }
 
 interface SafeEvent {
@@ -176,7 +178,12 @@ export function buildDebugReport(db: Database, input: DebugReportInput) {
 
 	const findings: DebugFinding[] = [];
 	if (input.videoTranscoder?.required && (!input.videoTranscoder.ffmpeg || !input.videoTranscoder.ffprobe)) {
-		findings.push({ code: "video_transcoder_unavailable", bot_id: "deployment" });
+		findings.push({
+			code: "video_transcoder_unavailable",
+			bot_id: "deployment",
+			impact: "video_recognition_disabled",
+			action: "install_ffmpeg_and_restart",
+		});
 	}
 	for (const diagnostic of input.modelReasoning ?? []) {
 		if (diagnostic.valid) continue;

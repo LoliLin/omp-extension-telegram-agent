@@ -89,7 +89,7 @@ export default defineConfig({
 
 - `max_suffix_tokens: 12000`和`max_message_tokens: 4096`限制每轮新增的Telegram provider context；
 - 主聊天默认`cache_retention: "short"`，compaction使用配置的廉价task model且关闭provider cache retention；
-- `vision.enabled`默认false；开启后，每轮媒体数、并发、每群每小时调用和deployment每日调用都有独立上限。视频识别还要求daemon主机PATH中有`ffmpeg`和`ffprobe`；缺失只降级视频，不影响图片；
+- `vision.enabled`默认false；开启后，每轮媒体数、deployment-wide并发、每群每小时attempt和每日attempt都有独立上限。视频从Telegram下载到抽帧、provider请求全程占同一个全局并发slot。视频识别要求daemon主机PATH中有`ffmpeg`和`ffprobe`；缺失时下载前直接跳过且不占budget/token，只给operator安装提示，不影响daemon、聊天、图片或sticker发送；
 - telemetry、raw update、immutable message event默认分别保留90、30、365天。旧event只有在所有已知bot cursor都消费且没有reply obligation引用时才删除。
 
 model、reasoning、cache policy、persona、tools、serializer等cache-visible字段变化都会得到新context fingerprint。受控restart会保留旧session文件，但在restore前创建新session，绝不会用新identity恢复旧context。

@@ -107,6 +107,7 @@ import {
 import { buildContextFingerprint, canResumeContextSession, sha256 } from "./context-fingerprint.ts";
 import { parsePiModelReference, type PiRequestThinkingLevel } from "./model-ref.ts";
 import type { VisionScheduler } from "../media/vision-scheduler.ts";
+import type { VideoTranscoderAvailability } from "../media/video-frames.ts";
 import { log } from "../observability/log.ts";
 import { AgentActivityCollector } from "./activity.ts";
 
@@ -196,6 +197,7 @@ export class BotRuntime {
 	private readonly visionScheduler: VisionScheduler | null;
 	private readonly visionEnabled: boolean;
 	private readonly typingLease: TelegramTypingLease;
+	private readonly videoTranscoder: VideoTranscoderAvailability | undefined;
 	/** Optional sink for TUI/live broadcasting of agent events. */
 	eventSink: ((kind: string, payload: unknown) => void) | null = null;
 	/** Optional sink for messages this bot sent (poller echo dedupes them, so TUI needs this path). */
@@ -224,6 +226,7 @@ export class BotRuntime {
 			botApis?: ReadonlyMap<string, MediaDownloadApi>;
 			visionExecutor?: VisionExecutor;
 			visionScheduler?: VisionScheduler;
+			videoTranscoder?: VideoTranscoderAvailability;
 		} = {},
 	) {
 		this.db = db;
@@ -232,6 +235,7 @@ export class BotRuntime {
 		this.modelRuntime = modelRuntime;
 		this.visionExecutor = options.visionExecutor ?? null;
 		this.visionScheduler = options.visionScheduler ?? null;
+		this.videoTranscoder = options.videoTranscoder;
 		this.visionEnabled = config.vision?.enabled ?? options.visionExecutor != null;
 		this.monotonicNow = options.monotonicNow ?? (() => performance.now());
 		this.api = options.api ?? new BotApi(bot.token);
@@ -1382,6 +1386,7 @@ export class BotRuntime {
 				botApis: this.botApis,
 				chatId,
 				foreground: true,
+				videoTranscoder: this.videoTranscoder,
 			});
 		} catch {
 			this.recordEvent("error", { stage: "vision", category: "request_failed" });

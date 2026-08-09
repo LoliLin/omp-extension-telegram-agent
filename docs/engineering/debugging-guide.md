@@ -28,7 +28,7 @@ bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整�
 | code | 已证明的事实 | 下一步 |
 |---|---|---|
 | `unsupported_reasoning_effort` | 配置requested档位不在该模型supported levels中，Pi会静默clamp为effective档位 | 将main/compaction/vision配置改为supported值；daemon启动也会fail fast |
-| `video_transcoder_unavailable` | vision已启用，但PATH缺少`ffmpeg`或`ffprobe` | 安装FFmpeg发行包并restart；图片vision不受影响 |
+| `video_transcoder_unavailable` | vision已启用，但PATH缺少`ffmpeg`或`ffprobe`；finding同时给出`impact=video_recognition_disabled`与`action=install_ffmpeg_and_restart` | 安装FFmpeg发行包并restart；它只用于视频抽帧，daemon、聊天、图片vision与sticker发送不受影响 |
 | `cursor_backlog` | 该bot尚未消费全部immutable events | 看最近claim与runtime state；没有trigger时可正常 |
 | `pending_reply_obligation` | direct reply尚未被structured commit确认交付 | 查flush/provider失败；restart后应自动recover |
 | `route_without_run` | started claim超过120秒仍无匹配`llm_runs.trigger_message_id` | 查`agent_runtime.flush_failed`与provider readiness |
@@ -58,8 +58,8 @@ bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整�
 1. canonical `messages.media`与`media_file_ids`证明哪个bot拥有可用`file_id`；`file_id`只能交给同一bot的Bot API。
 2. `media.local_path`与`media_cache_ready/skip/error`证明本地媒体准备，不证明vision provider已经运行。视频path只是本地source，不会进入IPC。
 3. 成功compaction后，`media_cache.post_compaction_pruned`只聚合`scanned/deleted/stale/failed`；`failed>0`保留DB path供下次重试，全部无候选时合法静默。`prune_observer_failed`表示observer自身失败，但compaction仍已提交。两者都不得加入media identity或path。
-4. 视频先检查`video_transcoder`；`video_transcoder_unavailable`可在安装后重试，`video_probe_failed`/`video_frame_extraction_failed`证明失败发生在provider前。不得记录命令stderr或path。
-5. `agent_events.kind=vision`的固定`outcome`、`frames`与`providerCalled`证明foreground识别结果；跨bot路由时应使用任一已配置且有mapping的接收bot，`file_id_unavailable`只表示所有可用source均缺失。
+4. 视频先检查`video_transcoder`；`video_transcoder_unavailable`在Telegram下载、FFmpeg与provider前立即no-op，可在安装并restart后重试。CLI只提醒operator，daemon log带`blocking=false`，不向群内发送告警。`video_probe_failed`/`video_frame_extraction_failed`证明失败发生在provider前。不得记录命令stderr或path。
+5. `agent_events.kind=vision`的固定`outcome`、`frames`与`providerCalled`证明foreground识别结果；预算已耗尽时本地视频准备也不会开始。跨bot路由时应使用任一已配置且有mapping的接收bot，`file_id_unavailable`只表示所有可用source均缺失。
 6. 非空`media.vision`与对应`message_events.kind=media_update`证明描述已持久化并进入append-only provider队列；主模型选择别的话题不等于没有识图。
 7. `/tg attach`的snapshot/history直接读`media.vision`，live路径读`vision_update`；全局、A、B等filter都应显示同一群消息描述，filter只限制LOCAL/usage。
 

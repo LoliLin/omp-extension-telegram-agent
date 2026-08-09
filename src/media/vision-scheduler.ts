@@ -20,7 +20,7 @@ export interface VisionSchedulerOptions {
 	now?: () => number;
 }
 
-/** One deployment-wide provider gate shared by foreground and catalog work. */
+/** One deployment-wide vision-work gate; video reserves it before local preparation. */
 export class VisionScheduler {
 	private readonly concurrency: number;
 	private readonly perChatHourlyLimit: number;

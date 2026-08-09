@@ -68,6 +68,15 @@ export function inspectVideoTranscoder(runner: VideoCommandRunner = defaultRunne
 	return { ffmpeg: runner.which("ffmpeg") != null, ffprobe: runner.which("ffprobe") != null };
 }
 
+/** Human-facing operator warning; absence never blocks chat or daemon readiness. */
+export function videoTranscoderAdvisory(required: boolean, availability: VideoTranscoderAvailability): string | null {
+	if (!required || (availability.ffmpeg && availability.ffprobe)) return null;
+	const missing = [!availability.ffmpeg ? "ffmpeg" : null, !availability.ffprobe ? "ffprobe" : null].filter(
+		(value): value is string => value != null,
+	);
+	return `warning: video recognition is disabled because ${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} unavailable; install the FFmpeg package and restart (it is used only to sample video frames; chat, image vision, and sticker sending continue normally)`;
+}
+
 function seededRandom(identity: string): () => number {
 	const digest = createHash("sha256").update(identity).digest();
 	let state = digest.readUInt32LE(0) || 0x9e3779b9;

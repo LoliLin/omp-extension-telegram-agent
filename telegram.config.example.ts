@@ -42,10 +42,10 @@ export default defineConfig({
 	// ===== Vision (off by default; budget-capped when on) =====
 	vision: {
 		enabled: false,
-		foreground_media_limit: 2, // images understood inline per message
-		concurrency: 2, // background recognition concurrency
-		per_chat_hourly_limit: 24, // per-group hourly cap
-		daily_limit: 200, // global daily cap
+		foreground_media_limit: 2, // media understood inline per bot turn
+		concurrency: 2, // deployment-wide vision work; includes full video pipelines
+		per_chat_hourly_limit: 24, // per-group recognition-attempt cap
+		daily_limit: 200, // deployment-wide recognition-attempt cap
 	},
 
 	// ===== Retention in days (defaults: 90 / 30 / 365) =====

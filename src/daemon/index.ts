@@ -41,6 +41,9 @@ if (config.vision?.enabled && (!videoTranscoder.ffmpeg || !videoTranscoder.ffpro
 		ffmpeg: videoTranscoder.ffmpeg,
 		ffprobe: videoTranscoder.ffprobe,
 		category: "video_transcoder_unavailable",
+		impact: "video_recognition_disabled",
+		action: "install_ffmpeg_and_restart",
+		blocking: false,
 	});
 }
 const visualModel = config.vision?.enabled ? parsePiModelReference(config.auxiliaryVisualModel)! : null;
@@ -132,6 +135,7 @@ const composition = await composeDeployment(db, config, {
 			botApis,
 			...(sharedVisionExecutor ? { visionExecutor: sharedVisionExecutor } : {}),
 			...(visionScheduler ? { visionScheduler } : {}),
+			videoTranscoder,
 		});
 		await runtime.init();
 		return runtime;

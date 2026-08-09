@@ -130,7 +130,7 @@ export function isVideoMedia(kind: string, mime: string | null | undefined): boo
 }
 
 export function isVisionMedia(kind: string, mime: string | null | undefined): boolean {
-	return kind === "photo" || kind === "sticker" || isVideoMedia(kind, mime);
+	return kind === "photo" || (kind === "sticker" && mime !== "application/x-tgsticker") || isVideoMedia(kind, mime);
 }
 
 export function fileIdForBot(db: Database, botId: string, fileUniqueId: string): string | null {

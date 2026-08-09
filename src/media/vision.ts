@@ -25,9 +25,11 @@ import { appendMediaUpdateEvents } from "../db/message-events.ts";
 import { VisionBudgetExceededError, type VisionScheduler } from "./vision-scheduler.ts";
 import {
 	extractVideoFrames,
+	inspectVideoTranscoder,
 	type VideoFrameInput,
 	type VideoFrameResult,
 	type VideoFrameOutcome,
+	type VideoTranscoderAvailability,
 } from "./video-frames.ts";
 
 export { fileIdForBot } from "./local-cache.ts";
@@ -121,6 +123,8 @@ export interface EnsureVisionOptions {
 	foreground?: boolean;
 	/** Deterministic extraction seam; production uses ffprobe + ffmpeg. */
 	extractFrames?: (input: VideoFrameInput) => Promise<VideoFrameResult>;
+	/** Startup snapshot: missing optional tools skip before Telegram download and never block chat. */
+	videoTranscoder?: VideoTranscoderAvailability;
 }
 
 interface PiVisionExecutorOptions {
@@ -420,12 +424,50 @@ async function ensureVisionInner(
 		vision: string | null;
 	} | null;
 	if (!media || !isVisionMedia(media.kind, media.mime)) return null;
-	let video = isVideoMedia(media.kind, media.mime);
-	let kind: VisionKind = video ? "video" : (media.kind as "photo" | "sticker");
+	const video = isVideoMedia(media.kind, media.mime);
+	const kind: VisionKind = video ? "video" : (media.kind as "photo" | "sticker");
 	if (media.vision) {
 		const cached = JSON.parse(media.vision) as { text?: string | null };
 		return cached.text?.trim() || null;
 	}
+	if (video) {
+		const transcoder =
+			options.videoTranscoder ?? (options.extractFrames ? { ffmpeg: true, ffprobe: true } : inspectVideoTranscoder());
+		if (!transcoder.ffmpeg || !transcoder.ffprobe) {
+			emitTelemetry(options, emptyTelemetry(kind, "video_transcoder_unavailable", monotonicNow() - startedAt));
+			return null;
+		}
+		if (options.scheduler) {
+			try {
+				return await options.scheduler.schedule(options.chatId ?? 0, options.foreground ?? false, () =>
+					ensureVisionPrepared(db, api, botId, fileUniqueId, executor, options, media, video, kind, startedAt, true),
+				);
+			} catch (error) {
+				if (!(error instanceof VisionBudgetExceededError)) throw error;
+				emitTelemetry(options, emptyTelemetry(kind, "budget_exceeded", monotonicNow() - startedAt));
+				return null;
+			}
+		}
+	}
+	return ensureVisionPrepared(db, api, botId, fileUniqueId, executor, options, media, video, kind, startedAt, false);
+}
+
+async function ensureVisionPrepared(
+	db: Database,
+	api: BotApi,
+	botId: string,
+	fileUniqueId: string,
+	executor: VisionExecutor,
+	options: EnsureVisionOptions,
+	media: { kind: string; mime: string | null; vision: string | null },
+	initialVideo: boolean,
+	initialKind: VisionKind,
+	startedAt: number,
+	providerSlotReserved: boolean,
+): Promise<string | null> {
+	const monotonicNow = options.monotonicNow ?? (() => performance.now());
+	let video = initialVideo;
+	let kind = initialKind;
 	const local = await ensureLocalMedia(db, api, botId, fileUniqueId, {
 		cacheDir: options.cacheDir,
 		botApis: options.botApis,
@@ -493,9 +535,10 @@ async function ensureVisionInner(
 				images,
 				...(video && media.kind === "sticker" ? { videoSticker: true } : {}),
 			});
-		result = options.scheduler
-			? await options.scheduler.schedule(options.chatId ?? 0, options.foreground ?? false, describe)
-			: await describe();
+		result =
+			options.scheduler && !providerSlotReserved
+				? await options.scheduler.schedule(options.chatId ?? 0, options.foreground ?? false, describe)
+				: await describe();
 	} catch (error) {
 		if (!(error instanceof VisionBudgetExceededError)) throw error;
 		emitTelemetry(options, emptyTelemetry(kind, "budget_exceeded", monotonicNow() - startedAt));
