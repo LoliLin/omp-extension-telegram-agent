@@ -39,13 +39,11 @@ export default defineConfig({
 	// .env key for the TinyFish search API key. Required only when a bot enables tools.search.
 	tinyfish_key_env: "tiny_fish_api_key",
 
-	// ===== Vision (off by default; budget-capped when on) =====
+	// ===== Vision (off by default; bounded when on) =====
 	vision: {
 		enabled: false,
 		foreground_media_limit: 2, // media understood inline per bot turn
 		concurrency: 2, // deployment-wide vision work; includes full video pipelines
-		per_chat_hourly_limit: 24, // per-group recognition-attempt cap
-		daily_limit: 200, // deployment-wide recognition-attempt cap
 	},
 
 	// ===== Retention in days (defaults: 90 / 30 / 365) =====
