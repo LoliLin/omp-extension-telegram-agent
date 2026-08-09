@@ -50,7 +50,7 @@
 | custom message 转换 | `convertToLlm` | 补上遗漏调用 |
 | compaction 生命周期 | `session_before_compact` / `session_compact` | 已复用；只保留 Telegram 专用 summary instruction |
 | transcript 序列化 | `serializeConversation` | 已复用；修正输入类型 |
-| TUI layout、Markdown、图片转换、assistant card | 已公开提供 | 已复用 |
+| TUI layout、Markdown、图片转换、assistant/tool card | 已公开提供 | 已复用；工具调用改用`ToolExecutionComponent` |
 | footer customization | `ctx.ui.setFooter` 允许自定义 component，但 `FooterComponent` 要求真实 session | 不再伪造 session；删除 panel |
 | model reference parser | `parseModelPattern` 有导出，但标为 internal/testing，且是依赖 model catalog 的模糊匹配器 | 保留严格的小型 `provider/model:thinking` parser |
 | provider cache retention | 底层 stream option 有，`createAgentSession` option 无 | 保留单点 wrapper，不扩散私有访问 |
@@ -83,6 +83,15 @@
 - telemetry 的共享读模型仍服务 Telegram `/status` 与 Pi `/tg status`；删除的是 footer 适配层，不删除成本可观测性。
 - Biome 的弃用提示是独立机械维护项，不影响运行或 cache；在行为清理后单独迁移，不能夹入功能提交。
 
+## TUI 补充审查
+
+- 原实现只把tool event画成一行accent文本，和Pi coding agent的pending/success/error工具卡外观不一致。extension已能从官方`setWidget` factory取得真实host TUI，因此直接使用公开`ToolExecutionComponent`，不再复制工具卡。
+- 消息标题用`botId ? ... : username ? ...`，导致own bot消息有username也必然隐藏。新标题始终优先呈现display name + `@username`，bot id降为右侧metadata。
+- 全部身份曾只分成固定human/bot两色。现在用稳定identity hash选择Pi theme已有语义/语法色；没有硬编码RGB、独立palette配置或持久颜色表。
+- feed entry内部重复的scope/帮助header已删除；scope与两个常用动作只留在editor上方的一行官方widget。卡片只保留身份、消息定位信息和正文/媒体，避免同一信息占两层。
+
+以上均为本地UI side channel，Cache impact为**NONE**；不改system、tool schema、消息grammar或provider payload。
+
 ## 执行顺序
 
 每一步一个原子提交，行为提交同时更新它拥有的测试和文档：
@@ -91,8 +100,9 @@
 2. 简化 vision 并发门和视频取帧；删除无持久语义的配额配置。
 3. 删除旧配置兼容语义，并让 normalized 类型消除下游 fallback。
 4. 删除 fake Pi footer 与 `/tg panel`，保留 `/tg status`。
-5. 合并 compaction e2e、删除完成态调查记录，并按长期 invariant 收缩测试。
-6. 运行完整验证漏斗；全部通过后才部署并检查生产 daemon。
+5. 对齐Pi原生工具卡并重排Telegram卡片身份层级。
+6. 合并 compaction e2e、删除完成态调查记录，并按长期 invariant 收缩测试。
+7. 运行完整验证漏斗；全部通过后才部署并检查生产 daemon。
 
 ## 验证与更新条件
 
@@ -105,4 +115,4 @@ bun run lint
 bun run docs:check
 ```
 
-部署只在工作树干净、提交签名有效且生产配置已使用显式新字段时进行。Pi 包升级、cache-visible grammar、vision 调度、extension footer API 或测试策略变化时，必须重新审查本记录对应章节；稳定 invariant 的权威说明仍分别属于 `docs/cache.md`、`docs/architecture.md`、`docs/testing.md` 和 `docs/telemetry.md`。
+部署只在工作树干净、提交签名有效且生产配置已使用显式新字段时进行。Pi 包升级、cache-visible grammar、vision 调度、extension UI API 或测试策略变化时，必须重新审查本记录对应章节；稳定 invariant 的权威说明仍分别属于 `docs/cache.md`、`docs/architecture.md`、`docs/testing.md` 和 `docs/telemetry.md`。

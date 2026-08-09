@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { spawn } from "node:child_process";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
 	AssistantMessageComponent,
 	convertToPng,
+	ToolExecutionComponent,
 	VERSION,
 	type ExtensionAPI,
 	type ExtensionContext,
 	type Theme,
+	type ThemeColor,
 } from "@earendil-works/pi-coding-agent";
 import * as Tui from "@earendil-works/pi-tui";
 import { loadConfig, type BotConfig } from "../../src/config.ts";
@@ -47,6 +50,17 @@ export const MEDIA_CACHE_MAX_BASE64_BYTES = 32 * 1024 * 1024;
 export const MEDIA_CACHE_MAX_ITEM_BASE64_BYTES = 8 * 1024 * 1024;
 export const MEDIA_CONVERSION_MAX_PENDING = 32;
 
+const IDENTITY_COLORS = [
+	"accent",
+	"syntaxFunction",
+	"syntaxString",
+	"syntaxNumber",
+	"syntaxType",
+	"syntaxKeyword",
+	"syntaxVariable",
+	"mdLink",
+] as const satisfies readonly ThemeColor[];
+
 type TimelineFactory = (filter: string | null, hooks: TimelineHooks) => TimelinePort;
 export interface ProcessRunResult {
 	status: number | null;
@@ -57,6 +71,7 @@ type ProcessRunner = (command: string, args: readonly string[], options: { cwd: 
 type FeedEntry = { instanceId: string; filter: string | null };
 type ComposeIdentity = Pick<BotConfig, "id" | "name">;
 type ComposeMode = { kind: "scope" } | { kind: "bot"; identity: ComposeIdentity };
+type ToolPresentationHost = { ui: Tui.TUI; cwd: string };
 type StatusBot = Pick<
 	BotConfig,
 	"id" | "name" | "provider" | "model" | "reasoningEffort" | "routingP" | "samplingCooldownMs"
@@ -439,6 +454,15 @@ function fmtDay(ts: number): string {
 	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+function identityColor(identity: string): ThemeColor {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < identity.length; index++) {
+		hash ^= identity.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return IDENTITY_COLORS[(hash >>> 0) % IDENTITY_COLORS.length]!;
+}
+
 function resolveStatusModel(
 	bot: StatusBot | undefined,
 	status: RuntimeControlSnapshot | undefined,
@@ -498,14 +522,17 @@ function eventBody(event: EvtItem): string {
 	}
 }
 
-function activityEventBody(section: AgentActivityEventSection): string {
-	let payload: Record<string, unknown> = {};
+function activityEventPayload(section: AgentActivityEventSection): Record<string, unknown> | null {
 	try {
 		const parsed = JSON.parse(section.detail) as unknown;
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) payload = parsed as Record<string, unknown>;
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
 	} catch {
-		return `${sanitize(section.kind)} · ${sanitize(section.detail)}`;
+		return null;
 	}
+}
+
+function activityEventBody(section: AgentActivityEventSection, payload = activityEventPayload(section)): string {
+	if (!payload) return `${sanitize(section.kind)} · ${sanitize(section.detail)}`;
 	const tool = sanitize(String(payload.tool ?? "tool"));
 	if (section.kind === "tool_call") return `${tool} · ${sanitize(JSON.stringify(payload.args ?? {}))}`;
 	if (section.kind === "tool_result") return `${tool} · ${payload.isError ? "error" : "done"}`;
@@ -520,19 +547,28 @@ function activityEventBody(section: AgentActivityEventSection): string {
 }
 
 function nativeAssistantSection(section: AgentActivityAssistantSection, ts: number): AssistantMessageComponent {
-	return new AssistantMessageComponent(
-		{
-			role: "assistant",
-			content: section.content.map((content) =>
-				content.type === "text"
-					? { type: "text" as const, text: sanitize(content.text) }
-					: { type: "thinking" as const, thinking: sanitize(content.thinking) },
-			),
-			stopReason: section.stopReason,
-			timestamp: ts,
-		} as never,
-		false,
-	);
+	const message = {
+		role: "assistant",
+		content: section.content.map((content) =>
+			content.type === "text"
+				? { type: "text" as const, text: sanitize(content.text) }
+				: { type: "thinking" as const, thinking: sanitize(content.thinking) },
+		),
+		api: "openai-completions",
+		provider: "telegram",
+		model: "telegram-activity",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: section.stopReason,
+		timestamp: ts,
+	} satisfies AssistantMessage;
+	return new AssistantMessageComponent(message, false);
 }
 
 /** One Pi-native assistant/tool presentation for an entire daemon agent run. */
@@ -541,15 +577,55 @@ export function activityComponent(
 	botName: string,
 	activity: AgentActivity,
 	theme: Theme,
-	status = "ACTIVITY",
+	status = "Activity",
+	toolHost?: ToolPresentationHost,
 ): Tui.Component {
 	const box = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
 	box.addChild(
-		cardHeader(`${botName} · bot ${botId}`, `${status} · ${fmtClock(activity.startedAt)}`, theme, "warning"),
+		cardHeader(botName, `bot ${botId} · ${status} · ${fmtClock(activity.startedAt)}`, theme, identityColor(botId)),
 	);
-	for (const section of activity.sections) {
+	const pendingTools = new Map<string, ToolExecutionComponent[]>();
+	for (let index = 0; index < activity.sections.length; index++) {
+		const section = activity.sections[index]!;
 		if (section.type === "assistant") box.addChild(nativeAssistantSection(section, activity.startedAt));
-		else box.addChild(new Tui.Text(theme.fg("accent", activityEventBody(section)), 0, 0));
+		else {
+			const payload = activityEventPayload(section);
+			const tool = payload ? sanitize(String(payload.tool ?? "tool")) : "tool";
+			if (toolHost && payload && section.kind === "tool_call") {
+				const component = new ToolExecutionComponent(
+					tool,
+					`${activity.activityId}:${index}`,
+					payload.args ?? {},
+					{ showImages: false },
+					undefined,
+					toolHost.ui,
+					toolHost.cwd,
+				);
+				const queue = pendingTools.get(tool) ?? [];
+				queue.push(component);
+				pendingTools.set(tool, queue);
+				box.addChild(component);
+				continue;
+			}
+			if (toolHost && payload && section.kind === "tool_result") {
+				const component = pendingTools.get(tool)?.shift();
+				if (component) {
+					const isError = payload.isError === true;
+					component.updateResult({
+						content: isError ? [{ type: "text", text: "error" }] : [],
+						isError,
+					});
+					continue;
+				}
+			}
+			const color: ThemeColor =
+				section.kind === "send_degraded"
+					? "error"
+					: section.kind === "send" || section.kind === "markdown_sent" || section.kind === "plain_fallback"
+						? "success"
+						: "muted";
+			box.addChild(new Tui.Text(theme.fg(color, activityEventBody(section, payload)), 0, 0));
+		}
 	}
 	if (activity.truncated) box.addChild(new Tui.Text(theme.fg("warning", "activity display truncated"), 0, 0));
 	return box;
@@ -572,12 +648,7 @@ function parsedActivity(event: EvtItem): AgentActivity | null {
 	}
 }
 
-function cardHeader(
-	identity: string,
-	metadata: string,
-	theme: Theme,
-	color: Parameters<Theme["fg"]>[0],
-): Tui.Component {
+function cardHeader(identity: string, metadata: string, theme: Theme, color: ThemeColor): Tui.Component {
 	const left = theme.bold(theme.fg(color, sanitize(identity))),
 		right = theme.fg("dim", metadata);
 	return new Tui.HStack(
@@ -595,30 +666,38 @@ export function itemComponent(
 	item: TimelineItem,
 	theme: Theme,
 	resolveMedia: MediaImageResolver = readMediaImage,
+	toolHost?: ToolPresentationHost,
 ): Tui.Component {
 	if (item.kind === "evt") {
 		const activity = parsedActivity(item);
-		if (activity) return activityComponent(item.botId, item.botName, activity, theme);
+		if (activity) return activityComponent(item.botId, item.botName, activity, theme, "Activity", toolHost);
 	}
 	const box = new Tui.Box(1, 0, (text) =>
 		theme.bg(item.kind === "msg" && !item.isBot ? "userMessageBg" : "customMessageBg", text),
 	);
 	if (item.kind === "evt") {
-		box.addChild(cardHeader(`${item.botName} · bot ${item.botId}`, `LOCAL · ${fmtClock(item.ts)}`, theme, "warning"));
+		box.addChild(
+			cardHeader(item.botName, `bot ${item.botId} · Local · ${fmtClock(item.ts)}`, theme, identityColor(item.botId)),
+		);
 		box.addChild(new Tui.Text(theme.fg("customMessageText", eventBody(item)), 0, 0));
 		return box;
 	}
 
-	const sender = `${item.senderName}${item.botId ? ` · bot ${item.botId}` : item.username ? ` · @${item.username}` : ""}`;
-	box.addChild(
-		cardHeader(
-			sender,
-			`#${item.messageId} · ${fmtClock(item.ts)}${item.edited ? " · edited" : ""}`,
-			theme,
-			item.isBot ? "accent" : "userMessageText",
-		),
-	);
-	if (item.replyTo != null) box.addChild(new Tui.Text(theme.fg("muted", `↪ reply to #${item.replyTo}`), 0, 0));
+	const username = item.username?.trim().replace(/^@/, "");
+	const normalizedName = item.senderName.trim().toLocaleLowerCase();
+	const sender =
+		username && normalizedName !== username.toLocaleLowerCase() && normalizedName !== `@${username.toLocaleLowerCase()}`
+			? `${item.senderName} · @${username}`
+			: item.senderName;
+	const metadata = [
+		`#${item.messageId}`,
+		...(item.botId ? [`bot ${item.botId}`] : []),
+		fmtClock(item.ts),
+		...(item.edited ? ["edited"] : []),
+	].join(" · ");
+	box.addChild(cardHeader(sender, metadata, theme, identityColor(username || item.senderName)));
+	if (item.replyTo != null)
+		box.addChild(new Tui.Text(theme.fg("customMessageLabel", `↪ reply to #${item.replyTo}`), 0, 0));
 	if (item.text)
 		box.addChild(
 			new Tui.Text(theme.fg(item.isBot ? "customMessageText" : "userMessageText", sanitize(item.text)), 0, 0),
@@ -626,7 +705,10 @@ export function itemComponent(
 	if (item.mediaKind) {
 		box.addChild(
 			new Tui.Text(
-				theme.fg("muted", `[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]`),
+				theme.fg(
+					"customMessageLabel",
+					`[${sanitize(item.mediaKind)}${item.stickerEmoji ? ` ${sanitize(item.stickerEmoji)}` : ""}]`,
+				),
 				0,
 				0,
 			),
@@ -646,13 +728,23 @@ export function itemComponent(
 				),
 			);
 		if (item.mediaDesc?.trim())
-			box.addChild(new Tui.Text(theme.fg("muted", `视觉理解 · ${sanitize(item.mediaDesc.trim())}`), 0, 0));
+			box.addChild(
+				new Tui.Text(
+					`${theme.bold(theme.fg("customMessageLabel", "Vision"))}${theme.fg("muted", ` · ${sanitize(item.mediaDesc.trim())}`)}`,
+					0,
+					0,
+				),
+			);
 	}
 	return box;
 }
 
-export function streamComponent(stream: Extract<AgentStreamFrame, { phase: "update" }>, theme: Theme): Tui.Component {
-	return activityComponent(stream.botId, stream.botName, stream.activity, theme, "STREAMING");
+export function streamComponent(
+	stream: Extract<AgentStreamFrame, { phase: "update" }>,
+	theme: Theme,
+	toolHost?: ToolPresentationHost,
+): Tui.Component {
+	return activityComponent(stream.botId, stream.botName, stream.activity, theme, "Streaming", toolHost);
 }
 
 export class TelegramFeed extends Tui.Container {
@@ -679,23 +771,11 @@ export class TelegramFeed extends Tui.Container {
 		private readonly changed: (event: TimelineEvent, feed: TelegramFeed) => void,
 		private readonly mediaCache: NativeMediaCache,
 		private readonly requestRender: () => void,
+		private readonly toolHost?: ToolPresentationHost,
 	) {
 		super();
 		this.mediaListener = this.createMediaListener();
 		this.mediaResolver = (item) => this.mediaCache.resolve(item, this.mediaListener);
-		const header = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
-		header.addChild(
-			new Tui.Text(theme.bold(theme.fg("accent", filter ? `Telegram · bot ${filter}` : "Telegram · all bots")), 0, 0),
-		);
-		header.addChild(
-			new Tui.Text(
-				theme.fg("dim", "Pi transcript owns scrolling, resize, selection and images · /tg more · /tg detach"),
-				0,
-				0,
-			),
-		);
-		this.addChild(header);
-		this.addChild(new Tui.Spacer(1));
 		this.addChild(this.content);
 		this.addChild(this.streamContent);
 		this.clientValue = factory(filter, { onEvent: (event) => this.onEvent(event) });
@@ -801,7 +881,7 @@ export class TelegramFeed extends Tui.Container {
 			if (day !== previousDay)
 				this.content.addChild(new Tui.Text(this.theme.fg("dim", `──────── ${day} ────────`), 1, 0));
 			const slot = new Tui.Container();
-			slot.addChild(itemComponent(item, this.theme, this.mediaResolver));
+			slot.addChild(itemComponent(item, this.theme, this.mediaResolver, this.toolHost));
 			this.cardSlots.set(this.itemKey(item), slot);
 			this.content.addChild(slot);
 			this.content.addChild(new Tui.Spacer(1));
@@ -827,7 +907,7 @@ export class TelegramFeed extends Tui.Container {
 			const slot = this.cardSlots.get(this.itemKey(item));
 			if (!slot) continue;
 			slot.clear();
-			slot.addChild(itemComponent(item, this.theme, this.mediaResolver));
+			slot.addChild(itemComponent(item, this.theme, this.mediaResolver, this.toolHost));
 			refreshed = true;
 		}
 		if (refreshed) this.requestRender();
@@ -843,7 +923,7 @@ export class TelegramFeed extends Tui.Container {
 			const slot = this.cardSlots.get(this.itemKey(updated));
 			if (!slot) continue;
 			slot.clear();
-			slot.addChild(itemComponent(updated, this.theme, this.mediaResolver));
+			slot.addChild(itemComponent(updated, this.theme, this.mediaResolver, this.toolHost));
 			refreshed = true;
 		}
 		if (refreshed) this.requestRender();
@@ -895,7 +975,7 @@ export class TelegramFeed extends Tui.Container {
 	private rebuildStreams(): void {
 		this.streamContent.clear();
 		for (const stream of this.streams.values()) {
-			this.streamContent.addChild(streamComponent(stream, this.theme));
+			this.streamContent.addChild(streamComponent(stream, this.theme, this.toolHost));
 			this.streamContent.addChild(new Tui.Spacer(1));
 		}
 	}
@@ -963,6 +1043,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	let completionBots: TgBotChoice[] | undefined;
 	let statusBots: StatusBot[] | undefined;
 	let requestHostRender: (() => void) | null = null;
+	let toolHost: ToolPresentationHost | undefined;
 	const getCompletionBots = (): TgBotChoice[] => {
 		if (completionBots) return completionBots;
 		try {
@@ -1043,6 +1124,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	};
 	const clearFeedWidget = (ui: ExtensionContext["ui"] | null = lastUi) => {
 		requestHostRender = null;
+		toolHost = undefined;
 		ui?.setWidget(FEED_WIDGET_KEY, undefined);
 	};
 	const mountFeedWidget = (filter: string | null, ctx: ExtensionContext) => {
@@ -1051,6 +1133,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			FEED_WIDGET_KEY,
 			(tui, theme) => {
 				requestHostRender = () => tui.requestRender();
+				toolHost = { ui: tui, cwd: ctx.cwd };
 				return new Tui.Text(
 					`${theme.bold(theme.fg("accent", "Telegram"))}${theme.fg("dim", ` · ${scope} · attached · /tg more · /tg detach`)}`,
 					1,
@@ -1111,8 +1194,14 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		const existing = feeds.get(data.instanceId);
 		if (existing) return existing;
 		if (!supported || pending?.data.instanceId !== data.instanceId) return detachedEntry(data, theme, supported);
-		const feed = new TelegramFeed(data.filter, theme, factory, pending.changed, mediaCache, () =>
-			requestHostRender?.(),
+		const feed = new TelegramFeed(
+			data.filter,
+			theme,
+			factory,
+			pending.changed,
+			mediaCache,
+			() => requestHostRender?.(),
+			toolHost,
 		);
 		pending = null;
 		feeds.set(data.instanceId, feed);

@@ -933,14 +933,46 @@ describe("Pi attach media presentation", () => {
 			],
 		};
 
-		const rendered = activityComponent("A", "bot A", activity, theme).render(100).join("\n");
+		const rendered = activityComponent("A", "bot A", activity, theme, "Activity", {
+			ui: { requestRender() {} } as Tui.TUI,
+			cwd: process.cwd(),
+		})
+			.render(100)
+			.join("\n");
 		expect(rendered).toContain("real chain of thought");
 		expect(rendered).toContain("normal-output-start");
 		expect(rendered).toContain("normal-output-end");
 		expect(rendered).toContain("send");
-		expect(rendered).toContain("done");
+		expect(rendered).toContain('"message": "hello"');
 		expect(rendered).toContain("markdown sent");
-		expect(rendered.match(/bot A · bot A/g)).toHaveLength(1);
+		expect(rendered).toContain("bot A · Activity");
+	});
+
+	test("keeps Telegram usernames in both human and bot card headers", () => {
+		const theme = {
+			fg: (_color: string, value: string) => value,
+			bg: (_color: string, value: string) => value,
+			bold: (value: string) => value,
+		} as Theme;
+		const human = itemComponent(
+			message({ senderName: "Alice Example", username: "alice", mediaKind: null, text: "hello" }),
+			theme,
+		).render(80);
+		const bot = itemComponent(
+			message({
+				senderName: "Helpful Bot",
+				username: "helpful_bot",
+				isBot: true,
+				botId: "friend",
+				mediaKind: null,
+				text: "hello",
+			}),
+			theme,
+		).render(80);
+
+		expect(human.join("\n")).toContain("Alice Example · @alice");
+		expect(bot.join("\n")).toContain("Helpful Bot · @helpful_bot");
+		expect(bot.join("\n")).toContain("#22662 · bot friend");
 	});
 
 	test("renders the vision description below the native image", () => {
@@ -959,7 +991,7 @@ describe("Pi attach media presentation", () => {
 		}));
 		const rendered = component.render(80);
 		const imageIndex = rendered.findIndex((line) => line.includes("\u001b_G"));
-		const visionIndex = rendered.findIndex((line) => line.includes("视觉理解 · recognized text"));
+		const visionIndex = rendered.findIndex((line) => line.includes("Vision · recognized text"));
 		expect(imageIndex).toBeGreaterThanOrEqual(0);
 		expect(visionIndex).toBeGreaterThan(imageIndex);
 	});
