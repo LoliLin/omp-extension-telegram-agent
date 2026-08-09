@@ -1,51 +1,77 @@
+// The single config file for this project (non-secret). Secrets live in .env; this file
+// only names the .env keys. Apply changes with `bun run restart`; tuning from the group
+// chat (`/set routing_p 0.5`, admin only) writes back into this file.
 import { defineConfig } from "./src/config.ts";
 
 export default defineConfig({
-	// Telegram supergroup id. Bare, negative, and -100-prefixed forms are accepted.
+	// ===== Required =====
+
+	// Target Telegram supergroup id. Bare, negative, and -100-prefixed forms are accepted.
 	group_peer_id: 1234567890,
 
-	// Cost-first fixed profile. Authentication remains exclusively in Pi's auth storage.
+	// ===== Models (omit to inherit Pi's /login + /model defaults) =====
+
 	provider: "openai-codex",
 	model: "gpt-5.6-luna",
+	// Thinking level: off / minimal / low / medium / high. Defaults to off.
 	reasoning_effort: "off",
+	// Provider prefix cache retention: none / short / long. "short" is the cheapest choice.
 	cache_retention: "short",
+	// Model used for context compaction (provider/model:thinking). Runs rarely; pick a cheap one.
 	compaction_model: "openai-codex/gpt-5.6-luna:low",
-
-	// Deterministic local behavior. These defaults keep context and background work bounded.
-	compaction_threshold: 128_000,
-	compaction_keep_recent: 20_000,
-	sampling_cooldown_ms: 2_000,
-	db_path: "data/agent.db",
-	router_secret_env: "router_secret",
-	tinyfish_key_env: "tiny_fish_api_key",
+	// Vision model for understanding images. Only called when vision.enabled is true.
 	auxiliary_visual_model: "openai-codex/gpt-5.6-luna:low",
-	max_suffix_tokens: 12_000,
-	max_message_tokens: 4_096,
+
+	// ===== Local behavior (every field has a default; shown for visibility) =====
+
+	compaction_threshold: 128_000, // compact only when context exceeds this many tokens
+	compaction_keep_recent: 20_000, // keep this many recent tokens verbatim after compaction
+	sampling_cooldown_ms: 2_000, // min interval between two unprompted replies per bot
+	max_suffix_tokens: 12_000, // cap on new-message tokens attached per provider call
+	max_message_tokens: 4_096, // per-message token cap
+
+	// ===== Files and secret references =====
+
+	db_path: "data/agent.db", // SQLite location
+	// .env key for the routing HMAC secret (deterministic probability sampling).
+	// Auto-generated and persisted by the daemon when absent; usually no need to set it.
+	router_secret_env: "router_secret",
+	// .env key for the TinyFish search API key. Required only when a bot enables tools.search.
+	tinyfish_key_env: "tiny_fish_api_key",
+
+	// ===== Vision (off by default; budget-capped when on) =====
 	vision: {
 		enabled: false,
-		foreground_media_limit: 2,
-		concurrency: 2,
-		per_chat_hourly_limit: 24,
-		daily_limit: 200,
+		foreground_media_limit: 2, // images understood inline per message
+		concurrency: 2, // background recognition concurrency
+		per_chat_hourly_limit: 24, // per-group hourly cap
+		daily_limit: 200, // global daily cap
 	},
-	telemetry_retention_days: 90,
-	raw_update_retention_days: 30,
-	message_event_retention_days: 365,
 
-	// Empty means the admin-only Telegram group commands (/compact, /set) are denied.
+	// ===== Retention in days (defaults: 90 / 30 / 365) =====
+	telemetry_retention_days: 90, // telemetry and cost records
+	raw_update_retention_days: 30, // raw Telegram updates
+	message_event_retention_days: 365, // message events
+
+	// Admin Telegram usernames (@-prefixed). Only admins may use /compact and /set.
+	// Empty means the admin-only group commands are denied for everyone.
 	telegram_admins: [],
 
+	// ===== Bots: add one entry per bot; keep routing_p sum <= 1 =====
 	bots: [
 		{
-			// Stable id for Pi commands, sessions, routing, and telemetry.
+			// Stable id for Pi commands, sessions, routing, and telemetry. Do not rename later.
 			id: "friend",
+			// Display name in the group; also the trigger word when addressed by name.
 			name: "Mochi",
-			// .env holds the token value; this file contains only its key name.
+			// .env holds the token value; this is only the key name.
 			token_env: "telegram_bot_token",
-			// Copy a public template to an ignored local file before personalizing it.
+			// Persona file. Copy a public template to an ignored local file before personalizing.
 			persona_path: "personas/template.en.md",
-			// Chance of joining an unaddressed human conversation. Explicit replies still route.
+			// Probability of joining an unaddressed human conversation.
+			// Direct replies and name mentions always route regardless of this value.
 			routing_p: 0.1,
+			// Sticker sets baked into the system prompt; the bot sends them by short_id.
 			sticker_sets: [],
 			tools: {
 				send: true,
