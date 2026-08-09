@@ -1,6 +1,6 @@
 # 成本设计概览
 
-本项目不承诺固定节省百分比。provider价格、群活跃度、persona长度与模型cache行为都会变化；实际效果以Pi footer、`/tg status`和SQLite telemetry保留窗口为准。
+本项目不承诺固定节省百分比。provider价格、群活跃度、persona长度与模型cache行为都会变化；实际效果以`/tg status`和SQLite telemetry保留窗口为准。
 
 项目的“极简”是最少机制而不是最少保障：优先少一个状态、接口、网络请求和provider-visible byte，同时保留transaction、timeout、脱敏、测试与可观察性。下面七项就是这一哲学在现有系统里的具体实现，不是未来平台功能清单。
 
@@ -44,9 +44,9 @@ compaction使用配置的廉价task model且关闭provider cache retention，因
 
 ## 7. UI 与 telemetry 走side channel
 
-Pi native feed、assistant partial、footer、`/tg status`和Telegram control使用本地IPC/SQLite/control plane。它们可观察运行状态，但不进入persona或主provider context。
+Pi native feed、assistant partial、feed status widget、`/tg status`和Telegram control使用本地IPC/SQLite/control plane。它们可观察运行状态，但不进入persona或主provider context。
 
-因此打开Pi、滚动历史、切换panel或查看usage不会消耗一次聊天模型调用。权威边界见[Pi原生transcript架构](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md)与[Cache工程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md)。
+因此打开Pi、滚动历史或查看usage不会消耗一次聊天模型调用。权威边界见[Pi原生transcript架构](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md)与[Cache工程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md)。
 
 ## 如何评估自己的 deployment
 

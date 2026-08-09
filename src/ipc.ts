@@ -99,7 +99,7 @@ export interface BotStats {
 
 export type RuntimeControlState = "idle" | "busy" | "cooldown" | "stopping" | "compacting";
 
-/** Daemon-resolved runtime truth shared by Telegram control, Pi status and Pi footer. */
+/** Daemon-resolved runtime truth shared by Telegram control and Pi status. */
 export interface RuntimeControlSnapshot {
 	state: RuntimeControlState;
 	epoch: number;

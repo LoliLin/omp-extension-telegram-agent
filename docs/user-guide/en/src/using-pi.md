@@ -17,7 +17,7 @@ Successful first setup attaches the global feed automatically. Later, choose the
 /tg detach             # Disconnect live IPC but retain the transcript
 ```
 
-The Telegram feed is one TUI-only Pi custom entry. Pi owns scrolling, resizing, selection, themes, image layout, and the footer. Displaying messages does not put them into the current Pi agent's provider context.
+The Telegram feed is one TUI-only Pi custom entry. Pi owns scrolling, resizing, selection, themes, image layout, and the footer; the extension adds only one feed-scope line above the editor. Displaying messages does not put them into the current Pi agent's provider context.
 
 Use Tab or Pi's selection menu after `/tg `. Bot arguments come from the currently validated config.
 
@@ -33,7 +33,7 @@ After attach, the Pi editor sends to Telegram by default. A filtered feed uses t
 /tg compose             # Restore the current feed scope
 ```
 
-The footer shows either `SEND AS ...` or `CHOOSE BOT ON SEND`. Canceling the selector restores the exact editor text and sends nothing. Compose intercepts only interactive editor input; RPC and extension sources continue to Pi. Attachments are blocked instead of silently sending only their caption.
+Pi's extension status shows either `SEND AS ...` or `CHOOSE BOT ON SEND`. Canceling the selector restores the exact editor text and sends nothing. Compose intercepts only interactive editor input; RPC and extension sources continue to Pi. Attachments are blocked instead of silently sending only their caption.
 
 An explicit failure restores the editor text. If the acknowledgement is lost or the connection drops during send, the outcome is unknown:
 
@@ -44,16 +44,14 @@ An explicit failure restores the editor text. If the acknowledgement is lost or 
 
 This boundary prevents a remote success plus local acknowledgement failure from creating duplicate messages.
 
-## Status and footer
+## Status
 
 ```text
-/tg panel              # Global Telegram telemetry
-/tg panel friend       # One-bot telemetry
-/tg panel off          # Restore the current Pi session footer
+/tg status             # Global Telegram telemetry
 /tg status friend      # Lifetime + latest details
 ```
 
-Pi's native footer renders `↑/↓/R/W/CH/$/context/model`; `/tg status` expands the same latest and lifetime details. Both share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md) with Telegram `/status`: lifetime covers retained SQLite `llm_runs`, including compaction calls, while current context is `used/window/percent` from the latest main-conversation run rather than a historical prompt sum.
+Pi `/tg status` and Telegram `/status` share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md): lifetime covers retained SQLite `llm_runs`, including compaction calls, while current context is `used/window/percent` from the latest main-conversation run rather than a historical prompt sum. Pi's native footer remains dedicated to the current operator session.
 
 ## Local events, streams, and media
 

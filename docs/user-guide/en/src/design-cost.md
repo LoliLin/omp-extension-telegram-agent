@@ -1,6 +1,6 @@
 # Cost design overview
 
-The project promises no fixed savings percentage. Provider pricing, group activity, persona length, and model cache behavior all vary. Measure your deployment through Pi's footer, `/tg status`, and retained SQLite telemetry.
+The project promises no fixed savings percentage. Provider pricing, group activity, persona length, and model cache behavior all vary. Measure your deployment through `/tg status` and retained SQLite telemetry.
 
 “Minimal” means fewer mechanisms, not fewer safeguards: minimize state, interfaces, network requests, and provider-visible bytes while preserving transactions, timeouts, redaction, tests, and observability. The seven mechanisms below are the current expression of that philosophy, not a roadmap for a general platform.
 
@@ -44,9 +44,9 @@ Deterministic code handles the untrusted-content boundary, URL safety, and log r
 
 ## 7. UI and telemetry use side channels
 
-The Pi-native feed, assistant partials, footer, `/tg status`, and Telegram controls use local IPC, SQLite, and the deterministic control plane. They remain outside personas and main provider context.
+The Pi-native feed, assistant partials, feed-status widget, `/tg status`, and Telegram controls use local IPC, SQLite, and the deterministic control plane. They remain outside personas and main provider context.
 
-Opening Pi, scrolling history, changing a panel, or viewing usage therefore does not create a chat-model call. See the [Pi-native transcript architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md) and [Cache engineering](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md).
+Opening Pi, scrolling history, or viewing usage therefore does not create a chat-model call. See the [Pi-native transcript architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md) and [Cache engineering](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md).
 
 ## Evaluate your deployment
 

@@ -86,7 +86,7 @@
 
 - 每次 provider response 记录 usage/cost/latency/epoch，以及 provider/api、session id hash、cache retention、system/tools/messages/full payload HMAC 与首次 divergence 位置。
 - 同时记录 trigger message、public send count、vision calls、tool follow-up rounds、input event 数、保守 token estimate 与 rows scanned。
-- footer/status 的 lifetime totals 聚合**当前保留行**（含 compaction）；current context 只取最新 `compaction = 0` 主对话 run，不累计 occupancy。字段和公式以 `docs/telemetry.md` 为准。
+- status 的 lifetime totals 聚合**当前保留行**（含 compaction）；current context 只取最新 `compaction = 0` 主对话 run，不累计 occupancy。字段和公式以 `docs/telemetry.md` 为准。
 
 ## 其他表
 

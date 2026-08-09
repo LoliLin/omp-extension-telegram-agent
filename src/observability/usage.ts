@@ -24,7 +24,7 @@ export function summarizeUsageContext(last: UsageRun | null, contextWindow: numb
 	};
 }
 
-/** Shared derived values for Pi footer, Pi status and Telegram status. */
+/** Shared derived values for Pi and Telegram status. */
 export function summarizeBotUsage(stats: BotStats, contextWindow: number): BotUsageSummary {
 	const cacheWrite = stats.cacheWrite ?? 0;
 	const cacheDenominator = stats.cacheMiss + stats.cacheRead + cacheWrite;

@@ -21,7 +21,7 @@
 - `db.test.ts` — SQLite migration：旧库迁移幂等且保留历史 telemetry。
 - `media.test.ts` — 跨bot Telegram media source配对、static/animated/video sticker metadata与原始file_id发送、TGS不进入vision、图片/视频vision singleflight/persistent cache、缺FFmpeg时下载前no-op与operator建议、跨bot全视频流水线并发门、固定代表帧、multi-image单调用、部署路径迁移、static sticker展示缓存、compaction后跨bot引用保护/失败重试/启动不复活回收文件，以及Pi attach filter握手、activity单卡/原生thinking/完整正文、视觉描述乱序合并与卡片位置。
 - `telegram-control.test.ts` — `/status` 的 InputRichMessage Markdown、统计数字千位分隔与缓存命中率、独立 plain projection、create→canonical persistence，以及仅在确定性rich拒绝时单次fallback的exactly-once边界。
-- `telemetry.test.ts` — footer、Pi/Telegram status共享读模型：latest排除compaction、lifetime/live totals包含compaction、runtime snapshot、统一字段顺序、context/window与`CH = R/(↑+R+W)`派生口径，并守卫reasoning与video transcoder debug finding。
+- `telemetry.test.ts` — Pi/Telegram status共享读模型：latest排除compaction、lifetime/live totals包含compaction、runtime snapshot、统一字段顺序、context/window与`CH = R/(↑+R+W)`派生口径，并守卫reasoning与video transcoder debug finding。
 
 ## 测试选择规则
 
