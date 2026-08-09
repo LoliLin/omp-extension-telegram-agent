@@ -20,7 +20,7 @@
 - `search.test.ts` — TinyFish search/fetch 契约：参数边界、SSRF prefilter（public IP 表）、untrusted boundary、telemetry 脱敏；只用本地 Bun server。
 - `db.test.ts` — SQLite migration：旧库迁移幂等且保留历史 telemetry。
 - `media.test.ts` — 跨bot Telegram media source配对、共享下载与vision singleflight/persistent cache、部署路径迁移、bot自发sticker展示缓存，以及Pi attach filter握手、activity单卡/原生thinking/完整正文、视觉描述乱序合并与卡片位置。
-- `telegram-control.test.ts` — `/status` 的 InputRichMessage Markdown、独立 plain projection、create→canonical persistence，以及仅在确定性rich拒绝时单次fallback的exactly-once边界。
+- `telegram-control.test.ts` — `/status` 的 InputRichMessage Markdown、统计数字千位分隔与缓存命中率、独立 plain projection、create→canonical persistence，以及仅在确定性rich拒绝时单次fallback的exactly-once边界。
 
 ## 测试选择规则
 

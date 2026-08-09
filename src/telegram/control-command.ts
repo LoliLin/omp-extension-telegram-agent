@@ -11,6 +11,11 @@ export const CONTROL_REPLY_EVENT = "telegram_control_reply";
 
 const MAX_REPLY_CHARS = 3500;
 const MAX_LABEL_CHARS = 64;
+const STATUS_INTEGER_FORMAT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const STATUS_COST_FORMAT = new Intl.NumberFormat("en-US", {
+	minimumFractionDigits: 4,
+	maximumFractionDigits: 4,
+});
 
 export interface ControlBotIdentity {
 	id: string;
@@ -65,6 +70,17 @@ interface ControlExecutionResult {
 	text: string;
 	richText?: string;
 	outcome: string;
+}
+
+interface StatusAggregate {
+	runs: number;
+	context_tokens: number;
+	output_tokens: number;
+	reasoning_tokens: number;
+	cache_read: number;
+	cache_write: number;
+	cache_miss: number;
+	cost: number;
 }
 
 /**
@@ -274,26 +290,18 @@ export class TelegramControlCommandService {
 					        COALESCE(SUM(cost), 0) cost
 					   FROM llm_runs WHERE bot_id = ?`,
 				)
-				.get(bot.id) as {
-				runs: number;
-				context_tokens: number;
-				output_tokens: number;
-				reasoning_tokens: number;
-				cache_read: number;
-				cache_write: number;
-				cache_miss: number;
-				cost: number;
-			};
+				.get(bot.id) as StatusAggregate;
+			const hitRate = cacheHitRate(aggregate);
 			if (lines.length > 0) lines.push("");
 			lines.push(
 				`${bounded(bot.id)} · ${bounded(bot.name)} · ${snapshot?.state ?? "unavailable"}`,
-				`epoch=${snapshot?.epoch ?? "-"} model=${bounded(snapshot?.model ?? bot.model)}`,
-				`routing_p=${bot.routingP} cooldown_ms=${bot.samplingCooldownMs}`,
-				`runs=${aggregate.runs} context=${aggregate.context_tokens} output=${aggregate.output_tokens} reasoning=${aggregate.reasoning_tokens}`,
-				`cache_read=${aggregate.cache_read} cache_write=${aggregate.cache_write} cache_miss=${aggregate.cache_miss} cost=$${aggregate.cost.toFixed(4)}`,
+				`epoch=${snapshot ? formatStatusInteger(snapshot.epoch) : "-"} model=${bounded(snapshot?.model ?? bot.model)}`,
+				`routing_p=${bot.routingP} cooldown_ms=${formatStatusInteger(bot.samplingCooldownMs)}`,
+				`runs=${formatStatusInteger(aggregate.runs)} context=${formatStatusInteger(aggregate.context_tokens)} output=${formatStatusInteger(aggregate.output_tokens)} reasoning=${formatStatusInteger(aggregate.reasoning_tokens)}`,
+				`cache_hit_rate=${hitRate} cache_read=${formatStatusInteger(aggregate.cache_read)} cache_write=${formatStatusInteger(aggregate.cache_write)} cache_miss=${formatStatusInteger(aggregate.cache_miss)} cost=$${formatStatusCost(aggregate.cost)}`,
 			);
 			if (snapshot?.lastCompact)
-				lines.push(`last_compact=${snapshot.lastCompact.outcome} at=${snapshot.lastCompact.at}`);
+				lines.push(`last_compact=${snapshot.lastCompact.outcome} at=${formatStatusInteger(snapshot.lastCompact.at)}`);
 			richSections.push(statusRichSection(bot, snapshot, aggregate));
 		}
 		return {
@@ -452,6 +460,20 @@ function escapeRichMarkdown(value: string): string {
 	return bounded(value).replace(/[\\`*_[\]{}()#+\-.!|>]/g, "\\$&");
 }
 
+function formatStatusInteger(value: number): string {
+	return STATUS_INTEGER_FORMAT.format(value);
+}
+
+function formatStatusCost(value: number): string {
+	return STATUS_COST_FORMAT.format(value);
+}
+
+/** Project telemetry defines cache hit ratio as read / (read + miss); writes stay separate. */
+function cacheHitRate(aggregate: Pick<StatusAggregate, "cache_read" | "cache_miss">): string {
+	const eligible = aggregate.cache_read + aggregate.cache_miss;
+	return eligible > 0 ? `${((aggregate.cache_read / eligible) * 100).toFixed(1)}%` : "—";
+}
+
 function statusIcon(state: RuntimeControlSnapshot["state"] | "unavailable"): string {
 	if (state === "idle") return "🟢";
 	if (state === "cooldown") return "🟡";
@@ -471,29 +493,21 @@ function statusLabel(state: RuntimeControlSnapshot["state"] | "unavailable"): st
 function statusRichSection(
 	bot: BotConfig,
 	snapshot: RuntimeControlSnapshot | undefined,
-	aggregate: {
-		runs: number;
-		context_tokens: number;
-		output_tokens: number;
-		reasoning_tokens: number;
-		cache_read: number;
-		cache_write: number;
-		cache_miss: number;
-		cost: number;
-	},
+	aggregate: StatusAggregate,
 ): string {
 	const state = snapshot?.state ?? "unavailable";
+	const hitRate = cacheHitRate(aggregate);
 	const compact = snapshot?.lastCompact
 		? `${escapeRichMarkdown(snapshot.lastCompact.outcome)} · ${new Date(snapshot.lastCompact.at).toISOString()}`
 		: "暂无";
 	return [
 		`## ${escapeRichMarkdown(bot.name)} · ${escapeRichMarkdown(bot.id)}`,
 		`- **状态**：${statusIcon(state)} ${statusLabel(state)}`,
-		`- **上下文**：epoch ${snapshot?.epoch ?? "-"} · ${escapeRichMarkdown(snapshot?.model ?? bot.model)}`,
-		`- **路由**：routing ${bot.routingP} · cooldown ${bot.samplingCooldownMs} ms`,
-		`- **累计**：${aggregate.runs} runs · ${aggregate.context_tokens} context · ${aggregate.output_tokens} output · ${aggregate.reasoning_tokens} reasoning`,
-		`- **缓存**：${aggregate.cache_read} read · ${aggregate.cache_write} write · ${aggregate.cache_miss} miss`,
-		`- **费用**：$${aggregate.cost.toFixed(4)}`,
+		`- **上下文**：epoch ${snapshot ? formatStatusInteger(snapshot.epoch) : "-"} · ${escapeRichMarkdown(snapshot?.model ?? bot.model)}`,
+		`- **路由**：routing ${bot.routingP} · cooldown ${formatStatusInteger(bot.samplingCooldownMs)} ms`,
+		`- **累计**：${formatStatusInteger(aggregate.runs)} runs · ${formatStatusInteger(aggregate.context_tokens)} context · ${formatStatusInteger(aggregate.output_tokens)} output · ${formatStatusInteger(aggregate.reasoning_tokens)} reasoning`,
+		`- **缓存**：命中率 ${hitRate} · ${formatStatusInteger(aggregate.cache_read)} read · ${formatStatusInteger(aggregate.cache_write)} write · ${formatStatusInteger(aggregate.cache_miss)} miss`,
+		`- **费用**：$${formatStatusCost(aggregate.cost)}`,
 		`- **最近压缩**：${compact}`,
 	].join("\n");
 }

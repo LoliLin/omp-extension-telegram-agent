@@ -43,7 +43,7 @@ bun run restart
 
 公开只读命令：`/help`、`/status`。
 
-`/status` 使用 Telegram 富消息按 bot 展示状态、模型/epoch、路由、缓存、token、费用与最近一次 compact。若 Telegram 在创建消息前明确拒绝富消息方法或格式，daemon 会改发一次独立生成的纯文本版本；超时、限流和服务端错误等结果不确定时不会重发，以免重复回复。
+`/status` 使用 Telegram 富消息按 bot 展示状态、模型/epoch、路由、缓存命中率、token、费用与最近一次 compact；统计数字使用千位分隔。缓存命中率按 `read / (read + miss)` 计算，没有缓存样本时显示 `—`。若 Telegram 在创建消息前明确拒绝富消息方法或格式，daemon 会改发一次独立生成的纯文本版本；超时、限流和服务端错误等结果不确定时不会重发，以免重复回复。
 
 `telegram_admins` allowlist 才能运行：
 

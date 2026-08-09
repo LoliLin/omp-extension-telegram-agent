@@ -94,6 +94,7 @@ describe("Telegram rich control status", () => {
 			tools: { send: true, search: false, runJs: false },
 			stickerSets: [],
 		} satisfies BotConfig;
+		const emptyBot = { ...bot, id: "B", name: "Bot B", token: "test-b" } satisfies BotConfig;
 		db.query(
 			`INSERT INTO llm_runs
 			 (bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
@@ -102,7 +103,7 @@ describe("Telegram rich control status", () => {
 		).run();
 		const service = new TelegramControlCommandService(
 			db,
-			[bot],
+			[bot, emptyBot],
 			"/tmp",
 			new Map([
 				[
@@ -126,9 +127,18 @@ describe("Telegram rich control status", () => {
 
 		expect(result.richText).toContain("# Telegram Agent 状态");
 		expect(result.richText).toContain("Bot \\*A\\*");
+		expect(result.richText).toContain("epoch 3");
+		expect(result.richText).toContain("cooldown 2,000 ms");
+		expect(result.richText).toContain("1,000 context");
+		expect(result.richText).toContain("命中率 73.7%");
+		expect(result.richText).toContain("命中率 —");
 		expect(result.richText).toContain("$0.1250");
 		expect(result.richText!.length).toBeLessThanOrEqual(3500);
 		expect(result.text).toContain("Bot *A*");
+		expect(result.text).toContain("cooldown_ms=2,000");
+		expect(result.text).toContain("context=1,000");
+		expect(result.text).toContain("cache_hit_rate=73.7%");
+		expect(result.text).toContain("cache_hit_rate=—");
 		expect(result.text).not.toBe(result.richText);
 	});
 
