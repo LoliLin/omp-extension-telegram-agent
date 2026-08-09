@@ -26,6 +26,7 @@ import type { IngestResult } from "../telegram/ingest.ts";
 import { claimRoutingDecision, finishRoutingClaim } from "../db/routing-claims.ts";
 import { applyRetention } from "../db/retention.ts";
 import { log } from "../observability/log.ts";
+import { inspectVideoTranscoder } from "../media/video-frames.ts";
 
 const rootDir = process.cwd();
 const config = loadConfig(rootDir);
@@ -33,6 +34,14 @@ const config = loadConfig(rootDir);
 // session creation): a second `start` while we're still initializing must not race us
 // (REQ-OPS-0001 R4). Released on shutdown; stale pid files are taken over.
 const pidFd = acquirePidLock(config.dataDir);
+const videoTranscoder = inspectVideoTranscoder();
+if (config.vision?.enabled && (!videoTranscoder.ffmpeg || !videoTranscoder.ffprobe)) {
+	log.warn("media_transcoder", "tools_unavailable", {
+		ffmpeg: videoTranscoder.ffmpeg,
+		ffprobe: videoTranscoder.ffprobe,
+		category: "video_transcoder_unavailable",
+	});
+}
 const visualModel = config.vision?.enabled ? parsePiModelReference(config.auxiliaryVisualModel)! : null;
 const chatModels = config.bots.map((bot) => ({
 	provider: bot.provider,

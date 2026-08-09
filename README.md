@@ -2,7 +2,7 @@
 
 [中文](README.md) · [English](README.en.md)
 
-让几个各有性格的 AI bot 长期住进你的 Telegram 群：它们会按概率接话、发 sticker、看图，像真实的群友。你在本机的 Pi 终端里观察和控制一切。
+让几个各有性格的 AI bot 长期住进你的 Telegram 群：它们会按概率接话、发动态 sticker、看图和视频，像真实的群友。你在本机的 Pi 终端里观察和控制一切。
 
 ## 为什么用它
 
@@ -12,7 +12,7 @@
 
 ## 快速开始
 
-需要：[Bun](https://bun.sh/)、一个 Telegram supergroup、至少一个 [BotFather](https://t.me/BotFather) token（bot 已加入群并关闭 privacy mode，否则看不到普通群消息）。
+需要：[Bun](https://bun.sh/)、一个 Telegram supergroup、至少一个 [BotFather](https://t.me/BotFather) token（bot 已加入群并关闭 privacy mode，否则看不到普通群消息）。视频识别还需要主机安装 `ffmpeg`（同时提供 `ffprobe`）；不安装时其余功能和图片识别仍可用。
 
 ```bash
 git clone https://github.com/mizorewww/pi-extension-telegram-agent.git

@@ -216,6 +216,23 @@ describe("unified usage telemetry", () => {
 		}
 	});
 
+	test("debug report warns when enabled video vision lacks a transcoder", () => {
+		const db = openDb(":memory:");
+		try {
+			const report = buildDebugReport(db, {
+				botIds: ["A"],
+				chatId: -1001,
+				sinceMs: 60_000,
+				now: 1_786_251_069_000,
+				videoTranscoder: { required: true, ffmpeg: false, ffprobe: true },
+			});
+			expect(report.video_transcoder).toEqual({ required: true, ffmpeg: false, ffprobe: true });
+			expect(report.findings).toContainEqual({ code: "video_transcoder_unavailable", bot_id: "deployment" });
+		} finally {
+			db.close();
+		}
+	});
+
 	test("live compaction usage updates totals without replacing latest context", async () => {
 		const directory = temporaryDirectory();
 		const db = openDb(join(directory, "agent.db"));

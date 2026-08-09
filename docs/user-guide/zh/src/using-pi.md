@@ -59,9 +59,9 @@ Pi 原生 footer 显示 `↑/↓/R/W/CH/$/context/model`；`/tg status` 展开�
 
 - assistant thinking/text/tool partial 会在同一 Pi native card 原位更新，结束后由持久 LOCAL/Telegram event 接替；partial 不写 SQLite。
 - bot 没有调用 `send` 时的 local assistant text 只在 feed 可见，不会发群。
-- vision默认关闭。显式开启后，照片与sticker的视觉描述只在真实bot run需要时按deployment budget生成；UI本身不会额外触发vision provider。
+- vision默认关闭。显式开启后，照片、sticker和视频的视觉描述只在真实bot run需要时按deployment budget生成；视频以中点概率最高的固定正态分布抽最多3帧，并在一次vision调用中综合理解。UI本身不会额外触发provider。
 - 视觉描述属于共享群消息：全局与任一单bot feed都会把它显示在对应图片正下方；单bot filter只限制LOCAL事件与usage。
-- 用户和bot发出的photo/sticker共用同一本地媒体准备链路，并在同一种native card里渲染；inline image是否可见仍取决于Pi terminal capability，文字、media label和视觉描述保持可读fallback。
+- 用户和bot发出的static photo/sticker共用本地展示准备链路；video、animation、video note、video document与video sticker以媒体placeholder显示并可获得视觉描述。inline image是否可见仍取决于Pi terminal capability，文字、media label和视觉描述保持可读fallback。
 
 ## 网页搜索与链接读取
 

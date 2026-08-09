@@ -1,4 +1,4 @@
-// Lazy, persistent photo/sticker vision shared by every bot in one deployment.
+// Lazy, persistent photo/sticker/video vision shared by every bot in one deployment.
 // Provider execution uses the daemon's shared Pi ModelRuntime; this module never
 // starts another CLI or reads provider credential material.
 
@@ -15,12 +15,20 @@ import {
 } from "../agent/model-runtime.ts";
 import {
 	ensureLocalMedia,
+	isVideoMedia,
+	isVisionMedia,
 	staticMediaMimeForPath,
 	type LocalMediaFailure,
 	type MediaDownloadApi,
 } from "./local-cache.ts";
 import { appendMediaUpdateEvents } from "../db/message-events.ts";
 import { VisionBudgetExceededError, type VisionScheduler } from "./vision-scheduler.ts";
+import {
+	extractVideoFrames,
+	type VideoFrameInput,
+	type VideoFrameResult,
+	type VideoFrameOutcome,
+} from "./video-frames.ts";
 
 export { fileIdForBot } from "./local-cache.ts";
 
@@ -28,10 +36,14 @@ const PHOTO_PROMPT = `你在帮一个群聊 bot 理解图片。简短描述：�
 
 const STICKER_PROMPT = `你在帮一个群聊 bot 理解一张 sticker（聊天表情贴图）。把它理解为一种聊天表达，输出短描述：communicative intent（想表达什么）、emotion、intensity、gesture/画面要点、可见文字。一两句话，用中文，例如"得意的赞同，smug/amused，中等强度"。直接给描述不要客套。`;
 
+const VIDEO_PROMPT = `你在帮一个群聊 bot 理解一段视频。下面是按时间顺序、以视频中点为高概率区域抽取的代表帧。综合描述动作或变化、人物与物体、重要文字/OCR、对聊天有用的信息和不确定处。2-3 句话以内，用中文，直接给描述不要客套；不要把单帧猜测说成确定的完整情节。`;
+
+const VIDEO_STICKER_PROMPT = `你在帮一个群聊 bot 理解一个 video sticker。下面是按时间顺序抽取的代表帧。把它理解为聊天表达，概括动作变化、communicative intent、emotion、intensity、gesture/画面要点和可见文字。一两句话，用中文，直接给描述不要客套。`;
+
 export const VISION_TIMEOUT_MS = 90_000;
 export const VISION_MAX_OUTPUT_TOKENS = 256;
 
-export type VisionKind = "photo" | "sticker";
+export type VisionKind = "photo" | "sticker" | "video";
 export type VisionBytesBucket = "unavailable" | "lt_32_kib" | "32_128_kib" | "128_512_kib" | "gte_512_kib";
 export type VisionOutcome =
 	| "ok"
@@ -46,6 +58,7 @@ export type VisionOutcome =
 	| "download_oversize"
 	| "media_download_aborted"
 	| "budget_exceeded"
+	| VideoFrameOutcome
 	| PiProviderFailureCategory;
 
 export interface VisionTelemetry {
@@ -58,6 +71,8 @@ export interface VisionTelemetry {
 	reasoningTokens: number;
 	cost: number;
 	outcome: VisionOutcome;
+	frames?: number;
+	providerCalled?: boolean;
 }
 
 export interface VisionDescriptionResult {
@@ -65,10 +80,17 @@ export interface VisionDescriptionResult {
 	telemetry: VisionTelemetry;
 }
 
-export interface VisionDescribeInput {
-	kind: VisionKind;
+export interface VisionImageInput {
 	bytes: Uint8Array;
 	mimeType: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+	position?: number;
+}
+
+export interface VisionDescribeInput {
+	kind: VisionKind;
+	sourceBytes: number;
+	images: VisionImageInput[];
+	videoSticker?: boolean;
 }
 
 export interface VisionExecutor {
@@ -97,6 +119,8 @@ export interface EnsureVisionOptions {
 	botApis?: ReadonlyMap<string, MediaDownloadApi>;
 	chatId?: number;
 	foreground?: boolean;
+	/** Deterministic extraction seam; production uses ffprobe + ffmpeg. */
+	extractFrames?: (input: VideoFrameInput) => Promise<VideoFrameResult>;
 }
 
 interface PiVisionExecutorOptions {
@@ -138,6 +162,8 @@ function usageTelemetry(
 	latencyMs: number,
 	outcome: VisionOutcome,
 	message?: AssistantMessage,
+	frames?: number,
+	providerCalled = false,
 ): VisionTelemetry {
 	return {
 		kind,
@@ -149,6 +175,8 @@ function usageTelemetry(
 		reasoningTokens: boundedNumber(message?.usage.reasoning),
 		cost: boundedNumber(message?.usage.cost.total),
 		outcome,
+		...(frames == null ? {} : { frames }),
+		...(providerCalled ? { providerCalled: true } : {}),
 	};
 }
 
@@ -174,46 +202,87 @@ export function createPiVisionExecutor(
 		readinessFailure,
 		async describe(input): Promise<VisionDescriptionResult> {
 			const startedAt = monotonicNow();
-			const sourceBytes = input.bytes.byteLength;
+			const sourceBytes = input.sourceBytes;
 			if (readinessFailure) {
 				return {
 					text: null,
-					telemetry: usageTelemetry(input.kind, sourceBytes, null, monotonicNow() - startedAt, readinessFailure),
+					telemetry: usageTelemetry(
+						input.kind,
+						sourceBytes,
+						null,
+						monotonicNow() - startedAt,
+						readinessFailure,
+						undefined,
+						input.images.length,
+					),
 				};
 			}
 
-			let image: { data: string; mimeType: string } = {
-				data: Buffer.from(input.bytes).toString("base64"),
-				mimeType: input.mimeType,
-			};
-			let convertedBytes: number | null = null;
-			if (input.mimeType === "image/webp" || input.mimeType === "image/gif") {
-				try {
-					const converted = await convert(image.data, input.mimeType);
-					if (!converted) {
+			if (input.images.length === 0) {
+				return {
+					text: null,
+					telemetry: usageTelemetry(input.kind, sourceBytes, null, monotonicNow() - startedAt, "unsupported_format"),
+				};
+			}
+
+			const images: Array<{ data: string; mimeType: string; position?: number }> = [];
+			let convertedBytes = input.kind === "video" ? 0 : null;
+			for (const source of input.images) {
+				let image: { data: string; mimeType: string } = {
+					data: Buffer.from(source.bytes).toString("base64"),
+					mimeType: source.mimeType,
+				};
+				if (source.mimeType === "image/webp" || source.mimeType === "image/gif") {
+					try {
+						const converted = await convert(image.data, source.mimeType);
+						if (!converted) throw new Error("conversion failed");
+						image = converted;
+						convertedBytes = (convertedBytes ?? 0) + Buffer.from(converted.data, "base64").byteLength;
+					} catch {
 						return {
 							text: null,
-							telemetry: usageTelemetry(input.kind, sourceBytes, null, monotonicNow() - startedAt, "conversion_failed"),
+							telemetry: usageTelemetry(
+								input.kind,
+								sourceBytes,
+								convertedBytes,
+								monotonicNow() - startedAt,
+								"conversion_failed",
+								undefined,
+								input.images.length,
+							),
 						};
 					}
-					image = converted;
-					convertedBytes = Buffer.from(converted.data, "base64").byteLength;
-				} catch {
-					return {
-						text: null,
-						telemetry: usageTelemetry(input.kind, sourceBytes, null, monotonicNow() - startedAt, "conversion_failed"),
-					};
+				} else if (input.kind === "video") {
+					convertedBytes! += source.bytes.byteLength;
 				}
+				images.push({ ...image, ...(source.position == null ? {} : { position: source.position }) });
+			}
+
+			const prompt =
+				input.kind === "video"
+					? input.videoSticker
+						? VIDEO_STICKER_PROMPT
+						: VIDEO_PROMPT
+					: input.kind === "sticker"
+						? STICKER_PROMPT
+						: PHOTO_PROMPT;
+			const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
+				{ type: "text", text: prompt },
+			];
+			for (let index = 0; index < images.length; index++) {
+				const image = images[index]!;
+				if (input.kind === "video") {
+					const percent = Math.round((image.position ?? 0) * 100);
+					content.push({ type: "text", text: `Frame ${index + 1}/${images.length} · ${percent}%` });
+				}
+				content.push({ type: "image", data: image.data, mimeType: image.mimeType });
 			}
 
 			const context: Context = {
 				messages: [
 					{
 						role: "user",
-						content: [
-							{ type: "text", text: input.kind === "sticker" ? STICKER_PROMPT : PHOTO_PROMPT },
-							{ type: "image", data: image.data, mimeType: image.mimeType },
-						],
+						content,
 						timestamp: Date.now(),
 					},
 				],
@@ -237,6 +306,9 @@ export function createPiVisionExecutor(
 						convertedBytes,
 						monotonicNow() - startedAt,
 						classifyPiProviderFailure(error),
+						undefined,
+						input.images.length,
+						true,
 					),
 				};
 			}
@@ -252,6 +324,8 @@ export function createPiVisionExecutor(
 						monotonicNow() - startedAt,
 						category,
 						message,
+						input.images.length,
+						true,
 					),
 				};
 			}
@@ -273,6 +347,8 @@ export function createPiVisionExecutor(
 					monotonicNow() - startedAt,
 					outcome,
 					message,
+					input.images.length,
+					true,
 				),
 			};
 		},
@@ -319,7 +395,7 @@ function emitTelemetry(options: EnsureVisionOptions, telemetry: VisionTelemetry)
 	}
 }
 
-export function visionMimeForPath(filePath: string): VisionDescribeInput["mimeType"] | null {
+export function visionMimeForPath(filePath: string): VisionImageInput["mimeType"] | null {
 	return staticMediaMimeForPath(filePath);
 }
 
@@ -338,12 +414,14 @@ async function ensureVisionInner(
 ): Promise<string | null> {
 	const monotonicNow = options.monotonicNow ?? (() => performance.now());
 	const startedAt = monotonicNow();
-	const media = db.query("SELECT kind, vision FROM media WHERE file_unique_id = ?").get(fileUniqueId) as {
+	const media = db.query("SELECT kind, mime, vision FROM media WHERE file_unique_id = ?").get(fileUniqueId) as {
 		kind: string;
+		mime: string | null;
 		vision: string | null;
 	} | null;
-	if (!media || (media.kind !== "photo" && media.kind !== "sticker")) return null;
-	const kind = media.kind as VisionKind;
+	if (!media || !isVisionMedia(media.kind, media.mime)) return null;
+	let video = isVideoMedia(media.kind, media.mime);
+	let kind: VisionKind = video ? "video" : (media.kind as "photo" | "sticker");
 	if (media.vision) {
 		const cached = JSON.parse(media.vision) as { text?: string | null };
 		return cached.text?.trim() || null;
@@ -363,7 +441,7 @@ async function ensureVisionInner(
 		emitTelemetry(options, emptyTelemetry(kind, outcome, monotonicNow() - startedAt));
 		return null;
 	}
-	if (local.kind !== kind) {
+	if (local.kind !== media.kind) {
 		db.query("UPDATE media SET vision = ? WHERE file_unique_id = ?").run(
 			JSON.stringify({ model: "none", kind, text: null, outcome: "media_unavailable", at: Date.now() }),
 			fileUniqueId,
@@ -371,10 +449,50 @@ async function ensureVisionInner(
 		emitTelemetry(options, emptyTelemetry(kind, "media_unavailable", monotonicNow() - startedAt));
 		return null;
 	}
+	if (!video && media.kind === "sticker" && local.mimeType.startsWith("video/")) {
+		video = true;
+		kind = "video";
+	}
+
+	let images: VisionImageInput[];
+	if (video) {
+		const prepared = await (options.extractFrames ?? extractVideoFrames)({
+			fileUniqueId,
+			sourcePath: local.sourcePath,
+			sourceBytes: local.bytes,
+			sourceExtension: local.sourceExtension,
+		});
+		if (!prepared.ok) {
+			if (prepared.outcome !== "video_transcoder_unavailable") {
+				db.query("UPDATE media SET vision = ? WHERE file_unique_id = ?").run(
+					JSON.stringify({ model: "none", kind, text: null, outcome: prepared.outcome, at: Date.now() }),
+					fileUniqueId,
+				);
+			}
+			emitTelemetry(
+				options,
+				usageTelemetry(kind, local.bytes.byteLength, null, monotonicNow() - startedAt, prepared.outcome),
+			);
+			return null;
+		}
+		images = prepared.frames;
+	} else {
+		if (!staticMediaMimeForPath(`source.${local.sourceExtension}`)) {
+			emitTelemetry(options, emptyTelemetry(kind, "unsupported_format", monotonicNow() - startedAt));
+			return null;
+		}
+		images = [{ bytes: local.bytes, mimeType: local.mimeType as VisionImageInput["mimeType"] }];
+	}
 
 	let result: VisionDescriptionResult;
 	try {
-		const describe = () => executor.describe({ kind, bytes: local.bytes, mimeType: local.mimeType });
+		const describe = () =>
+			executor.describe({
+				kind,
+				sourceBytes: local.bytes.byteLength,
+				images,
+				...(video && media.kind === "sticker" ? { videoSticker: true } : {}),
+			});
 		result = options.scheduler
 			? await options.scheduler.schedule(options.chatId ?? 0, options.foreground ?? false, describe)
 			: await describe();

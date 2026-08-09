@@ -12,6 +12,7 @@ import { readStructuredLogTail } from "../src/observability/log.ts";
 import { inspectProviderContext } from "../src/observability/provider-context.ts";
 import { inspectModelReasoning } from "../src/agent/model-runtime.ts";
 import { parsePiModelReference } from "../src/agent/model-ref.ts";
+import { inspectVideoTranscoder } from "../src/media/video-frames.ts";
 
 function usage(): string {
 	return "Usage: bun run debug -- [--bot <id>] [--since <30s|15m|2h|7d>] [--show-provider-content]\n";
@@ -119,6 +120,7 @@ export async function main(args = process.argv.slice(2), rootDir = process.cwd()
 			logs: readStructuredLogTail(join(config.dataDir, "daemon.log")),
 			daemon: { pid, alive: pid != null && pidAlive(pid), socket: existsSync(join(config.dataDir, "daemon.sock")) },
 			modelReasoning,
+			videoTranscoder: { required: config.visionEnabled, ...inspectVideoTranscoder() },
 		});
 		const providerContexts = Object.fromEntries(
 			botIds.map((id) => {

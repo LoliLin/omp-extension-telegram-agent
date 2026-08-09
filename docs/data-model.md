@@ -72,7 +72,7 @@
 
 - `media.file_unique_id` 是共享身份；`media_file_ids(bot_id,file_id,file_unique_id)` 是 bot-specific 可发送能力。
 - short id 由 rowid 单调分配；不能用 `COUNT+1`。
-- vision 按 identity 持久化并跨 bot 复用。Sticker 的 `mime` 规范化为 `image/webp`、`application/x-tgsticker` 或 `video/webm`，供 catalog 标注格式；可发送性仍以 bot-specific mapping 为准。完整静态文件先写 0600 临时文件，再同目录 rename；图片 bytes 与绝对 path 不进 SQLite，`local_path`只保存当前`data/media`内的 cache-relative basename。daemon 启动时会按 basename 迁移旧绝对值，目标不存在则清空并允许有界后台队列重新获取。
+- vision 按 identity 持久化并跨 bot 复用。Sticker 的 `mime` 规范化为 `image/webp`、`application/x-tgsticker` 或 `video/webm`，供 catalog 标注格式；可发送性仍以 bot-specific mapping 为准。≤1 MiB static display image与≤20 MiB video source先写0600临时文件再同目录rename；bytes与绝对path不进SQLite，`local_path`只保存当前`data/media`内的cache-relative basename。daemon启动按basename迁移旧绝对值，缺失或不支持的目标清空；video path只供本地抽帧，不进入IPC。
 
 ### agent_events
 

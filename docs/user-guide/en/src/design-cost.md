@@ -30,7 +30,7 @@ Compaction uses a configured cheap task model with provider cache retention disa
 
 ## 5. Media vision runs lazily and reuses results
 
-Photos and stickers from users and bots enter canonical SQLite first and share one bounded display cache. SQLite stores only a cache-relative filename, so moving a deployment does not pin TUI rendering to the previous absolute path. Vision is disabled by default. When explicitly enabled, a deployment scheduler bounds foreground media, concurrency, per-chat hourly calls, and daily calls. Results are persisted by media identity, reused across bots, and appended as immutable media-update events instead of rewriting old context. UI updates consume cached results without adding a model call.
+Static photos and stickers from users and bots enter canonical SQLite first and share one bounded display cache; video sources are prepared lazily only for a real vision turn. SQLite stores only a cache-relative filename, so moving a deployment does not pin TUI rendering to the previous absolute path. Vision is disabled by default. When explicitly enabled, a deployment scheduler bounds foreground media, concurrency, per-chat hourly calls, and daily calls; each video contributes at most three frames but only one provider call. Results are persisted by media identity, reused across bots, and appended as immutable media-update events instead of rewriting old context. UI updates consume cached results without adding a model call.
 
 See the [Vision architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md).
 

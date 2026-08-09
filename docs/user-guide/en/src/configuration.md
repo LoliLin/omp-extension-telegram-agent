@@ -89,14 +89,14 @@ These controls are bounded by default:
 
 - `max_suffix_tokens: 12000` and `max_message_tokens: 4096` cap new provider-visible Telegram context;
 - `cache_retention: "short"` controls the main chat request, while compaction always uses its configured cheap task model with provider cache retention disabled;
-- `vision.enabled` is false by default. When enabled, foreground media, concurrency, hourly per-chat calls, and deployment daily calls each have an explicit limit;
+- `vision.enabled` is false by default. When enabled, foreground media, concurrency, hourly per-chat calls, and deployment daily calls each have an explicit limit. Video understanding also requires `ffmpeg` and `ffprobe` on the daemon host PATH; missing tools degrade video only, not images;
 - telemetry, raw updates, and immutable message events default to 90, 30, and 365 days. Old message events are pruned only after every known bot cursor consumed them and no direct-reply obligation references them.
 
 Changing model, reasoning, cache policy, persona, tools, serializer, or another cache-visible field produces a new context fingerprint. The next controlled restart preserves the old session file but starts a new session before restoration, so stale context is never resumed under a new identity.
 
 `tools` controls:
 
-- `send`: Markdown text converted locally to Telegram message entities, plus sticker delivery; ordinary prose keeps ordinary weight;
+- `send`: Markdown text converted locally to Telegram message entities, plus static, animated, and video sticker delivery; ordinary prose keeps ordinary weight;
 - `search`: enables bounded TinyFish search and single-page retrieval through one tool; it requires the TinyFish key selected by `tinyfish_key_env` in `.env`;
 - `run_js`: constrained deterministic computation; it is off by default because model-provided JavaScript still has a residual sandbox risk.
 

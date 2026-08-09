@@ -19,7 +19,7 @@ bun run debug -- --bot A --since 2h
 bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整当前provider上下文
 ```
 
-命令只读取deployment配置、本机Pi模型目录、readonly SQLite/Pi session与最后64 KiB结构化日志，不访问网络、不写DB、不输出credential。输出JSON包含daemon存活/socket状态、每bot cursor/high-water/reply obligations、最近claims/runs/safe events/logs、`findings`与`provider_contexts`。模型能力诊断只输出provider/model与requested/effective/supported reasoning；`model_reasoning_available`明确标记本次是否成功读取模型目录，失败时业务报告仍然生成且`model_reasoning`为`null`。
+命令只读取deployment配置、本机Pi模型目录、readonly SQLite/Pi session、PATH工具可用性与最后64 KiB结构化日志，不访问网络、不写DB、不输出credential。输出JSON包含daemon存活/socket状态、每bot cursor/high-water/reply obligations、最近claims/runs/safe events/logs、`findings`、`video_transcoder`与`provider_contexts`。模型能力诊断只输出provider/model与requested/effective/supported reasoning；`model_reasoning_available`明确标记本次是否成功读取模型目录，失败时业务报告仍然生成且`model_reasoning`为`null`。
 
 `provider_contexts`默认列出完整的模型输入结构：provider/model/api/cache元数据、system长度/hash、完整tool description/schema，以及每条消息的role、content types/长度/hash、tool name/call id/error；消息与system正文省略。这样可以机械回答“search schema是否注册”“TinyFish toolResult是否与call id配对”“follow-up前结果是否仍在active branch”。`--show-provider-content`必须同时指定单个`--bot`，才把完整system prompt和当前compaction-aware消息投影写到stdout；其中可能含persona、群正文、tool args/result与历史thinking，不得贴issue、重定向到长期文件或纳入自动日志。它是当前session的pre-adapter重建，不伪称历史最后一次HTTP request；历史精确边界仍以`llm_runs`哈希为准。
 
@@ -28,6 +28,7 @@ bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整�
 | code | 已证明的事实 | 下一步 |
 |---|---|---|
 | `unsupported_reasoning_effort` | 配置requested档位不在该模型supported levels中，Pi会静默clamp为effective档位 | 将main/compaction/vision配置改为supported值；daemon启动也会fail fast |
+| `video_transcoder_unavailable` | vision已启用，但PATH缺少`ffmpeg`或`ffprobe` | 安装FFmpeg发行包并restart；图片vision不受影响 |
 | `cursor_backlog` | 该bot尚未消费全部immutable events | 看最近claim与runtime state；没有trigger时可正常 |
 | `pending_reply_obligation` | direct reply尚未被structured commit确认交付 | 查flush/provider失败；restart后应自动recover |
 | `route_without_run` | started claim超过120秒仍无匹配`llm_runs.trigger_message_id` | 查`agent_runtime.flush_failed`与provider readiness |
@@ -52,13 +53,14 @@ bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整�
 
 不要用“看到模型有输出”推断公开发送，也不要用“群里没消息”推断provider没运行。
 
-### 图片理解证据梯
+### 图片与视频理解证据梯
 
 1. canonical `messages.media`与`media_file_ids`证明哪个bot拥有可用`file_id`；`file_id`只能交给同一bot的Bot API。
-2. `media.local_path`与`media_cache_ready/skip/error`证明本地媒体准备，不证明vision provider已经运行。
-3. `agent_events.kind=vision`的固定`outcome`证明foreground识别结果；跨bot路由时应使用任一已配置且有mapping的接收bot，`file_id_unavailable`只表示所有可用source均缺失。
-4. 非空`media.vision`与对应`message_events.kind=media_update`证明描述已持久化并进入append-only provider队列；主模型选择别的话题不等于没有识图。
-5. `/tg attach`的snapshot/history直接读`media.vision`，live路径读`vision_update`；全局、A、B等filter都应显示同一群消息描述，filter只限制LOCAL/usage。
+2. `media.local_path`与`media_cache_ready/skip/error`证明本地媒体准备，不证明vision provider已经运行。视频path只是本地source，不会进入IPC。
+3. 视频先检查`video_transcoder`；`video_transcoder_unavailable`可在安装后重试，`video_probe_failed`/`video_frame_extraction_failed`证明失败发生在provider前。不得记录命令stderr或path。
+4. `agent_events.kind=vision`的固定`outcome`、`frames`与`providerCalled`证明foreground识别结果；跨bot路由时应使用任一已配置且有mapping的接收bot，`file_id_unavailable`只表示所有可用source均缺失。
+5. 非空`media.vision`与对应`message_events.kind=media_update`证明描述已持久化并进入append-only provider队列；主模型选择别的话题不等于没有识图。
+6. `/tg attach`的snapshot/history直接读`media.vision`，live路径读`vision_update`；全局、A、B等filter都应显示同一群消息描述，filter只限制LOCAL/usage。
 
 不得把私人图片、OCR正文、`file_unique_id`、`file_id`或本地path复制进daemon日志；内容取证只在明确授权的本机SQLite/provider-context检查中短暂查看。
 

@@ -26,7 +26,8 @@ bun run stop                       # SIGTERM 优雅停止
 ```
 
 - 配置了sticker sets时，首次Telegram catalog拉取可能延长启动；以后复用本地DB。vision默认关闭，只有显式启用（或legacy配置明确写辅助视觉模型）才会产生视觉工作。`start`会在60秒内等socket；超时但child仍存活时只报告starting，并提示用`status` / `daemon.log`确认。
-- daemon启动会把历史`media.local_path`按basename迁到当前deployment的`data/media`；存在的用户/bot photo与sticker立即恢复可显示状态，缺失项清空后进入有界后台回填。该过程不调用vision或聊天provider。
+- daemon启动会把历史`media.local_path`按basename迁到当前deployment的`data/media`；static photo/sticker恢复可显示状态，video source恢复为lazy抽帧输入，缺失项清空。该过程不调用vision或聊天provider。
+- 视频识别要求PATH中同时存在`ffmpeg`与`ffprobe`。macOS可用`brew install ffmpeg`，Arch Linux可用`sudo pacman -S ffmpeg`，Debian/Ubuntu可用`sudo apt install ffmpeg`。缺失时daemon仍启动，static image vision不受影响；`bun run debug`会输出`video_transcoder_unavailable`。
 - 每 bot 启动日志的 `sticker-catalog` 行会报告 `catalog/sendable/missing_file_id`；`missing_file_id>0` 的条目不会暴露给该 bot。检查 set 名/token 权限或 Telegram `getStickerSet` 失败，不要复制另一个 bot 的 file_id。
 - 配置错误会在启动期逐条列出（stderr / daemon.log），不会静默跑坏配置。
 - 双 start 竞态由排他pid锁挡住；并发restart由`data/daemon.control.lock`串行，第二个立即报`restart already in progress`。
@@ -73,7 +74,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - attach 会自动进入 Telegram scope compose：单 bot filter或全局唯一bot直接发送；全局多bot每次提交复用Pi原生`select`选择身份。footer显示`TELEGRAM · SEND AS <id/name>`或`TELEGRAM · CHOOSE BOT ON SEND`。`compose <bot-id>`固定身份，`compose off`把输入交还Pi，bare `compose`恢复scope。
 - compose 仅支持纯文本。附件会被阻止；明确失败会把原文放回 editor。若 ACK 超时或 daemon 在发送中断线，结果可能未知：先检查群聊，不要直接重发；插件不会自动重试，并会安全关闭 compose。
 - selector取消会恢复原文且不发送；选择/发送期间拒绝第二次提交。RPC/extension source不受compose影响。attach切换会建立新scope；detach、daemon断线、restart/config变更或Pi退出会关闭compose并让迟到选择失效；bot token始终只在daemon内。
-- 显式启用vision后，photo/sticker被有界lazy流程识别时，同一native media card会在下方原位出现`视觉理解 · ...`；无需重新attach。UI本身不调用模型；vision关闭、未选中或超预算时仍保留图片/fallback。
+- 显式启用vision后，photo/sticker/video被有界lazy流程识别时，同一native media card或媒体placeholder会在下方原位出现`视觉理解 · ...`；无需重新attach。视频最多抽3帧并合成一次vision调用。UI本身不调用模型；vision关闭、未选中或超预算时仍保留图片/fallback。
 - attach自动让Pi自己的`FooterComponent`显示Telegram `↑/↓/R/W/CH/$/context/model`。token/cost是当前SQLite retention窗口中`llm_runs`首条保留记录以来的lifetime累计，跨daemon/Pi restart与epoch但会受默认90天清理影响；context是最新run当前占用而非历史求和。`W`仅在provider报告非零cache write时显示。
 - `/tg panel` 可单独切换范围，`panel off` 恢复 operator Pi session usage。`/tg status [bot]` 另列 runs/since/epoch、latest cache/output/reasoning/latency/cost 与 lifetime totals/平均 latency。
 - 在editor输入`/tg `后按Tab/选择使用Pi原生分级菜单；`attach/status/compose/panel`的下一层会从配置动态列出bot id/name，`compose/panel`另有`off`，bare `compose`也可直接执行。
@@ -101,7 +102,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 1. `.env` 加一行 token：`my_bot_token: REPLACE_WITH_BOTFATHER_TOKEN`
 2. `telegram.config.ts` 的 `bots` 数组加一项（id 唯一、`token_env` 指向新 key、persona 文件存在）
 3. 重启 daemon → 启动日志会列出新 bot；Pi 中 `/tg attach <id>` 可单独观察
-4. 需要 sticker 就加`sticker_sets`；启动时同步的固定目录以 identity-only 形式（set + emoji + short_id）固化进该 bot 的 system prompt，模型按 short_id 直接发送，不做每轮检索
+4. 需要 sticker 就加`sticker_sets`；启动时同步的固定目录以identity + format形式（set + static/animated/video + emoji + short_id）固化进该bot的system prompt，模型按short_id直接发送，不做每轮检索
 
 ## Opt-in 第三个 bot 真实 smoke
 

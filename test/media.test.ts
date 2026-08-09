@@ -3,7 +3,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createConnection, createServer } from "node:net";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Tui from "@earendil-works/pi-tui";
@@ -24,7 +24,13 @@ import {
 import { ensureLocalMedia, reconcileMediaCachePaths, type MediaDownloadApi } from "../src/media/local-cache.ts";
 import { MediaCacheQueue } from "../src/media/media-cache.ts";
 import { ensureStickerCatalog } from "../src/media/sticker-catalog.ts";
-import { ensureVision, type VisionExecutor } from "../src/media/vision.ts";
+import {
+	createPiVisionExecutor,
+	ensureVision,
+	type VisionDescribeInput,
+	type VisionExecutor,
+} from "../src/media/vision.ts";
+import { extractVideoFrames, sampleVideoFrameFractions, type VideoCommandRunner } from "../src/media/video-frames.ts";
 import { setLogSink } from "../src/observability/log.ts";
 import { readMediaImage, TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
 import { BotApi } from "../src/telegram/api.ts";
@@ -151,6 +157,13 @@ describe("cross-bot media acquisition", () => {
 			});
 		expect(telegramMessage({ is_animated: true }).media?.mime).toBe("application/x-tgsticker");
 		expect(telegramMessage({ is_video: true }).media?.mime).toBe("video/webm");
+		const note = normalizeMessage({
+			chat: { id: -1001 },
+			message_id: 2,
+			date: 1,
+			video_note: { file_id: "note-file", file_unique_id: "note-unique", mime_type: "video/mp4" },
+		});
+		expect(note.media).toMatchObject({ kind: "video_note", mime: "video/mp4" });
 	});
 
 	test("coalesces concurrent vision for two bots and reuses the persisted description", async () => {
@@ -253,12 +266,144 @@ describe("cross-bot media acquisition", () => {
 		}
 	});
 
+	test("coalesces video preparation across bots and sends three ordered frames in one vision call", async () => {
+		const directory = temporaryDirectory("tg-video-singleflight-");
+		const db = openDb(join(directory, "agent.db"));
+		const apiB: MediaDownloadApi = {
+			getFile: async (fileId) => {
+				expect(fileId).toBe("video-file-b");
+				return { file_path: "videos/clip.mp4" };
+			},
+			downloadFile: async () => new Uint8Array([0, 1, 2, 3]),
+		};
+		const apiA: MediaDownloadApi = {
+			getFile: async () => {
+				throw new Error("A has no mapping");
+			},
+			downloadFile: async () => new Uint8Array(),
+		};
+		const apis = new Map([
+			["A", apiA],
+			["B", apiB],
+		]);
+		let extractCalls = 0;
+		let describeCalls = 0;
+		const described: VisionDescribeInput[] = [];
+		const executor: VisionExecutor = {
+			modelRef: "test/vision:off",
+			provider: "test",
+			model: "vision",
+			readinessFailure: null,
+			describe: async (input) => {
+				describeCalls++;
+				described.push(input);
+				return {
+					text: "人物从左侧走到画面中央",
+					telemetry: {
+						kind: "video",
+						sourceBytesBucket: "lt_32_kib",
+						convertedBytesBucket: "lt_32_kib",
+						latencyMs: 1,
+						inputTokens: 1,
+						outputTokens: 1,
+						reasoningTokens: 0,
+						cost: 0,
+						outcome: "ok",
+						frames: 3,
+					},
+				};
+			},
+		};
+		try {
+			db.query("INSERT INTO media (file_unique_id, kind, mime) VALUES ('shared-video', 'video', 'video/mp4')").run();
+			db.query(
+				"INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('B', 'video-file-b', 'shared-video')",
+			).run();
+			const options = {
+				cacheDir: join(directory, "media"),
+				botApis: apis,
+				extractFrames: async () => {
+					extractCalls++;
+					return {
+						ok: true as const,
+						durationSeconds: 12,
+						frames: [0.31, 0.5, 0.74].map((position, index) => ({
+							bytes: new Uint8Array([0xff, 0xd8, index, 0xff, 0xd9]),
+							mimeType: "image/jpeg" as const,
+							position,
+						})),
+					};
+				},
+			};
+			const first = ensureVision(db, apiA as never, "A", "shared-video", executor, options);
+			const second = ensureVision(db, apiB as never, "B", "shared-video", executor, options);
+			expect(first).toBe(second);
+			expect(await Promise.all([first, second])).toEqual(["人物从左侧走到画面中央", "人物从左侧走到画面中央"]);
+			expect(extractCalls).toBe(1);
+			expect(describeCalls).toBe(1);
+			expect(described[0]?.kind).toBe("video");
+			expect(described[0]?.images.map((image) => image.position)).toEqual([0.31, 0.5, 0.74]);
+			const cached = db.query("SELECT local_path FROM media WHERE file_unique_id = 'shared-video'").get() as {
+				local_path: string;
+			};
+			expect(cached.local_path.endsWith(".mp4")).toBe(true);
+			expect(existsSync(join(directory, "media", cached.local_path))).toBe(true);
+		} finally {
+			db.close();
+		}
+	});
+
+	test("does not persist a missing transcoder as a terminal video result", async () => {
+		const directory = temporaryDirectory("tg-video-transcoder-retry-");
+		const db = openDb(join(directory, "agent.db"));
+		const api: MediaDownloadApi = {
+			getFile: async () => ({ file_path: "videos/retry.mp4" }),
+			downloadFile: async () => new Uint8Array([0, 1, 2, 3]),
+		};
+		let extractionAttempts = 0;
+		let describeCalls = 0;
+		const executor: VisionExecutor = {
+			modelRef: "test/vision:low",
+			provider: "test",
+			model: "vision",
+			readinessFailure: null,
+			describe: async () => {
+				describeCalls++;
+				throw new Error("provider must not run");
+			},
+		};
+		try {
+			db.query("INSERT INTO media (file_unique_id, kind, mime) VALUES ('retry-video', 'video', 'video/mp4')").run();
+			db.query(
+				"INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', 'retry-file', 'retry-video')",
+			).run();
+			const options = {
+				cacheDir: join(directory, "media"),
+				extractFrames: async () => {
+					extractionAttempts++;
+					return { ok: false as const, outcome: "video_transcoder_unavailable" as const };
+				},
+			};
+			expect(await ensureVision(db, api as never, "A", "retry-video", executor, options)).toBeNull();
+			expect(await ensureVision(db, api as never, "A", "retry-video", executor, options)).toBeNull();
+			expect(extractionAttempts).toBe(2);
+			expect(describeCalls).toBe(0);
+			expect(
+				(db.query("SELECT vision FROM media WHERE file_unique_id = 'retry-video'").get() as { vision: string | null })
+					.vision,
+			).toBeNull();
+		} finally {
+			db.close();
+		}
+	});
+
 	test("uses the receiving bot's file_id with the matching Bot API", async () => {
 		const db = new Database(":memory:");
 		db.exec(`
 			CREATE TABLE media (
 				file_unique_id TEXT PRIMARY KEY,
 				kind TEXT NOT NULL,
+				mime TEXT,
 				local_path TEXT
 			);
 			CREATE TABLE media_file_ids (
@@ -385,6 +530,88 @@ describe("cross-bot media acquisition", () => {
 			await queue.stop();
 			db.close();
 		}
+	});
+});
+
+describe("video frame sampling", () => {
+	test("uses deterministic truncated-normal positions centered on the middle", () => {
+		const first = sampleVideoFrameFractions("same-video", 3);
+		expect(sampleVideoFrameFractions("same-video", 3)).toEqual(first);
+		expect(first).toHaveLength(3);
+		expect(first).toEqual([...first].sort((left, right) => left - right));
+		expect(first.every((position) => position >= 0.05 && position <= 0.95)).toBe(true);
+
+		let middle = 0;
+		let edges = 0;
+		for (let index = 0; index < 2_000; index++) {
+			for (const position of sampleVideoFrameFractions(`video-${index}`, 3)) {
+				if (position >= 1 / 3 && position <= 2 / 3) middle++;
+				if (position <= 1 / 6 || position >= 5 / 6) edges++;
+			}
+		}
+		expect(middle).toBeGreaterThan(edges * 2);
+	});
+
+	test("probes once, extracts at most three frames, and removes temporary output", async () => {
+		const directory = temporaryDirectory("tg-video-extract-");
+		const sourcePath = join(directory, "source.mp4");
+		writeFileSync(sourcePath, new Uint8Array([0, 1, 2, 3]));
+		const commands: string[][] = [];
+		const runner: VideoCommandRunner = {
+			which: (command) => `/usr/bin/${command}`,
+			run: async (argv) => {
+				commands.push([...argv]);
+				if (argv[0]?.endsWith("ffprobe")) {
+					return { exitCode: 0, stdout: JSON.stringify({ format: { duration: "10" }, streams: [{}] }) };
+				}
+				writeFileSync(argv.at(-1)!, new Uint8Array([0xff, 0xd8, 0xff, 0xd9]));
+				return { exitCode: 0, stdout: "" };
+			},
+		};
+		const result = await extractVideoFrames(
+			{ fileUniqueId: "video-id", sourcePath, sourceBytes: new Uint8Array(), sourceExtension: "mp4" },
+			{ runner },
+		);
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.frames).toHaveLength(3);
+		expect(commands.filter((argv) => argv[0]?.endsWith("ffprobe"))).toHaveLength(1);
+		expect(commands.filter((argv) => argv[0]?.endsWith("ffmpeg"))).toHaveLength(3);
+		expect(result.frames.every((frame) => frame.bytes.byteLength === 4)).toBe(true);
+		expect(commands.every((argv) => !argv.includes("sh") && !argv.includes("-c"))).toBe(true);
+		expect(commands.slice(1).every((argv) => !existsSync(argv.at(-1)!))).toBe(true);
+	});
+
+	test("builds one Pi request containing all sampled frames", async () => {
+		let calls = 0;
+		let captured: unknown = null;
+		const runtime = {
+			getModel: () => ({ input: ["text", "image"] }),
+			completeSimple: async (_model: unknown, context: unknown) => {
+				calls++;
+				captured = context;
+				return {
+					role: "assistant",
+					content: [{ type: "text", text: "video description" }],
+					stopReason: "stop",
+					usage: { input: 3, output: 2, reasoning: 0, cost: { total: 0 } },
+				};
+			},
+		};
+		const executor = createPiVisionExecutor(runtime as never, "test/vision:low");
+		const result = await executor.describe({
+			kind: "video",
+			sourceBytes: 100,
+			images: [0.2, 0.5, 0.8].map((position) => ({
+				bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+				mimeType: "image/jpeg" as const,
+				position,
+			})),
+		});
+		expect(result.text).toBe("video description");
+		expect(calls).toBe(1);
+		const content = (captured as { messages: Array<{ content: Array<{ type: string }> }> }).messages[0]!.content;
+		expect(content.filter((item) => item.type === "image")).toHaveLength(3);
 	});
 });
 

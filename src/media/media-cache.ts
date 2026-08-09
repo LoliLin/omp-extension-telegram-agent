@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { log } from "../observability/log.ts";
 import {
 	ensureLocalMedia,
+	isVideoMedia,
 	isDisplayReadyPath,
 	MEDIA_CACHE_MAX_BYTES,
 	resolveMediaCachePath,
@@ -98,11 +99,20 @@ export class MediaCacheQueue {
 	/** Queue one canonical display-media identity. Returns immediately and never blocks polling. */
 	schedule(botId: string, fileUniqueId: string): boolean {
 		if (this.stopped || !fileUniqueId || !this.apis.has(botId) || this.scheduled.has(fileUniqueId)) return false;
-		const row = this.db.query("SELECT kind, local_path FROM media WHERE file_unique_id = ?").get(fileUniqueId) as {
+		const row = this.db
+			.query("SELECT kind, mime, local_path FROM media WHERE file_unique_id = ?")
+			.get(fileUniqueId) as {
 			kind: string;
+			mime: string | null;
 			local_path: string | null;
 		} | null;
-		if (!row || (row.kind !== "photo" && row.kind !== "sticker")) return false;
+		if (
+			!row ||
+			(row.kind !== "photo" && row.kind !== "sticker") ||
+			isVideoMedia(row.kind, row.mime) ||
+			row.mime === "application/x-tgsticker"
+		)
+			return false;
 		const kind = row.kind as DisplayMediaKind;
 		const cacheDir = this.options.cacheDir ?? join(process.cwd(), "data", "media");
 		if (isDisplayReadyPath(resolveMediaCachePath(cacheDir, row.local_path), this.options.fileOps)) return false;
@@ -134,7 +144,10 @@ export class MediaCacheQueue {
 		if (this.stopped) return 0;
 		const rows = this.db
 			.query(
-				"SELECT file_unique_id FROM media WHERE kind IN ('photo', 'sticker') AND local_path IS NULL ORDER BY rowid DESC LIMIT ?",
+				`SELECT file_unique_id FROM media
+				  WHERE local_path IS NULL
+				    AND (kind = 'photo' OR (kind = 'sticker' AND COALESCE(mime, 'image/webp') = 'image/webp'))
+				  ORDER BY rowid DESC LIMIT ?`,
 			)
 			.all(this.backfillLimit) as { file_unique_id: string }[];
 		let count = 0;

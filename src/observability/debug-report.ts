@@ -14,6 +14,7 @@ export interface DebugReportInput {
 	logs?: readonly LogRecord[];
 	daemon?: { pid: number | null; alive: boolean; socket: boolean };
 	modelReasoning?: readonly DebugModelReasoning[];
+	videoTranscoder?: { required: boolean; ffmpeg: boolean; ffprobe: boolean };
 }
 
 export interface DebugModelReasoning {
@@ -30,6 +31,7 @@ export interface DebugModelReasoning {
 export interface DebugFinding {
 	code:
 		| "unsupported_reasoning_effort"
+		| "video_transcoder_unavailable"
 		| "cursor_backlog"
 		| "pending_reply_obligation"
 		| "route_without_run"
@@ -173,6 +175,9 @@ export function buildDebugReport(db: Database, input: DebugReportInput) {
 	});
 
 	const findings: DebugFinding[] = [];
+	if (input.videoTranscoder?.required && (!input.videoTranscoder.ffmpeg || !input.videoTranscoder.ffprobe)) {
+		findings.push({ code: "video_transcoder_unavailable", bot_id: "deployment" });
+	}
 	for (const diagnostic of input.modelReasoning ?? []) {
 		if (diagnostic.valid) continue;
 		findings.push({
@@ -237,6 +242,7 @@ export function buildDebugReport(db: Database, input: DebugReportInput) {
 		limits: { claims_per_bot: MAX_CLAIMS, runs_per_bot: MAX_RUNS, events_per_bot: MAX_EVENTS, logs_per_bot: MAX_LOGS },
 		model_reasoning_available: input.modelReasoning !== undefined,
 		model_reasoning: input.modelReasoning ?? null,
+		video_transcoder: input.videoTranscoder ?? null,
 		bots,
 		findings: findings.slice(0, 100),
 	};

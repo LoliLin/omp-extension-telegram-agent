@@ -59,7 +59,7 @@ import {
 	type VisionExecutor,
 	type VisionUpdateSink,
 } from "../media/vision.ts";
-import type { MediaDownloadApi } from "../media/local-cache.ts";
+import { isVisionMedia, type MediaDownloadApi } from "../media/local-cache.ts";
 import {
 	appendStickerCandidateSuffix,
 	ensureStickerCatalog,
@@ -262,7 +262,7 @@ export class BotRuntime {
 	async init(): Promise<void> {
 		const persona = readFileSync(this.bot.personaPath, "utf8");
 		const chatId = Number(`-100${this.config.groupPeerId}`);
-		// Catalog membership is pinned identity-only into the stable system prefix below.
+		// Catalog identity + format is pinned into the stable system prefix below.
 		if (this.bot.stickerSets.length > 0) {
 			await ensureStickerCatalog(this.db, this.api, this.bot.id, this.bot.stickerSets);
 		}
@@ -1332,8 +1332,8 @@ export class BotRuntime {
 			if (event.kind === "media_update") continue;
 			const row = event.payload as MessageRow;
 			if (!row.media) continue;
-			const media = JSON.parse(row.media) as { kind: string; file_unique_id?: string };
-			if (!media.file_unique_id || (media.kind !== "photo" && media.kind !== "sticker")) continue;
+			const media = JSON.parse(row.media) as { kind: string; mime?: string; file_unique_id?: string };
+			if (!media.file_unique_id || !isVisionMedia(media.kind, media.mime)) continue;
 			if (seen.has(media.file_unique_id)) continue;
 			seen.add(media.file_unique_id);
 			const existing = this.db.query("SELECT vision FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as {
@@ -1363,7 +1363,7 @@ export class BotRuntime {
 				cacheDir: join(this.config.dataDir, "media"),
 				onPersist: (fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
 				onTelemetry: (telemetry) => {
-					if (telemetry.sourceBytesBucket !== "unavailable" && telemetry.outcome !== "budget_exceeded") {
+					if (telemetry.providerCalled) {
 						this.pendingInputMetrics.visionCalls++;
 					}
 					this.recordEvent("vision", telemetry);

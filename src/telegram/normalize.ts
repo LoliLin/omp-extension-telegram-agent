@@ -29,7 +29,7 @@ export interface CanonicalMessage {
 }
 
 export interface MediaInfo {
-	kind: "photo" | "sticker" | "animation" | "video" | "document" | "voice" | "audio";
+	kind: "photo" | "sticker" | "animation" | "video" | "video_note" | "document" | "voice" | "audio";
 	file_unique_id: string;
 	file_id: string;
 	mime?: string;
@@ -93,7 +93,7 @@ function extractMedia(msg: any): MediaInfo | null {
 			sticker_emoji: s.emoji,
 		};
 	}
-	for (const kind of ["animation", "video", "document", "voice", "audio"] as const) {
+	for (const kind of ["animation", "video", "video_note", "document", "voice", "audio"] as const) {
 		const m = msg[kind];
 		if (m) {
 			return {

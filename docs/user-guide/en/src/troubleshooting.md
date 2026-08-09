@@ -57,9 +57,13 @@ Another process is long-polling with the same token. Run `bun run restart`; the 
 
 ## Images do not render inline
 
-A new user- or bot-sent photo/sticker first shows its media label, then the daemon downloads it in the background and updates the same Pi card. This does not depend on routing or vision. On startup, legacy absolute cache paths are rebased by filename when the file exists in the current `data/media`; missing entries are cleared before the newest 100 are backfilled, so very old gaps may require later restarts to continue.
+A new user- or bot-sent static photo/sticker first shows its media label, then the daemon downloads it in the background and updates the same Pi card. This does not depend on routing or vision; animated/video media retains a text placeholder. On startup, legacy absolute cache paths are rebased by filename when the file exists in the current `data/media`; missing entries are cleared before the newest 100 static display gaps are backfilled, so very old gaps may require later restarts to continue.
 
 If new media remains label-only, inspect only the fixed `media_cache_ready/skip/error` category and queue number in redacted logs, then check the 1 MiB limit, static-image format, terminal image capability, and project Pi version. Pi still selects Kitty, iTerm2, or native text fallback. Do not add terminal escapes or bypass Pi components. Record terminal type, tmux state, media kind, fixed outcome, and whether a local path exists—never a token, absolute path, or private image contents.
+
+## A video has no vision description
+
+Run `bun run debug` first. `video_transcoder_unavailable` means the host lacks `ffmpeg` or `ffprobe`; install the same FFmpeg distribution package and restart. This preparation failure is not cached permanently. `video_probe_failed` or `video_frame_extraction_failed` means the local tools could not read the file; check the 20 MiB bound and format support. Logs never contain its path, stderr, or video contents.
 
 ## Search or page retrieval fails
 

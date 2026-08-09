@@ -18,6 +18,15 @@ export const MEDIA_CACHE_MAX_BYTES = 1024 * 1024;
 export const MEDIA_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
 
 export type StaticMediaMime = "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+export type VideoMediaMime =
+	| "video/mp4"
+	| "video/webm"
+	| "video/quicktime"
+	| "video/x-m4v"
+	| "video/x-matroska"
+	| "video/x-msvideo";
+export type SourceMediaMime = StaticMediaMime | VideoMediaMime;
+export type LocalMediaKind = "photo" | "sticker" | "animation" | "video" | "video_note" | "document";
 
 export interface MediaDownloadApi {
 	getFile(fileId: string, signal?: AbortSignal): Promise<{ file_path?: string }>;
@@ -39,9 +48,11 @@ export type LocalMediaCacheOutcome = "cached" | "ready" | "oversize" | "install_
 export type LocalMediaResult =
 	| {
 			ok: true;
-			kind: "photo" | "sticker";
+			kind: LocalMediaKind;
 			bytes: Uint8Array;
-			mimeType: StaticMediaMime;
+			mimeType: SourceMediaMime;
+			sourceExtension: string;
+			sourcePath: string | null;
 			mediaPath: string | null;
 			cacheOutcome: LocalMediaCacheOutcome;
 	  }
@@ -94,9 +105,32 @@ export function staticMediaMimeForPath(path: string): StaticMediaMime | null {
 	return null;
 }
 
-function normalizedExtension(path: string): string | null {
+export function sourceMediaMimeForPath(path: string): SourceMediaMime | null {
 	const extension = extname(path).slice(1).toLowerCase();
-	return staticMediaMimeForPath(path) ? extension : null;
+	const image = staticMediaMimeForPath(path);
+	if (image) return image;
+	if (extension === "mp4") return "video/mp4";
+	if (extension === "webm") return "video/webm";
+	if (extension === "mov") return "video/quicktime";
+	if (extension === "m4v") return "video/x-m4v";
+	if (extension === "mkv") return "video/x-matroska";
+	if (extension === "avi") return "video/x-msvideo";
+	return null;
+}
+
+function normalizedSourceExtension(path: string): string | null {
+	const extension = extname(path).slice(1).toLowerCase();
+	return sourceMediaMimeForPath(path) ? extension : null;
+}
+
+export function isVideoMedia(kind: string, mime: string | null | undefined): boolean {
+	if (kind === "video" || kind === "video_note" || kind === "animation") return true;
+	if (kind === "document") return mime?.startsWith("video/") ?? false;
+	return kind === "sticker" && mime === "video/webm";
+}
+
+export function isVisionMedia(kind: string, mime: string | null | undefined): boolean {
+	return kind === "photo" || kind === "sticker" || isVideoMedia(kind, mime);
 }
 
 export function fileIdForBot(db: Database, botId: string, fileUniqueId: string): string | null {
@@ -139,12 +173,28 @@ export function isDisplayReadyPath(path: string | null, fileOps: MediaCacheFileO
 	}
 }
 
-/** Resolve the cache-relative filename stored in SQLite inside this deployment's media directory. */
-export function resolveMediaCachePath(cacheDir: string, storedPath: string | null): string | null {
+export function isSourceReadyPath(path: string | null, fileOps: MediaCacheFileOps = defaultFileOps): boolean {
+	if (!path || !sourceMediaMimeForPath(path)) return false;
+	try {
+		const stat = fileOps.stat(path);
+		return stat.isFile() && stat.size > 0 && stat.size <= MEDIA_DOWNLOAD_MAX_BYTES;
+	} catch {
+		return false;
+	}
+}
+
+/** Resolve a cache-relative source filename inside this deployment's media directory. */
+export function resolveMediaSourcePath(cacheDir: string, storedPath: string | null): string | null {
 	if (!storedPath || storedPath.includes("\0")) return null;
 	const filename = basename(storedPath);
-	if (!filename || filename === "." || filename === ".." || !staticMediaMimeForPath(filename)) return null;
+	if (!filename || filename === "." || filename === ".." || !sourceMediaMimeForPath(filename)) return null;
 	return join(cacheDir, filename);
+}
+
+/** Resolve only a display-ready static-image filename; video sources never enter IPC. */
+export function resolveMediaCachePath(cacheDir: string, storedPath: string | null): string | null {
+	const sourcePath = resolveMediaSourcePath(cacheDir, storedPath);
+	return sourcePath && staticMediaMimeForPath(sourcePath) ? sourcePath : null;
 }
 
 /**
@@ -166,8 +216,8 @@ export function reconcileMediaCachePaths(
 	const update = db.query("UPDATE media SET local_path = ? WHERE file_unique_id = ?");
 	const reconcile = db.transaction(() => {
 		for (const row of rows) {
-			const resolved = resolveMediaCachePath(cacheDir, row.local_path);
-			if (resolved && isDisplayReadyPath(resolved, fileOps)) {
+			const resolved = resolveMediaSourcePath(cacheDir, row.local_path);
+			if (resolved && isSourceReadyPath(resolved, fileOps)) {
 				const canonical = basename(resolved);
 				if (row.local_path !== canonical) {
 					update.run(canonical, row.file_unique_id);
@@ -186,16 +236,17 @@ export function reconcileMediaCachePaths(
 function readExisting(
 	path: string,
 	fileOps: MediaCacheFileOps,
-): { bytes: Uint8Array; mimeType: StaticMediaMime } | null {
-	const mimeType = staticMediaMimeForPath(path);
-	if (!mimeType) return null;
+): { bytes: Uint8Array; mimeType: SourceMediaMime; sourceExtension: string } | null {
+	const mimeType = sourceMediaMimeForPath(path);
+	const sourceExtension = normalizedSourceExtension(path);
+	if (!mimeType || !sourceExtension) return null;
 	try {
 		const stat = fileOps.stat(path);
 		if (!stat.isFile() || stat.size <= 0 || stat.size > MEDIA_DOWNLOAD_MAX_BYTES) return null;
 		const bytes = fileOps.read(path);
 		if (bytes.byteLength !== stat.size || bytes.byteLength === 0 || bytes.byteLength > MEDIA_DOWNLOAD_MAX_BYTES)
 			return null;
-		return { bytes, mimeType };
+		return { bytes, mimeType, sourceExtension };
 	} catch {
 		return null;
 	}
@@ -266,24 +317,29 @@ async function ensureLocalMediaInner(
 	const cacheDir = options.cacheDir ?? join(process.cwd(), "data", "media");
 	const signal = options.signal;
 	if (signal?.aborted) return { ok: false, outcome: "aborted" };
-	const media = db.query("SELECT kind, local_path FROM media WHERE file_unique_id = ?").get(fileUniqueId) as {
+	const media = db.query("SELECT kind, mime, local_path FROM media WHERE file_unique_id = ?").get(fileUniqueId) as {
 		kind: string;
+		mime: string | null;
 		local_path: string | null;
 	} | null;
-	if (!media || (media.kind !== "photo" && media.kind !== "sticker")) {
+	if (!media || !isVisionMedia(media.kind, media.mime)) {
 		return { ok: false, outcome: "media_unavailable" };
 	}
-	const kind = media.kind;
+	const kind = media.kind as LocalMediaKind;
+	const video = isVideoMedia(media.kind, media.mime);
 	if (media.local_path) {
-		const existingPath = resolveMediaCachePath(cacheDir, media.local_path);
+		const existingPath = resolveMediaSourcePath(cacheDir, media.local_path);
 		const existing = existingPath ? readExisting(existingPath, fileOps) : null;
 		if (existing) {
+			const existingVideo = video || existing.mimeType.startsWith("video/");
+			const displayReady = !existingVideo && isDisplayReadyPath(existingPath, fileOps);
 			return {
 				ok: true,
 				kind,
 				...existing,
-				mediaPath: existing.bytes.byteLength <= MEDIA_CACHE_MAX_BYTES ? existingPath : null,
-				cacheOutcome: existing.bytes.byteLength <= MEDIA_CACHE_MAX_BYTES ? "cached" : "oversize",
+				sourcePath: existingPath,
+				mediaPath: displayReady ? existingPath : null,
+				cacheOutcome: displayReady || existingVideo ? "cached" : "oversize",
 			};
 		}
 	}
@@ -298,9 +354,10 @@ async function ensureLocalMediaInner(
 	}
 	if (signal?.aborted) return { ok: false, outcome: "aborted" };
 	if (!remotePath) return { ok: false, outcome: "telegram_file_unavailable" };
-	const mimeType = staticMediaMimeForPath(remotePath);
-	const extension = normalizedExtension(remotePath);
+	const mimeType = sourceMediaMimeForPath(remotePath);
+	const extension = normalizedSourceExtension(remotePath);
 	if (!mimeType || !extension) return { ok: false, outcome: "unsupported_format" };
+	const sourceVideo = video || mimeType.startsWith("video/");
 
 	let bytes: Uint8Array;
 	try {
@@ -311,27 +368,54 @@ async function ensureLocalMediaInner(
 	if (signal?.aborted) return { ok: false, outcome: "aborted" };
 	if (bytes.byteLength === 0) return { ok: false, outcome: "empty_file" };
 	if (bytes.byteLength > MEDIA_DOWNLOAD_MAX_BYTES) return { ok: false, outcome: "download_oversize" };
-	if (bytes.byteLength > MEDIA_CACHE_MAX_BYTES) {
-		return { ok: true, kind, bytes, mimeType, mediaPath: null, cacheOutcome: "oversize" };
+	if (!sourceVideo && bytes.byteLength > MEDIA_CACHE_MAX_BYTES) {
+		return {
+			ok: true,
+			kind,
+			bytes,
+			mimeType,
+			sourceExtension: extension,
+			sourcePath: null,
+			mediaPath: null,
+			cacheOutcome: "oversize",
+		};
 	}
 
-	let mediaPath: string | null = null;
+	let sourcePath: string | null = null;
 	try {
-		mediaPath = installMediaCacheFile(cacheDir, fileUniqueId, extension, bytes, fileOps);
+		sourcePath = installMediaCacheFile(cacheDir, fileUniqueId, extension, bytes, fileOps);
 		if (signal?.aborted) {
-			fileOps.remove(mediaPath);
+			fileOps.remove(sourcePath);
 			return { ok: false, outcome: "aborted" };
 		}
-		db.query("UPDATE media SET local_path = ? WHERE file_unique_id = ?").run(basename(mediaPath), fileUniqueId);
+		db.query("UPDATE media SET local_path = ? WHERE file_unique_id = ?").run(basename(sourcePath), fileUniqueId);
 	} catch {
-		if (mediaPath) {
+		if (sourcePath) {
 			try {
-				fileOps.remove(mediaPath);
+				fileOps.remove(sourcePath);
 			} catch {
 				// The DB remains authoritative; cleanup failure is intentionally non-sensitive.
 			}
 		}
-		return { ok: true, kind, bytes, mimeType, mediaPath: null, cacheOutcome: "install_failed" };
+		return {
+			ok: true,
+			kind,
+			bytes,
+			mimeType,
+			sourceExtension: extension,
+			sourcePath: null,
+			mediaPath: null,
+			cacheOutcome: "install_failed",
+		};
 	}
-	return { ok: true, kind, bytes, mimeType, mediaPath, cacheOutcome: "ready" };
+	return {
+		ok: true,
+		kind,
+		bytes,
+		mimeType,
+		sourceExtension: extension,
+		sourcePath,
+		mediaPath: sourceVideo ? null : sourcePath,
+		cacheOutcome: "ready",
+	};
 }
