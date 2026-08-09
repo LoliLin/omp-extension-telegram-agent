@@ -49,7 +49,7 @@
 
 ## 5. 测试规则
 
-- 鼓励 TDD：新行为先写失败测试再实现。脚手架测试在功能稳定后必须删除——`test/` 只保留护长期 invariant / 安全边界的守卫（当前 6 个，见 `docs/testing.md`）。
+- 鼓励 TDD：新行为先写失败测试再实现。脚手架测试在功能稳定后必须删除——`test/` 只保留护长期 invariant / 安全边界的守卫，清单见 `docs/testing.md`。
 - 能确定性复现的 bug 必须有回归测试；agent 行为测可观察轨迹与结果，不断言 prompt 字符串。
 - `bun test` 零外网、零付费调用，由 `bunfig.toml` 的 test preload 机械保证。
 

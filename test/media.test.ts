@@ -37,12 +37,7 @@ import {
 	type VisionExecutor,
 } from "../src/media/vision.ts";
 import { VisionScheduler } from "../src/media/vision-scheduler.ts";
-import {
-	extractVideoFrames,
-	sampleVideoFrameFractions,
-	type VideoCommandRunner,
-	videoTranscoderAdvisory,
-} from "../src/media/video-frames.ts";
+import { extractVideoFrames, sampleVideoFrameFractions, type VideoCommandRunner } from "../src/media/video-frames.ts";
 import { setLogSink } from "../src/observability/log.ts";
 import { readMediaImage, TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
 import { BotApi } from "../src/telegram/api.ts";
@@ -656,14 +651,6 @@ describe("cross-bot media acquisition", () => {
 });
 
 describe("video frame sampling", () => {
-	test("gives operators a non-blocking installation advisory", () => {
-		expect(videoTranscoderAdvisory(false, { ffmpeg: false, ffprobe: false })).toBeNull();
-		expect(videoTranscoderAdvisory(true, { ffmpeg: true, ffprobe: true })).toBeNull();
-		expect(videoTranscoderAdvisory(true, { ffmpeg: false, ffprobe: true })).toBe(
-			"warning: video recognition is disabled because ffmpeg is unavailable; install the FFmpeg package and restart (it is used only to sample video frames; chat, image vision, and sticker sending continue normally)",
-		);
-	});
-
 	test("uses fixed representative frame positions", () => {
 		expect(sampleVideoFrameFractions(0)).toEqual([]);
 		expect(sampleVideoFrameFractions(1)).toEqual([0.5]);
@@ -973,27 +960,6 @@ describe("Pi attach media presentation", () => {
 		expect(human.join("\n")).toContain("Alice Example · @alice");
 		expect(bot.join("\n")).toContain("Helpful Bot · @helpful_bot");
 		expect(bot.join("\n")).toContain("#22662 · bot friend");
-	});
-
-	test("renders the vision description below the native image", () => {
-		Tui.setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
-		Tui.setCellDimensions({ widthPx: 8, heightPx: 16 });
-		const theme = {
-			fg: (_color: string, value: string) => value,
-			bg: (_color: string, value: string) => value,
-			bold: (value: string) => value,
-		} as Theme;
-		const component = itemComponent(message({ mediaDesc: "recognized text" }), theme, () => ({
-			base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-			mime: "image/png",
-			filename: "/tmp/shared.png",
-			revision: "test-revision",
-		}));
-		const rendered = component.render(80);
-		const imageIndex = rendered.findIndex((line) => line.includes("\u001b_G"));
-		const visionIndex = rendered.findIndex((line) => line.includes("Vision · recognized text"));
-		expect(imageIndex).toBeGreaterThanOrEqual(0);
-		expect(visionIndex).toBeGreaterThan(imageIndex);
 	});
 
 	test("merges a shared vision update that arrives before a filtered feed message", async () => {

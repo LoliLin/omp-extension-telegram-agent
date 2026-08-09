@@ -10,7 +10,6 @@ import { IpcServer } from "../src/daemon/ipc-server.ts";
 import { openDb } from "../src/db/db.ts";
 import { loadBotStats } from "../src/db/usage.ts";
 import type { BotStats, RuntimeControlSnapshot, UsageRun } from "../src/ipc.ts";
-import { buildDebugReport } from "../src/observability/debug-report.ts";
 import { BOT_STATUS_FIELD_KEYS } from "../src/observability/status.ts";
 import { summarizeBotUsage } from "../src/observability/usage.ts";
 import { TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
@@ -145,14 +144,12 @@ describe("unified usage telemetry", () => {
 								provider: "test",
 								id: "chat-model",
 								contextWindow: 128_000,
-								reasoning: true,
 							},
 						],
 					},
 					model: undefined,
 					thinkingLevel: "off",
-					sessionManager: {},
-				} as never,
+				},
 			);
 
 			expect(stats.runs).toBe(2);
@@ -175,64 +172,6 @@ describe("unified usage telemetry", () => {
 			const empty = summarizeBotUsage(loadBotStats(db, "B"), 128_000);
 			expect(empty.context).toEqual({ tokens: null, contextWindow: 128_000, percent: null });
 			expect(empty.cacheHitPercent).toBeNull();
-		} finally {
-			db.close();
-		}
-	});
-
-	test("debug report exposes requested, effective and supported reasoning", () => {
-		const db = openDb(":memory:");
-		try {
-			const diagnostic = {
-				bot_id: "A",
-				scope: "main" as const,
-				provider: "deepseek",
-				model: "deepseek-v4-flash",
-				requested: "medium",
-				effective: "high",
-				supported: ["off", "high", "max"],
-				valid: false,
-			};
-			const report = buildDebugReport(db, {
-				botIds: ["A"],
-				chatId: -1001,
-				sinceMs: 60_000,
-				now: 1_786_251_069_000,
-				modelReasoning: [diagnostic],
-			});
-
-			expect(report.model_reasoning_available).toBe(true);
-			expect(report.model_reasoning).toEqual([diagnostic]);
-			expect(report.findings).toContainEqual({
-				code: "unsupported_reasoning_effort",
-				bot_id: "A",
-				scope: "main",
-				requested: "medium",
-				effective: "high",
-				supported: ["off", "high", "max"],
-			});
-		} finally {
-			db.close();
-		}
-	});
-
-	test("debug report warns when enabled video vision lacks a transcoder", () => {
-		const db = openDb(":memory:");
-		try {
-			const report = buildDebugReport(db, {
-				botIds: ["A"],
-				chatId: -1001,
-				sinceMs: 60_000,
-				now: 1_786_251_069_000,
-				videoTranscoder: { required: true, ffmpeg: false, ffprobe: true },
-			});
-			expect(report.video_transcoder).toEqual({ required: true, ffmpeg: false, ffprobe: true });
-			expect(report.findings).toContainEqual({
-				code: "video_transcoder_unavailable",
-				bot_id: "deployment",
-				impact: "video_recognition_disabled",
-				action: "install_ffmpeg_and_restart",
-			});
 		} finally {
 			db.close();
 		}

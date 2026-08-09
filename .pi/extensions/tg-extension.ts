@@ -72,11 +72,16 @@ type FeedEntry = { instanceId: string; filter: string | null };
 type ComposeIdentity = Pick<BotConfig, "id" | "name">;
 type ComposeMode = { kind: "scope" } | { kind: "bot"; identity: ComposeIdentity };
 type ToolPresentationHost = { ui: Tui.TUI; cwd: string };
+type StatusModel = Pick<NonNullable<ExtensionContext["model"]>, "id" | "provider" | "contextWindow">;
 type StatusBot = Pick<
 	BotConfig,
 	"id" | "name" | "provider" | "model" | "reasoningEffort" | "routingP" | "samplingCooldownMs"
 >;
-type StatusHost = Pick<ExtensionContext, "modelRegistry" | "model" | "thinkingLevel">;
+type StatusHost = {
+	modelRegistry: { getAvailable(): readonly StatusModel[] };
+	model: StatusModel | undefined;
+	thinkingLevel?: ExtensionContext["thinkingLevel"];
+};
 
 export type MediaConverter = (
 	base64Data: string,
@@ -467,7 +472,7 @@ function resolveStatusModel(
 	bot: StatusBot | undefined,
 	status: RuntimeControlSnapshot | undefined,
 	host: StatusHost,
-): NonNullable<ExtensionContext["model"]> | undefined {
+): StatusModel | undefined {
 	if (!bot && !status) return host.model;
 	const provider = status?.provider ?? bot?.provider;
 	const modelId = status?.model ?? bot?.model;
@@ -478,13 +483,10 @@ function resolveStatusModel(
 	const activeModel = host.model;
 	if (activeModel && activeModel.provider === provider && activeModel.id === modelId) return activeModel;
 	return {
-		...(activeModel ?? {}),
 		id: modelId ?? "unknown",
 		provider: provider ?? "unknown",
-		api: activeModel?.api ?? "openai-completions",
 		contextWindow: status?.contextWindow ?? 0,
-		reasoning: (status?.reasoningEffort ?? bot?.reasoningEffort) !== "off",
-	} as NonNullable<ExtensionContext["model"]>;
+	};
 }
 
 export function statsText(
