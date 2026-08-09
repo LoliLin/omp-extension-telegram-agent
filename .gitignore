@@ -157,3 +157,5 @@ personas/*.md
 !personas/README.md
 !personas/template.zh.md
 !personas/template.en.md
+.DS_Store
+docs/dev/req.md
