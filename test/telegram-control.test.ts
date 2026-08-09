@@ -98,27 +98,27 @@ describe("Telegram rich control status", () => {
 		db.query(
 			`INSERT INTO llm_runs
 			 (bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
-			  output_tokens, reasoning_tokens, cost)
-			 VALUES ('A', 1, 'gpt-5.6-luna', 3, 1000, 700, 50, 250, 120, 30, 0.125)`,
+			  output_tokens, reasoning_tokens, latency_ms, cost)
+			 VALUES ('A', 1786251069000, 'gpt-5.6-luna', 3, 1000, 700, 50, 250, 120, 30, 1250, 0.125)`,
 		).run();
+		const runtime = {
+			controlSnapshot: () => ({
+				state: "idle" as const,
+				epoch: 3,
+				model: "gpt-5.6-luna",
+				contextWindow: 128_000,
+				lastCompact: { at: 1_786_251_069_000, outcome: "ok" as const },
+			}),
+			compactForControl: async () => ({ ok: false as const, code: "busy" as const }),
+			consumeControlMessage: () => {},
+		};
 		const service = new TelegramControlCommandService(
 			db,
 			[bot, emptyBot],
 			"/tmp",
 			new Map([
-				[
-					"A",
-					{
-						controlSnapshot: () => ({
-							state: "idle" as const,
-							epoch: 3,
-							model: "gpt-5.6-luna",
-							lastCompact: { at: 1_786_251_069_000, outcome: "ok" as const },
-						}),
-						compactForControl: async () => ({ ok: false as const, code: "busy" as const }),
-						consumeControlMessage: () => {},
-					},
-				],
+				["A", runtime],
+				["B", runtime],
 			]),
 			[],
 		);
@@ -129,15 +129,19 @@ describe("Telegram rich control status", () => {
 		expect(result.richText).toContain("Bot \\*A\\*");
 		expect(result.richText).toContain("epoch 3");
 		expect(result.richText).toContain("cooldown 2,000 ms");
-		expect(result.richText).toContain("1,000 context");
-		expect(result.richText).toContain("命中率 73.7%");
-		expect(result.richText).toContain("命中率 —");
+		expect(result.richText).toContain("当前上下文**：1,000 / 128,000 (0.8%)");
+		expect(result.richText).toContain("↑miss 250 · ↓output 120 · R 700 · W 50 · reasoning 30");
+		expect(result.richText).toContain("prompt 1,000");
+		expect(result.richText).toContain("CH 70.0%");
+		expect(result.richText).toContain("CH —");
+		expect(result.richText).toContain("avg 1.25 s");
 		expect(result.richText).toContain("$0.1250");
 		expect(result.richText!.length).toBeLessThanOrEqual(3500);
 		expect(result.text).toContain("Bot *A*");
 		expect(result.text).toContain("cooldown_ms=2,000");
-		expect(result.text).toContain("context=1,000");
-		expect(result.text).toContain("cache_hit_rate=73.7%");
+		expect(result.text).toContain("context_current=1,000 / 128,000 (0.8%)");
+		expect(result.text).toContain("lifetime_usage=prompt:1,000");
+		expect(result.text).toContain("cache_hit_rate=70.0%");
 		expect(result.text).toContain("cache_hit_rate=—");
 		expect(result.text).not.toBe(result.richText);
 	});

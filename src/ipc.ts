@@ -71,6 +71,8 @@ export interface UsageRun {
 	reasoningTokens?: number;
 	latencyMs?: number | null;
 	cost: number;
+	/** Auxiliary compaction response: included in totals, never replaces latest conversation context. */
+	compaction?: boolean;
 }
 
 /** Cumulative stats per bot (full-history aggregation, daemon-side). */
@@ -89,6 +91,7 @@ export interface BotStats {
 	firstRunTs?: number | null;
 	cost: number;
 	epoch: number;
+	/** Latest main-conversation response (`compaction = 0`). */
 	last: UsageRun | null;
 }
 

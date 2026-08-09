@@ -435,7 +435,7 @@ export class TimelineClient implements TimelinePort {
 				merged.cost += run.cost;
 				merged.epoch = Math.max(merged.epoch, run.epoch);
 				merged.firstRunTs = merged.firstRunTs == null ? run.ts : Math.min(merged.firstRunTs, run.ts);
-				merged.last = run;
+				if (!run.compaction) merged.last = run;
 			}
 			stats[botId] = merged;
 		}

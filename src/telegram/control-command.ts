@@ -3,6 +3,9 @@ import { log } from "../observability/log.ts";
 import type { BotConfig, TelegramAdmin } from "../config.ts";
 import type { ManualCompactResult, RuntimeControlSnapshot } from "../agent/runtime.ts";
 import { updateBotConfigField } from "../onboarding/config-core.ts";
+import { loadBotStats } from "../db/usage.ts";
+import type { BotStats } from "../ipc.ts";
+import { summarizeBotUsage } from "../observability/usage.ts";
 import { extractUpdateMessage } from "./normalize.ts";
 
 export const CONTROL_COMMAND_CLAIM_EVENT = "telegram_control_claim";
@@ -70,17 +73,6 @@ interface ControlExecutionResult {
 	text: string;
 	richText?: string;
 	outcome: string;
-}
-
-interface StatusAggregate {
-	runs: number;
-	context_tokens: number;
-	output_tokens: number;
-	reasoning_tokens: number;
-	cache_read: number;
-	cache_write: number;
-	cache_miss: number;
-	cost: number;
 }
 
 /**
@@ -278,31 +270,10 @@ export class TelegramControlCommandService {
 		const richSections: string[] = [];
 		for (const bot of this.bots) {
 			const snapshot = this.runtimes.get(bot.id)?.controlSnapshot();
-			const aggregate = this.db
-				.query(
-					`SELECT COUNT(*) runs,
-					        COALESCE(SUM(context_tokens), 0) context_tokens,
-					        COALESCE(SUM(output_tokens), 0) output_tokens,
-					        COALESCE(SUM(reasoning_tokens), 0) reasoning_tokens,
-					        COALESCE(SUM(cache_read), 0) cache_read,
-					        COALESCE(SUM(cache_write), 0) cache_write,
-					        COALESCE(SUM(cache_miss), 0) cache_miss,
-					        COALESCE(SUM(cost), 0) cost
-					   FROM llm_runs WHERE bot_id = ?`,
-				)
-				.get(bot.id) as StatusAggregate;
-			const hitRate = cacheHitRate(aggregate);
+			const stats = loadBotStats(this.db, bot.id);
 			if (lines.length > 0) lines.push("");
-			lines.push(
-				`${bounded(bot.id)} · ${bounded(bot.name)} · ${snapshot?.state ?? "unavailable"}`,
-				`epoch=${snapshot ? formatStatusInteger(snapshot.epoch) : "-"} model=${bounded(snapshot?.model ?? bot.model)}`,
-				`routing_p=${bot.routingP} cooldown_ms=${formatStatusInteger(bot.samplingCooldownMs)}`,
-				`runs=${formatStatusInteger(aggregate.runs)} context=${formatStatusInteger(aggregate.context_tokens)} output=${formatStatusInteger(aggregate.output_tokens)} reasoning=${formatStatusInteger(aggregate.reasoning_tokens)}`,
-				`cache_hit_rate=${hitRate} cache_read=${formatStatusInteger(aggregate.cache_read)} cache_write=${formatStatusInteger(aggregate.cache_write)} cache_miss=${formatStatusInteger(aggregate.cache_miss)} cost=$${formatStatusCost(aggregate.cost)}`,
-			);
-			if (snapshot?.lastCompact)
-				lines.push(`last_compact=${snapshot.lastCompact.outcome} at=${formatStatusInteger(snapshot.lastCompact.at)}`);
-			richSections.push(statusRichSection(bot, snapshot, aggregate));
+			lines.push(...statusPlainSection(bot, snapshot, stats));
+			richSections.push(statusRichSection(bot, snapshot, stats));
 		}
 		return {
 			text: boundedReply(lines.join("\n")),
@@ -468,10 +439,25 @@ function formatStatusCost(value: number): string {
 	return STATUS_COST_FORMAT.format(value);
 }
 
-/** Project telemetry defines cache hit ratio as read / (read + miss); writes stay separate. */
-function cacheHitRate(aggregate: Pick<StatusAggregate, "cache_read" | "cache_miss">): string {
-	const eligible = aggregate.cache_read + aggregate.cache_miss;
-	return eligible > 0 ? `${((aggregate.cache_read / eligible) * 100).toFixed(1)}%` : "—";
+function formatStatusPercent(value: number | null): string {
+	return value == null ? "—" : `${value.toFixed(1)}%`;
+}
+
+function formatStatusDuration(value: number | null | undefined): string {
+	if (value == null) return "—";
+	if (value < 1000) return `${formatStatusInteger(value)} ms`;
+	if (value < 10_000) return `${(value / 1000).toFixed(2)} s`;
+	return `${(value / 1000).toFixed(1)} s`;
+}
+
+function formatStatusTime(value: number | null | undefined): string {
+	return value == null ? "—" : new Date(value).toISOString();
+}
+
+function formatStatusContext(context: ReturnType<typeof summarizeBotUsage>["context"]): string {
+	const tokens = context.tokens == null ? "—" : formatStatusInteger(context.tokens);
+	const window = context.contextWindow > 0 ? formatStatusInteger(context.contextWindow) : "—";
+	return `${tokens} / ${window} (${formatStatusPercent(context.percent)})`;
 }
 
 function statusIcon(state: RuntimeControlSnapshot["state"] | "unavailable"): string {
@@ -490,24 +476,54 @@ function statusLabel(state: RuntimeControlSnapshot["state"] | "unavailable"): st
 	return "不可用";
 }
 
-function statusRichSection(
-	bot: BotConfig,
-	snapshot: RuntimeControlSnapshot | undefined,
-	aggregate: StatusAggregate,
-): string {
+function statusPlainSection(bot: BotConfig, snapshot: RuntimeControlSnapshot | undefined, stats: BotStats): string[] {
+	const summary = summarizeBotUsage(stats, snapshot?.contextWindow ?? 0);
+	const last = stats.last;
+	const lines = [
+		`${bounded(bot.id)} · ${bounded(bot.name)} · ${snapshot?.state ?? "unavailable"}`,
+		`provider=${bounded(bot.provider)} model=${bounded(snapshot?.model ?? bot.model)} reasoning=${bot.reasoningEffort} epoch=${snapshot ? formatStatusInteger(snapshot.epoch) : "—"}`,
+		`context_current=${formatStatusContext(summary.context)}`,
+	];
+	if (last) {
+		lines.push(
+			`latest_at=${formatStatusTime(last.ts)} latency=${formatStatusDuration(last.latencyMs)} cost=$${formatStatusCost(last.cost)}`,
+			`latest_usage=↑miss:${formatStatusInteger(last.cacheMiss)} ↓output:${formatStatusInteger(last.outputTokens)} R:${formatStatusInteger(last.cacheRead)} W:${formatStatusInteger(last.cacheWrite ?? 0)} reasoning:${formatStatusInteger(last.reasoningTokens ?? 0)}`,
+		);
+	} else {
+		lines.push("latest=—");
+	}
+	lines.push(
+		`lifetime_runs=${formatStatusInteger(stats.runs)} since=${formatStatusTime(stats.firstRunTs)} avg_latency=${formatStatusDuration(summary.averageLatencyMs)}`,
+		`lifetime_usage=prompt:${formatStatusInteger(stats.contextTokens)} ↑miss:${formatStatusInteger(stats.cacheMiss)} ↓output:${formatStatusInteger(stats.outputTokens)} R:${formatStatusInteger(stats.cacheRead)} W:${formatStatusInteger(summary.cacheWrite)} reasoning:${formatStatusInteger(summary.reasoningTokens)}`,
+		`cache_hit_rate=${formatStatusPercent(summary.cacheHitPercent)} lifetime_cost=$${formatStatusCost(stats.cost)}`,
+		`routing_p=${bot.routingP} cooldown_ms=${formatStatusInteger(bot.samplingCooldownMs)}`,
+		`last_compact=${snapshot?.lastCompact ? `${snapshot.lastCompact.outcome} at=${formatStatusTime(snapshot.lastCompact.at)}` : "—"}`,
+	);
+	return lines;
+}
+
+function statusRichSection(bot: BotConfig, snapshot: RuntimeControlSnapshot | undefined, stats: BotStats): string {
 	const state = snapshot?.state ?? "unavailable";
-	const hitRate = cacheHitRate(aggregate);
+	const summary = summarizeBotUsage(stats, snapshot?.contextWindow ?? 0);
+	const last = stats.last;
 	const compact = snapshot?.lastCompact
 		? `${escapeRichMarkdown(snapshot.lastCompact.outcome)} · ${new Date(snapshot.lastCompact.at).toISOString()}`
 		: "暂无";
 	return [
 		`## ${escapeRichMarkdown(bot.name)} · ${escapeRichMarkdown(bot.id)}`,
 		`- **状态**：${statusIcon(state)} ${statusLabel(state)}`,
-		`- **上下文**：epoch ${snapshot ? formatStatusInteger(snapshot.epoch) : "-"} · ${escapeRichMarkdown(snapshot?.model ?? bot.model)}`,
+		`- **模型**：${escapeRichMarkdown(`${bot.provider}/${snapshot?.model ?? bot.model}`)} · reasoning ${bot.reasoningEffort} · epoch ${snapshot ? formatStatusInteger(snapshot.epoch) : "—"}`,
+		`- **当前上下文**：${formatStatusContext(summary.context)}`,
+		...(last
+			? [
+					`- **最近请求**：${formatStatusTime(last.ts)} · ${formatStatusDuration(last.latencyMs)} · $${formatStatusCost(last.cost)}`,
+					`- **最近用量**：↑miss ${formatStatusInteger(last.cacheMiss)} · ↓output ${formatStatusInteger(last.outputTokens)} · R ${formatStatusInteger(last.cacheRead)} · W ${formatStatusInteger(last.cacheWrite ?? 0)} · reasoning ${formatStatusInteger(last.reasoningTokens ?? 0)}`,
+				]
+			: ["- **最近请求**：暂无"]),
+		`- **保留期**：${formatStatusInteger(stats.runs)} runs · since ${formatStatusTime(stats.firstRunTs)} · avg ${formatStatusDuration(summary.averageLatencyMs)}`,
+		`- **累计用量**：prompt ${formatStatusInteger(stats.contextTokens)} · ↑miss ${formatStatusInteger(stats.cacheMiss)} · ↓output ${formatStatusInteger(stats.outputTokens)} · R ${formatStatusInteger(stats.cacheRead)} · W ${formatStatusInteger(summary.cacheWrite)} · reasoning ${formatStatusInteger(summary.reasoningTokens)}`,
+		`- **缓存与费用**：CH ${formatStatusPercent(summary.cacheHitPercent)} · $${formatStatusCost(stats.cost)}`,
 		`- **路由**：routing ${bot.routingP} · cooldown ${formatStatusInteger(bot.samplingCooldownMs)} ms`,
-		`- **累计**：${formatStatusInteger(aggregate.runs)} runs · ${formatStatusInteger(aggregate.context_tokens)} context · ${formatStatusInteger(aggregate.output_tokens)} output · ${formatStatusInteger(aggregate.reasoning_tokens)} reasoning`,
-		`- **缓存**：命中率 ${hitRate} · ${formatStatusInteger(aggregate.cache_read)} read · ${formatStatusInteger(aggregate.cache_write)} write · ${formatStatusInteger(aggregate.cache_miss)} miss`,
-		`- **费用**：$${formatStatusCost(aggregate.cost)}`,
 		`- **最近压缩**：${compact}`,
 	].join("\n");
 }

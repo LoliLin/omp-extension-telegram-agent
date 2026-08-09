@@ -25,6 +25,7 @@ import type {
 	TimelineItem,
 } from "../../src/ipc.ts";
 import { runNativeConfigWizard, type PiModelPreflight } from "../../src/onboarding/config-wizard.ts";
+import { summarizeBotUsage, summarizeUsageContext } from "../../src/observability/usage.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
 	mediaFileRevision,
@@ -56,6 +57,8 @@ type ProcessRunner = (command: string, args: readonly string[], options: { cwd: 
 type FeedEntry = { instanceId: string; filter: string | null };
 type ComposeIdentity = Pick<BotConfig, "id" | "name">;
 type ComposeMode = { kind: "scope" } | { kind: "bot"; identity: ComposeIdentity };
+type FooterBot = Pick<BotConfig, "id" | "provider" | "model" | "reasoningEffort">;
+type FooterHost = Pick<ExtensionContext, "sessionManager" | "modelRegistry" | "model" | "thinkingLevel">;
 
 export type MediaConverter = (
 	base64Data: string,
@@ -453,21 +456,48 @@ function fmtDuration(value: number): string {
 	return `${(value / 1000).toFixed(1)}s`;
 }
 
-function statsText(botId: string, stats: BotStats): string {
-	if (stats.runs === 0) return `${botId} · lifetime · no runs yet`;
-	const cacheWrite = stats.cacheWrite ?? 0;
-	const reasoningTokens = stats.reasoningTokens ?? 0;
-	const denominator = stats.cacheRead + cacheWrite + stats.cacheMiss;
-	const hit = denominator > 0 ? (stats.cacheRead / denominator) * 100 : 0;
+function resolveFooterModel(
+	bot: FooterBot | undefined,
+	host: FooterHost,
+): NonNullable<ExtensionContext["model"]> | undefined {
+	if (!bot) return host.model;
+	const configured = host.modelRegistry
+		.getAvailable()
+		.find((model) => model.provider === bot.provider && model.id === bot.model);
+	if (configured) return configured;
+	if (host.model?.provider === bot.provider && host.model.id === bot.model) return host.model;
+	return {
+		...(host.model ?? {}),
+		id: bot.model,
+		provider: bot.provider,
+		api: host.model?.api ?? "openai-completions",
+		contextWindow: 0,
+		reasoning: bot.reasoningEffort !== "off",
+	} as NonNullable<ExtensionContext["model"]>;
+}
+
+function compactContext(tokens: number | null, contextWindow: number, percent: number | null): string {
+	const used = tokens == null ? "?" : fmtNum(tokens);
+	const window = contextWindow > 0 ? fmtNum(contextWindow) : "?";
+	return `${used}/${window} (${percent == null ? "?" : `${percent.toFixed(1)}%`})`;
+}
+
+export function statsText(botId: string, stats: BotStats, bot: FooterBot | undefined, host: FooterHost): string {
+	const model = resolveFooterModel(bot, host);
+	const summary = summarizeBotUsage(stats, model?.contextWindow ?? 0);
+	const modelLabel = `${model?.provider ?? bot?.provider ?? "unknown"}/${model?.id ?? bot?.model ?? "unknown"}:${bot?.reasoningEffort ?? host.thinkingLevel}`;
+	if (stats.runs === 0) {
+		return `${botId} · lifetime · no runs yet · ${modelLabel}\nlast · ctx ${compactContext(null, summary.context.contextWindow, null)}`;
+	}
 	const since = stats.firstRunTs != null ? `${fmtDay(stats.firstRunTs)} ${fmtClock(stats.firstRunTs)}` : "unknown";
-	const averageLatency =
-		(stats.latencySamples ?? 0) > 0 ? fmtDuration((stats.totalLatencyMs ?? 0) / (stats.latencySamples ?? 1)) : "n/a";
+	const averageLatency = summary.averageLatencyMs == null ? "n/a" : fmtDuration(summary.averageLatencyMs);
 	const last = stats.last;
 	const lastLine = last
-		? `last · ep${last.epoch} · ctx ${fmtNum(last.contextTokens)} · miss ${fmtNum(last.cacheMiss)} · read ${fmtNum(last.cacheRead)} · write ${fmtNum(last.cacheWrite ?? 0)} · out ${fmtNum(last.outputTokens)} · reasoning ${fmtNum(last.reasoningTokens ?? 0)} · ${last.latencyMs == null ? "latency n/a" : fmtDuration(last.latencyMs)} · $${last.cost.toFixed(last.cost >= 1 ? 2 : 4)}`
+		? `last · ep${last.epoch} · ctx ${compactContext(summary.context.tokens, summary.context.contextWindow, summary.context.percent)} · ↑${fmtNum(last.cacheMiss)} ↓${fmtNum(last.outputTokens)} R${fmtNum(last.cacheRead)} W${fmtNum(last.cacheWrite ?? 0)} · reasoning ${fmtNum(last.reasoningTokens ?? 0)} · ${last.latencyMs == null ? "latency n/a" : fmtDuration(last.latencyMs)} · $${last.cost.toFixed(last.cost >= 1 ? 2 : 4)}`
 		: `last · ep${stats.epoch} · unavailable`;
-	const totalLine = `total · prompt ${fmtNum(stats.contextTokens)} · ↑${fmtNum(stats.cacheMiss)} ↓${fmtNum(stats.outputTokens)} R${fmtNum(stats.cacheRead)} W${fmtNum(cacheWrite)} · reasoning ${fmtNum(reasoningTokens)} · $${stats.cost.toFixed(stats.cost >= 1 ? 2 : 4)} · CH${hit.toFixed(1)}% · avg ${averageLatency}`;
-	return `${botId} · lifetime · ${stats.runs} runs since ${since}\n${lastLine}\n${totalLine}`;
+	const cacheHit = summary.cacheHitPercent == null ? "CH—" : `CH${summary.cacheHitPercent.toFixed(1)}%`;
+	const totalLine = `total · prompt ${fmtNum(stats.contextTokens)} · ↑${fmtNum(stats.cacheMiss)} ↓${fmtNum(stats.outputTokens)} R${fmtNum(stats.cacheRead)} W${fmtNum(summary.cacheWrite)} · reasoning ${fmtNum(summary.reasoningTokens)} · $${stats.cost.toFixed(stats.cost >= 1 ? 2 : 4)} · ${cacheHit} · avg ${averageLatency}`;
+	return `${botId} · lifetime · ${stats.runs} runs since ${since} · ${modelLabel}\n${lastLine}\n${totalLine}`;
 }
 
 function eventBody(event: EvtItem): string {
@@ -642,9 +672,6 @@ export function streamComponent(stream: Extract<AgentStreamFrame, { phase: "upda
 	return activityComponent(stream.botId, stream.botName, stream.activity, theme, "STREAMING");
 }
 
-type FooterBot = Pick<BotConfig, "id" | "model" | "reasoningEffort">;
-type FooterHost = Pick<ExtensionContext, "sessionManager" | "modelRegistry" | "model" | "thinkingLevel">;
-
 /** Read-only IPC telemetry view consumed by Pi's own FooterComponent. */
 export class TelegramFooterTelemetry {
 	private stats: Record<string, BotStats> = {};
@@ -720,18 +747,7 @@ export class TelegramFooterTelemetry {
 	}
 
 	private modelFor(bot: FooterBot | undefined): NonNullable<ExtensionContext["model"]> | undefined {
-		if (!bot) return this.host.model;
-		const configured = this.host.modelRegistry.getAvailable().find((model) => model.id === bot.model);
-		if (configured) return configured;
-		if (this.host.model?.id === bot.model) return this.host.model;
-		return {
-			...(this.host.model ?? {}),
-			id: bot.model,
-			provider: this.host.model?.provider ?? "telegram",
-			api: this.host.model?.api ?? "openai-completions",
-			contextWindow: this.host.model?.contextWindow ?? 0,
-			reasoning: bot.reasoningEffort !== "off",
-		} as NonNullable<ExtensionContext["model"]>;
+		return resolveFooterModel(bot, this.host);
 	}
 
 	private entries(): unknown[] {
@@ -766,11 +782,10 @@ export class TelegramFooterTelemetry {
 		];
 	}
 
-	private contextUsage(): { tokens: number; contextWindow: number; percent: number } {
+	private contextUsage(): { tokens: number | null; contextWindow: number; percent: number | null } {
 		const { bot, latest } = this.scope();
 		const contextWindow = this.modelFor(bot)?.contextWindow ?? 0;
-		const tokens = latest?.contextTokens ?? 0;
-		return { tokens, contextWindow, percent: contextWindow > 0 ? (tokens / contextWindow) * 100 : 0 };
+		return summarizeUsageContext(latest, contextWindow);
 	}
 }
 
@@ -1078,12 +1093,27 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	let sending = false;
 	let lastUi: ExtensionContext["ui"] | null = null;
 	let completionBots: TgBotChoice[] | undefined;
+	let telemetryBots: FooterBot[] | undefined;
 	let requestHostRender: (() => void) | null = null;
 	const getCompletionBots = (): TgBotChoice[] => {
 		if (completionBots) return completionBots;
 		try {
 			completionBots = loadConfig(rootDir).bots.map(({ id, name }) => ({ id, name }));
 			return completionBots;
+		} catch {
+			return [];
+		}
+	};
+	const getTelemetryBots = (): FooterBot[] => {
+		if (telemetryBots) return telemetryBots;
+		try {
+			telemetryBots = loadConfig(rootDir).bots.map(({ id, provider, model, reasoningEffort }) => ({
+				id,
+				provider,
+				model,
+				reasoningEffort,
+			}));
+			return telemetryBots;
 		} catch {
 			return [];
 		}
@@ -1146,8 +1176,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		ui?.setFooter(undefined);
 	};
 	const mountStatsFooter = (filter: string | null, owner: "feed" | "standalone", ctx: ExtensionContext) => {
-		const bots = loadConfig(rootDir).bots.map(({ id, model, reasoningEffort }) => ({ id, model, reasoningEffort }));
-		const telemetry = new TelegramFooterTelemetry(bots, filter, ctx);
+		const telemetry = new TelegramFooterTelemetry(getTelemetryBots(), filter, ctx);
 		footerTelemetry = telemetry;
 		footerOwner = owner;
 		ctx.ui.setFooter((tui, _theme, footerData) => {
@@ -1481,14 +1510,23 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				const filter = resolveFilter(botArg);
 				if (filter === undefined) return;
 				if (active && active.filter === filter && Object.keys(active.stats).length > 0) {
+					const statusBots = getTelemetryBots();
 					ctx.ui.notify(
 						Object.entries(active.stats)
-							.map(([id, stats]) => statsText(id, stats))
+							.map(([id, stats]) =>
+								statsText(
+									id,
+									stats,
+									statusBots.find((bot) => bot.id === id),
+									ctx,
+								),
+							)
 							.join("\n\n"),
 						"info",
 					);
 					return;
 				}
+				const statusBots = getTelemetryBots();
 				await new Promise<void>((resolve) => {
 					let client: TimelinePort;
 					let done = false;
@@ -1505,7 +1543,14 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 						onEvent: (event) => {
 							if (event.type === "stats") {
 								const text = Object.entries(event.stats)
-									.map(([id, stats]) => statsText(id, stats))
+									.map(([id, stats]) =>
+										statsText(
+											id,
+											stats,
+											statusBots.find((bot) => bot.id === id),
+											ctx,
+										),
+									)
 									.join("\n\n");
 								finish(text || "no telemetry yet", "info");
 							} else if (event.type === "disconnected") finish(event.reason, "error");

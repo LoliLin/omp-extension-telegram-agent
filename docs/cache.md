@@ -111,7 +111,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确�
 
 每次 provider response 还记录 provider/api/model/session hash/cache retention、epoch、context/input/cache read/cache write/output/reasoning/latency/cost、trigger、public send、vision/tool rounds，以及 input event/token estimate/rows scanned。保留期默认 90 天，因此 UI 的 lifetime 表示**当前 SQLite 保留窗口**，不是永久累计。
 
-2026-08-07 的 50-run DeepSeek 数据曾测得 90.0% cache hit。该数字仅是历史 deployment 样本，不代表当前 schema 版本、其他模型或未来负载。
+2026-08-07 的 50-run DeepSeek 数据按当前统一公式 `R / (↑ + R + W)`（该样本 `W=0`）测得 90.0% cache hit。该数字仅是历史 deployment 样本，不代表当前 schema 版本、其他模型或未来负载；完整字段口径见 `docs/telemetry.md`。
 
 ## Golden
 

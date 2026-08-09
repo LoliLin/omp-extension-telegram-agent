@@ -74,7 +74,7 @@ import {
 	replyObligationCount,
 } from "../db/reply-obligations.ts";
 import type { RoutingTrigger, TriggerResult, TriggerSource } from "./router.ts";
-import type { AgentStreamFrame } from "../ipc.ts";
+import type { AgentStreamFrame, UsageRun } from "../ipc.ts";
 import { consumedControlMessageIds } from "../telegram/control-command.ts";
 import { classifyPiProviderFailure } from "./model-runtime.ts";
 import {
@@ -140,6 +140,7 @@ export interface RuntimeControlSnapshot {
 	state: RuntimeControlState;
 	epoch: number;
 	model: string;
+	contextWindow: number;
 	lastCompact: { at: number; outcome: "ok" | "failed" } | null;
 }
 
@@ -210,23 +211,7 @@ export class BotRuntime {
 	/** Optional sink for messages this bot sent (poller echo dedupes them, so TUI needs this path). */
 	sentMessageSink: ((rawMsg: unknown) => void) | null = null;
 	/** Optional sink for llm_run telemetry (REQ-UI-0003: live usage push). */
-	usageSink:
-		| ((run: {
-				id: number;
-				botId: string;
-				ts: number;
-				model: string;
-				epoch: number;
-				contextTokens: number;
-				cacheRead: number;
-				cacheWrite: number;
-				cacheMiss: number;
-				outputTokens: number;
-				reasoningTokens: number;
-				latencyMs: number | null;
-				cost: number;
-		  }) => void)
-		| null = null;
+	usageSink: ((run: UsageRun) => void) | null = null;
 	/** Optional sink for newly persisted media descriptions (REQ-UI-0006). */
 	visionSink: VisionUpdateSink | null = null;
 	/** Ephemeral Pi-feed assistant snapshots; never persisted (REQ-UI-0010). */
@@ -1299,6 +1284,7 @@ export class BotRuntime {
 			state: this.controlCompacting ? "compacting" : this.samplingState(),
 			epoch: this.epoch,
 			model: this.bot.model,
+			contextWindow: this.model.contextWindow,
 			lastCompact: this.lastControlCompact,
 		};
 	}
@@ -1524,7 +1510,8 @@ export class BotRuntime {
 		now: number,
 	): void {
 		if (!this.compactionModel) return;
-		this.db
+		const contextTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+		const result = this.db
 			.query(`
 			INSERT INTO llm_runs (
 				bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
@@ -1537,7 +1524,7 @@ export class BotRuntime {
 				now,
 				this.compactionModel.id,
 				this.epoch,
-				usage.input + usage.cacheRead + usage.cacheWrite,
+				contextTokens,
 				usage.cacheRead,
 				usage.cacheWrite,
 				usage.input,
@@ -1549,6 +1536,22 @@ export class BotRuntime {
 				this.compactionModel.provider,
 				this.compactionModel.api,
 			);
+		this.usageSink?.({
+			id: Number(result.lastInsertRowid),
+			botId: this.bot.id,
+			ts: now,
+			model: this.compactionModel.id,
+			epoch: this.epoch,
+			contextTokens,
+			cacheRead: usage.cacheRead,
+			cacheWrite: usage.cacheWrite,
+			cacheMiss: usage.input,
+			outputTokens: usage.output,
+			reasoningTokens: usage.reasoning ?? 0,
+			latencyMs: null,
+			cost: usage.cost.total,
+			compaction: true,
+		});
 	}
 
 	async stop(): Promise<void> {

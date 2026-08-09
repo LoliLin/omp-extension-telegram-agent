@@ -53,7 +53,7 @@ footer 会显示 `SEND AS ...` 或 `CHOOSE BOT ON SEND`。取消选择会恢复�
 /tg status friend      # lifetime + latest 明细
 ```
 
-Pi 原生 footer 显示 `↑/↓/R/W/CH/$/context/model`。lifetime 来自 SQLite `llm_runs` 保留期，跨 Pi、daemon restart 和 context epoch；context 是最近 run 的当前占用，不是历史总和。
+Pi 原生 footer 显示 `↑/↓/R/W/CH/$/context/model`；`/tg status` 展开同一份 latest 与 lifetime 明细。三者与 Telegram `/status` 共用[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)：lifetime 来自 SQLite `llm_runs` 保留期并包含 compact 调用，current context 只取最近主对话 run 并显示 `used/window/percent`，不是历史 prompt 总和。
 
 ## 本地事件、stream 与媒体
 

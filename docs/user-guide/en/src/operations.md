@@ -43,7 +43,7 @@ Never start two daemons against one copied database in the same directory.
 
 Public read commands are `/help` and `/status`.
 
-`/status` uses a Telegram rich message to show each bot's state, model/epoch, routing, cache hit rate, tokens, cost, and latest compaction, with grouped thousands for statistics. Cache hit rate is `read / (read + miss)` and displays `—` when no cache sample exists. If Telegram definitively rejects the rich-message method or format before creating a message, the daemon sends one independently generated plain-text projection instead. It does not resend after timeouts, rate limits, server failures, or other uncertain outcomes, preventing duplicate replies.
+`/status` uses a Telegram rich message to show each bot's runtime state, provider/model/reasoning, current context/window/percentage, latest conversation request, retained SQLite totals, cache hit rate, latency/cost, routing, and latest compaction, with grouped thousands for statistics. It shares the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md) with Pi's footer and `/tg status`: `CH = R / (↑ + R + W)`, no cache read/write sample displays `—`, and current context never uses historical prompt totals. If Telegram definitively rejects the rich-message method or format before creating a message, the daemon sends one independently generated plain-text projection instead. It does not resend after timeouts, rate limits, server failures, or other uncertain outcomes, preventing duplicate replies.
 
 Only `telegram_admins` may run:
 

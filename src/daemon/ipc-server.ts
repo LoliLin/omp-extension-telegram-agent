@@ -22,6 +22,7 @@ import type {
 import { encodeFrame, FrameDecoder, FrameOverflowError } from "../ipc.ts";
 import type { MessageRow } from "../agent/serialize.ts";
 import { isDisplayReadyPath, resolveMediaCachePath } from "../media/local-cache.ts";
+import { loadBotStats } from "../db/usage.ts";
 
 const SNAPSHOT_LIMIT = 100;
 const HISTORY_LIMIT = 100;
@@ -407,38 +408,7 @@ export class IpcServer {
 		const maxId = this.db.query("SELECT COALESCE(MAX(id), 0) m FROM llm_runs").get() as { m: number };
 		out.lastId = maxId.m;
 		for (const botId of bots) {
-			const agg = this.db
-				.query(
-					`SELECT COUNT(*) runs, COALESCE(SUM(context_tokens),0) contextTokens, COALESCE(SUM(cache_read),0) cacheRead,
-					        COALESCE(SUM(cache_write),0) cacheWrite, COALESCE(SUM(cache_miss),0) cacheMiss,
-					        COALESCE(SUM(output_tokens),0) outputTokens, COALESCE(SUM(reasoning_tokens),0) reasoningTokens,
-					        COALESCE(SUM(latency_ms),0) totalLatencyMs, COUNT(latency_ms) latencySamples, MIN(ts) firstRunTs,
-					        COALESCE(SUM(cost),0) cost, COALESCE(MAX(epoch),0) epoch
-					 FROM llm_runs WHERE bot_id = ?`,
-				)
-				.get(botId) as {
-				runs: number;
-				contextTokens: number;
-				cacheRead: number;
-				cacheWrite: number;
-				cacheMiss: number;
-				outputTokens: number;
-				reasoningTokens: number;
-				totalLatencyMs: number;
-				latencySamples: number;
-				firstRunTs: number | null;
-				cost: number;
-				epoch: number;
-			};
-			const last = this.db
-				.query(
-					`SELECT id, bot_id botId, ts, model, epoch, context_tokens contextTokens, cache_read cacheRead,
-					        cache_write cacheWrite, cache_miss cacheMiss, output_tokens outputTokens,
-					        reasoning_tokens reasoningTokens, latency_ms latencyMs, cost
-					 FROM llm_runs WHERE bot_id = ? ORDER BY ts DESC, id DESC LIMIT 1`,
-				)
-				.get(botId) as UsageRun | null;
-			out.bots[botId] = { ...agg, last };
+			out.bots[botId] = loadBotStats(this.db, botId);
 		}
 		return out;
 	}

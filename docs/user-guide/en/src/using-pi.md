@@ -53,7 +53,7 @@ This boundary prevents a remote success plus local acknowledgement failure from 
 /tg status friend      # Lifetime + latest details
 ```
 
-Pi's native footer renders `↑/↓/R/W/CH/$/context/model`. Lifetime values cover retained SQLite `llm_runs` across Pi and daemon restarts and context epochs. Context is the latest run's current use, not a historical sum.
+Pi's native footer renders `↑/↓/R/W/CH/$/context/model`; `/tg status` expands the same latest and lifetime details. Both share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md) with Telegram `/status`: lifetime covers retained SQLite `llm_runs`, including compaction calls, while current context is `used/window/percent` from the latest main-conversation run rather than a historical prompt sum.
 
 ## Local events, streams, and media
 

@@ -48,7 +48,7 @@ Pi native feed、assistant partial、footer、`/tg status`和Telegram control使
 
 ## 如何评估自己的 deployment
 
-1. 用`/tg status [bot]`记录runs、有效public send、prompt miss/read/write、output、reasoning、latency与cost；“lifetime”只表示配置的SQLite保留窗口。
+1. 用`/tg status [bot]`或Telegram `/status`按[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)记录runs、当前context/window、prompt miss/read/write、output、reasoning、latency与cost；“lifetime”只表示配置的SQLite保留窗口。
 2. 比较同类活跃期，不把不同provider/persona/群规模混为一组。
 3. 调整compaction阈值时用`bun run debug`与`llm_runs`遥测的context数据做依据；不要凭感觉改。
 4. 任何prompt/tool/serialization改动先按[开发指南的cache流程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/engineering/development-guide.md)验证golden和epoch。

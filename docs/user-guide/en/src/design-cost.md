@@ -48,7 +48,7 @@ Opening Pi, scrolling history, changing a panel, or viewing usage therefore does
 
 ## Evaluate your deployment
 
-1. Record runs, useful public sends, prompt miss/read/write, output, reasoning, latency, and cost with `/tg status [bot]`; “lifetime” means the configured SQLite retention window.
+1. Use `/tg status [bot]` or Telegram `/status` under the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md) to record runs, current context/window, prompt miss/read/write, output, reasoning, latency, and cost; “lifetime” means the configured SQLite retention window.
 2. Compare similar activity periods; do not mix providers, personas, or group sizes in one conclusion.
 3. Base compaction-threshold changes on `bun run debug` and `llm_runs` telemetry context data; do not tune by intuition.
 4. Before changing prompts, tools, or serialization, follow the cache process in the [development guide](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/engineering/development-guide.md).
