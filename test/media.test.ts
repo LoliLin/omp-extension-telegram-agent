@@ -23,6 +23,7 @@ import {
 } from "../src/ipc.ts";
 import { ensureLocalMedia, reconcileMediaCachePaths, type MediaDownloadApi } from "../src/media/local-cache.ts";
 import { MediaCacheQueue } from "../src/media/media-cache.ts";
+import { ensureVision, type VisionExecutor } from "../src/media/vision.ts";
 import { setLogSink } from "../src/observability/log.ts";
 import { readMediaImage, TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
 
@@ -89,6 +90,106 @@ async function withTimeout<T>(promise: Promise<T>, milliseconds: number, label: 
 }
 
 describe("cross-bot media acquisition", () => {
+	test("coalesces concurrent vision for two bots and reuses the persisted description", async () => {
+		const directory = temporaryDirectory("tg-vision-singleflight-");
+		const db = openDb(join(directory, "agent.db"));
+		const calls: string[] = [];
+		const api = (botId: string): MediaDownloadApi => ({
+			getFile: async (fileId) => {
+				calls.push(`${botId}:get:${fileId}`);
+				return { file_path: `${botId}.jpg` };
+			},
+			downloadFile: async (filePath) => {
+				calls.push(`${botId}:download:${filePath}`);
+				return new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+			},
+		});
+		const apiA = api("A");
+		const apiB = api("B");
+		const apis = new Map([
+			["A", apiA],
+			["B", apiB],
+		]);
+		let describeCalls = 0;
+		let release!: () => void;
+		let markEntered!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const entered = new Promise<void>((resolve) => {
+			markEntered = resolve;
+		});
+		const executor: VisionExecutor = {
+			modelRef: "test/vision:low",
+			provider: "test",
+			model: "vision",
+			readinessFailure: null,
+			describe: async () => {
+				describeCalls++;
+				markEntered();
+				await gate;
+				return {
+					text: "one shared description",
+					telemetry: {
+						kind: "photo",
+						sourceBytesBucket: "lt_32_kib",
+						convertedBytesBucket: "unavailable",
+						latencyMs: 1,
+						inputTokens: 1,
+						outputTokens: 1,
+						reasoningTokens: 0,
+						cost: 0,
+						outcome: "ok",
+					},
+				};
+			},
+		};
+
+		try {
+			db.query("INSERT INTO media (file_unique_id, kind) VALUES ('shared-vision', 'photo')").run();
+			db.query(
+				"INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', 'file-a', 'shared-vision'), ('B', 'file-b', 'shared-vision')",
+			).run();
+			const first = ensureVision(db, apiA as never, "A", "shared-vision", executor, {
+				cacheDir: join(directory, "media"),
+				botApis: apis,
+			});
+			const second = ensureVision(db, apiB as never, "B", "shared-vision", executor, {
+				cacheDir: join(directory, "media"),
+				botApis: apis,
+			});
+			expect(first).toBe(second);
+			await entered;
+			expect(describeCalls).toBe(1);
+			release();
+			expect(await Promise.all([first, second])).toEqual(["one shared description", "one shared description"]);
+
+			const cachedExecutor = {
+				...executor,
+				describe: async () => {
+					describeCalls++;
+					throw new Error("persisted vision cache was bypassed");
+				},
+			} satisfies VisionExecutor;
+			expect(
+				await ensureVision(db, apiB as never, "B", "shared-vision", cachedExecutor, {
+					cacheDir: join(directory, "media"),
+					botApis: apis,
+				}),
+			).toBe("one shared description");
+			expect(describeCalls).toBe(1);
+			expect(
+				JSON.parse(
+					(db.query("SELECT vision FROM media WHERE file_unique_id = 'shared-vision'").get() as { vision: string })
+						.vision,
+				).text,
+			).toBe("one shared description");
+		} finally {
+			release();
+			db.close();
+		}
+	});
+
 	test("uses the receiving bot's file_id with the matching Bot API", async () => {
 		const db = new Database(":memory:");
 		db.exec(`
