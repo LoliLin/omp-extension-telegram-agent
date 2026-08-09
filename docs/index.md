@@ -13,6 +13,7 @@
 - `project.md` — 项目目标、约束、术语
 - `architecture.md` — 稳定的架构边界与 invariant
 - `cache.md` — provider cache 工程：prefix invariant / CACHE_SCHEMA_VERSION / schema history / telemetry
+- `telemetry.md` — Pi footer、`/tg status` 与 Telegram `/status` 的统一 usage 字段和公式
 - `data-model.md` — SQLite schema 与去重规则
 - `engineering/development-guide.md` — **LLM 开发指南，日常开发流程以此为准**（含提交与追溯规则）
 - `engineering/documentation-guide.md` — 文档写作规范

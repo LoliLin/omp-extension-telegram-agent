@@ -1,0 +1,63 @@
+# Usage telemetry 口径
+
+> 本文是 Pi footer、Pi `/tg status` 与 Telegram `/status` 的 usage 字段、计算公式和展示一致性的唯一权威来源。日志诊断见 `docs/engineering/debugging-guide.md`；provider cache 协议见 `docs/cache.md`。
+
+## 目的与范围
+
+三个界面 MUST 从同一份 SQLite `llm_runs` 读模型和同一组派生函数得到数值。界面可以因空间不同采用缩写、换行或富文本，但不能改变字段含义、统计范围或公式。
+
+本文只定义 provider usage telemetry。Telegram runtime state、routing/cooldown 与最近 compact outcome 仍由 control/runtime 层拥有，不属于 usage 聚合。
+
+## 权威数据与两种时间范围
+
+`llm_runs` 每行是一条成功返回 usage 的 provider response。保留期由配置控制，默认 90 天；文案中的“累计”或“lifetime”只表示当前 SQLite 保留行，不表示永久历史。
+
+- **最近请求（latest）**：该 bot 最新一条 `compaction = 0` 的主对话 response。它提供当前上下文、epoch、miss/read/write、output、reasoning、latency 与单次费用。compaction 的辅助模型调用不能冒充当前主对话上下文。
+- **保留期累计（lifetime）**：该 bot 当前保留的全部 `llm_runs`，包括主对话与 compaction provider response。它提供 runs、起始时间、prompt/output/cache/reasoning、费用与平均 latency。
+
+新增 response 必须同时更新 SQLite 与 live IPC totals；snapshot/push 通过 `llm_runs.id` 去重。compaction usage 参与累计，但不替换 latest 主对话请求。
+
+## 字段与公式
+
+| 展示 | 符号 | 权威值 / 公式 | 说明 |
+| --- | --- | --- | --- |
+| Prompt miss | `↑` | `cache_miss` | provider 报告的非 cache prompt input |
+| Output | `↓` | `output_tokens` | provider output；不计入当前 prompt context |
+| Cache read | `R` | `cache_read` | 从 provider cache 读取的 prompt tokens |
+| Cache write | `W` | `cache_write` | 本次写入 provider cache、但未命中的 prompt tokens |
+| Cache hit | `CH` | `R / (↑ + R + W) × 100%` | 显示一位小数；只有 `R > 0` 或 `W > 0` 时有 cache 样本，否则显示 `—` |
+| Prompt total | `prompt` | `↑ + R + W` | lifetime 中等于 `SUM(context_tokens)` |
+| 当前上下文 | `context` | latest 主对话 `context_tokens / model.contextWindow` | 同时显示 tokens、window 与一位小数百分比；不是 lifetime prompt 总和 |
+| Reasoning | `reasoning` | `reasoning_tokens` | latest 取单行；lifetime 求和 |
+| Latency | `latency` / `avg` | `latency_ms` / `SUM(latency_ms) ÷ COUNT(latency_ms)` | 缺失样本显示 `—` |
+| Cost | `$` | `cost` | latest 取单行；lifetime 求和 |
+
+`context_tokens` 是发送给 provider 的 prompt tokens，即 `↑ + R + W`；`output_tokens` 单列。因此“当前上下文 16,000 / 128,000”与“累计 prompt 1,600,000”可以同时成立，二者不可互换。
+
+若没有 latest 主对话请求，当前上下文显示 `— / <window>`；若模型目录也没有有效 `contextWindow`，window 与百分比均显示 `—`。上下文上限 MUST 来自 Pi `ModelRuntime` / model registry 的已解析模型，不在 Telegram 配置中复制第二份常量。
+
+## 三个界面的共同字段
+
+| 字段 | Pi footer | Pi `/tg status` | Telegram `/status` |
+| --- | --- | --- | --- |
+| `↑ / ↓ / R / W / CH / $` lifetime | 紧凑单行 | 完整数值 | 完整数值 |
+| 当前 context / window / percent | 紧凑单行 | latest 明细 | 每 bot 富消息小节 |
+| provider/model/reasoning | 右侧 | 标题/明细 | 每 bot 富消息小节 |
+| latest usage/latency/cost | — | 是 | 是 |
+| lifetime runs/since/prompt/reasoning/avg | — | 是 | 是 |
+| runtime state/routing/compact | footer extension status另管 | — | 是 |
+
+Pi footer 继续委托 Pi 原生 `FooterComponent` 渲染；项目只提供只读 telemetry session view。`/tg status` 与 Telegram `/status` 是空间更充足的明细投影，不应为了与 footer 字符串完全相同而复制 Pi renderer。
+
+## 格式与边界
+
+- Telegram `/status` 的整数和费用整数部分使用英文逗号千位分隔；百分比固定一位小数。
+- Pi footer 保留 Pi 原生 `k/M` 紧凑格式；Pi `/tg status` 可使用紧凑格式，但数值与公式必须相同。
+- Telegram 富消息仍受 3500 字上限；只能按完整 bot 小节省略，不能在 Markdown 中间截断。
+- 格式化和查看 telemetry 不调用 provider，不改变 session、context epoch 或 cache-visible payload。
+
+## 验证与更新触发条件
+
+测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、当前 context 使用 latest/window 而非 lifetime sum，以及 Telegram rich/plain 两种投影一致。
+
+修改 `llm_runs` 字段、Pi footer telemetry adapter、IPC `UsageRun` / `BotStats`、`/tg status` 或 Telegram `/status` 时必须同步本文。该模块的 Cache impact 为 **NONE**：它只读取既有 telemetry 并生成 UI/control side-channel。
