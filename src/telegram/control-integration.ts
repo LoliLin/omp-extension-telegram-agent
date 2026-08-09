@@ -5,9 +5,10 @@ import {
 	classifyTelegramCreateFailure,
 	localFailureCategory,
 	retrySqliteBusy,
+	sendRichTextAndPersist,
 	sendTextAndPersist,
 	SentMessagePersistenceError,
-	type TextSendApi,
+	type RichTextSendApi,
 } from "./send.ts";
 
 export interface TelegramControlCommandPort {
@@ -25,12 +26,12 @@ export type TelegramControlDeliveryResult =
 	| { outcome: "sent"; botId: string; chatId: number; messageId: number }
 	| { outcome: "no_reply" | "failed"; category?: string };
 
-/** Command execution + existing plain send/canonical projection, with no remote retry. */
+/** Command execution + Telegram send/canonical projection, with no uncertain remote retry. */
 export class TelegramControlCoordinator {
 	constructor(
 		private readonly db: Database,
 		private readonly commands: TelegramControlCommandPort,
-		private readonly apis: ReadonlyMap<string, TextSendApi>,
+		private readonly apis: ReadonlyMap<string, RichTextSendApi>,
 		private readonly onSent?: (message: TelegramControlReplyNotification) => void,
 		private readonly warn: (operation: string, fields: Record<string, unknown>) => void = (operation, fields) =>
 			log.warn("telegram_control", "operation_failed", { operation, ...fields }),
@@ -52,14 +53,24 @@ export class TelegramControlCoordinator {
 		}
 
 		try {
-			const { canonical } = await sendTextAndPersist(
-				this.db,
-				api,
-				result.replyBotId,
-				result.chatId,
-				result.text,
-				result.replyToMessageId,
-			);
+			const { canonical } = result.richText
+				? await sendRichTextAndPersist(
+						this.db,
+						api,
+						result.replyBotId,
+						result.chatId,
+						result.richText,
+						result.text,
+						result.replyToMessageId,
+					)
+				: await sendTextAndPersist(
+						this.db,
+						api,
+						result.replyBotId,
+						result.chatId,
+						result.text,
+						result.replyToMessageId,
+					);
 			try {
 				await retrySqliteBusy(() =>
 					this.commands.consumeReply(result.replyBotId, canonical.chat_id, canonical.message_id),

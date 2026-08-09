@@ -1,0 +1,255 @@
+process.env.TZ = "Asia/Singapore";
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { Database } from "bun:sqlite";
+import type { BotConfig } from "../src/config.ts";
+import { openDb } from "../src/db/db.ts";
+import { BotApi, TelegramApiError } from "../src/telegram/api.ts";
+import {
+	TelegramControlCommandService,
+	type ParsedTelegramControlCommand,
+	type TelegramControlResult,
+} from "../src/telegram/control-command.ts";
+import { TelegramControlCoordinator } from "../src/telegram/control-integration.ts";
+import {
+	isDeterministicRichRejection,
+	sendRichTextAndPersist,
+	SentMessagePersistenceError,
+} from "../src/telegram/send.ts";
+
+const CHAT_ID = -1001234567890;
+const RICH_MARKDOWN = "# Telegram Agent 状态\n\n## Bot A";
+const PLAIN_FALLBACK = "Telegram Agent 状态\nBot A";
+
+let db: Database;
+
+beforeEach(() => {
+	db = openDb(":memory:");
+});
+
+afterEach(() => {
+	db.close();
+});
+
+function telegramMessage(messageId: number, rich: boolean): Record<string, unknown> {
+	return {
+		chat: { id: CHAT_ID, type: "supergroup", title: "test" },
+		message_id: messageId,
+		from: { id: 777, is_bot: true, first_name: "Bot A" },
+		date: 1_786_251_069,
+		...(rich
+			? { rich_message: { blocks: [{ type: "heading", text: "Telegram Agent 状态" }] } }
+			: { text: PLAIN_FALLBACK }),
+	};
+}
+
+function statusCommand(): ParsedTelegramControlCommand {
+	return {
+		chatId: CHAT_ID,
+		messageId: 42,
+		edited: false,
+		receivedByBotId: "A",
+		replyBotId: "A",
+		sender: { id: 1, username: "@operator", isBot: false, hasSenderChat: false },
+		action: { kind: "status" },
+	};
+}
+
+describe("Telegram rich control status", () => {
+	test("BotApi sends InputRichMessage markdown with reply parameters", async () => {
+		const api = new BotApi("test-token");
+		const calls: unknown[] = [];
+		(api as unknown as { call(method: string, params: unknown): Promise<unknown> }).call = async (method, params) => {
+			calls.push({ method, params });
+			return telegramMessage(100, true);
+		};
+
+		await api.sendRichMessage(CHAT_ID, RICH_MARKDOWN, 42);
+
+		expect(calls).toEqual([
+			{
+				method: "sendRichMessage",
+				params: {
+					chat_id: CHAT_ID,
+					rich_message: { markdown: RICH_MARKDOWN },
+					reply_parameters: { message_id: 42 },
+				},
+			},
+		]);
+	});
+
+	test("status formatter returns bounded rich Markdown and an independent plain projection", async () => {
+		const bot = {
+			id: "A",
+			name: "Bot *A*",
+			token: "test",
+			personaPath: "/tmp/persona",
+			routingP: 0.25,
+			samplingCooldownMs: 2000,
+			provider: "openai-codex",
+			model: "gpt-5.6-luna",
+			reasoningEffort: "low",
+			compactionThreshold: 128_000,
+			compactionKeepRecent: 16_000,
+			tools: { send: true, search: false, runJs: false },
+			stickerSets: [],
+		} satisfies BotConfig;
+		db.query(
+			`INSERT INTO llm_runs
+			 (bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
+			  output_tokens, reasoning_tokens, cost)
+			 VALUES ('A', 1, 'gpt-5.6-luna', 3, 1000, 700, 50, 250, 120, 30, 0.125)`,
+		).run();
+		const service = new TelegramControlCommandService(
+			db,
+			[bot],
+			"/tmp",
+			new Map([
+				[
+					"A",
+					{
+						controlSnapshot: () => ({
+							state: "idle" as const,
+							epoch: 3,
+							model: "gpt-5.6-luna",
+							lastCompact: { at: 1_786_251_069_000, outcome: "ok" as const },
+						}),
+						compactForControl: async () => ({ ok: false as const, code: "busy" as const }),
+						consumeControlMessage: () => {},
+					},
+				],
+			]),
+			[],
+		);
+
+		const result = await service.handle(statusCommand());
+
+		expect(result.richText).toContain("# Telegram Agent 状态");
+		expect(result.richText).toContain("Bot \\*A\\*");
+		expect(result.richText).toContain("$0.1250");
+		expect(result.richText!.length).toBeLessThanOrEqual(3500);
+		expect(result.text).toContain("Bot *A*");
+		expect(result.text).not.toBe(result.richText);
+	});
+
+	test("coordinator sends and persists the rich reply once", async () => {
+		const calls: string[] = [];
+		const consumed: number[] = [];
+		const result: TelegramControlResult = {
+			chatId: CHAT_ID,
+			replyToMessageId: 42,
+			replyBotId: "A",
+			text: PLAIN_FALLBACK,
+			richText: RICH_MARKDOWN,
+			duplicate: false,
+		};
+		const coordinator = new TelegramControlCoordinator(
+			db,
+			{
+				handle: async () => result,
+				consumeReply: (_botId, _chatId, messageId) => {
+					consumed.push(messageId);
+				},
+			},
+			new Map([
+				[
+					"A",
+					{
+						sendRichMessage: async () => {
+							calls.push("rich");
+							return telegramMessage(100, true);
+						},
+						sendMessage: async () => {
+							calls.push("plain");
+							return telegramMessage(101, false);
+						},
+					},
+				],
+			]),
+		);
+
+		expect(await coordinator.handle(statusCommand())).toEqual({
+			outcome: "sent",
+			botId: "A",
+			chatId: CHAT_ID,
+			messageId: 100,
+		});
+		expect(calls).toEqual(["rich"]);
+		expect(consumed).toEqual([100]);
+		expect(db.query("SELECT text, rich_message FROM messages WHERE message_id = 100").get()).toEqual({
+			text: "Telegram Agent 状态",
+			rich_message: JSON.stringify(telegramMessage(100, true).rich_message),
+		});
+	});
+
+	test("only a deterministic rich rejection falls back to the plain projection", async () => {
+		expect(isDeterministicRichRejection(new TelegramApiError(404, "Not Found"))).toBe(true);
+		expect(
+			isDeterministicRichRejection(new TelegramApiError(400, "Bad Request: message to be replied not found")),
+		).toBe(false);
+		expect(isDeterministicRichRejection(new TelegramApiError(429, "Too Many Requests"))).toBe(false);
+		expect(isDeterministicRichRejection(new TelegramApiError(500, "Internal Server Error"))).toBe(false);
+
+		const calls: unknown[] = [];
+		const api = {
+			sendRichMessage: async () => {
+				calls.push("rich");
+				throw new TelegramApiError(400, "Bad Request: can't parse rich message markdown");
+			},
+			sendMessage: async (_chatId: number, text: string) => {
+				calls.push({ plain: text });
+				return telegramMessage(101, false);
+			},
+		};
+
+		const sent = await sendRichTextAndPersist(db, api, "A", CHAT_ID, RICH_MARKDOWN, PLAIN_FALLBACK, 42);
+		expect(sent.transport).toBe("plain_fallback");
+		expect(calls).toEqual(["rich", { plain: PLAIN_FALLBACK }]);
+		expect(db.query("SELECT COUNT(*) count FROM messages").get()).toEqual({ count: 1 });
+	});
+
+	test("unknown rich outcomes never retry plain or retry after persistence", async () => {
+		let plainCalls = 0;
+		const upstream = new TelegramApiError(500, "Internal Server Error");
+		await expect(
+			sendRichTextAndPersist(
+				db,
+				{
+					sendRichMessage: async () => {
+						throw upstream;
+					},
+					sendMessage: async () => {
+						plainCalls++;
+						return telegramMessage(102, false);
+					},
+				},
+				"A",
+				CHAT_ID,
+				RICH_MARKDOWN,
+				PLAIN_FALLBACK,
+			),
+		).rejects.toBe(upstream);
+		expect(plainCalls).toBe(0);
+
+		const closed = openDb(":memory:");
+		closed.close();
+		let richCalls = 0;
+		await expect(
+			sendRichTextAndPersist(
+				closed,
+				{
+					sendRichMessage: async () => {
+						richCalls++;
+						return telegramMessage(103, true);
+					},
+					sendMessage: async () => telegramMessage(104, false),
+				},
+				"A",
+				CHAT_ID,
+				RICH_MARKDOWN,
+				PLAIN_FALLBACK,
+			),
+		).rejects.toBeInstanceOf(SentMessagePersistenceError);
+		expect(richCalls).toBe(1);
+	});
+});

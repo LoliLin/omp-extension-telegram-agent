@@ -43,6 +43,8 @@ bun run restart
 
 公开只读命令：`/help`、`/status`。
 
+`/status` 使用 Telegram 富消息按 bot 展示状态、模型/epoch、路由、缓存、token、费用与最近一次 compact。若 Telegram 在创建消息前明确拒绝富消息方法或格式，daemon 会改发一次独立生成的纯文本版本；超时、限流和服务端错误等结果不确定时不会重发，以免重复回复。
+
 `telegram_admins` allowlist 才能运行：
 
 ```text

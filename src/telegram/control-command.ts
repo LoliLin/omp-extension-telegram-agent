@@ -56,7 +56,15 @@ export interface TelegramControlResult {
 	replyToMessageId: number;
 	replyBotId: string;
 	text: string | null;
+	/** Telegram InputRichMessage Markdown; text remains the independent safe fallback projection. */
+	richText?: string;
 	duplicate: boolean;
+}
+
+interface ControlExecutionResult {
+	text: string;
+	richText?: string;
+	outcome: string;
 }
 
 /**
@@ -191,14 +199,14 @@ export class TelegramControlCommandService {
 
 		if (mutation) {
 			return await this.enqueueMutation(async () => {
-				const { text, outcome } = await this.execute(command);
-				this.audit(command, true, outcome, startedAt);
-				return this.result(command, text, false);
+				const executed = await this.execute(command);
+				this.audit(command, true, executed.outcome, startedAt);
+				return this.result(command, executed.text, false, executed.richText);
 			});
 		}
-		const { text, outcome } = await this.execute(command);
-		this.audit(command, true, outcome, startedAt);
-		return this.result(command, text, false);
+		const executed = await this.execute(command);
+		this.audit(command, true, executed.outcome, startedAt);
+		return this.result(command, executed.text, false, executed.richText);
 	}
 
 	/** Persist and expose a sent control reply so it remains outside every future provider epoch. */
@@ -234,7 +242,7 @@ export class TelegramControlCommandService {
 		return true;
 	}
 
-	private async execute(command: ParsedTelegramControlCommand): Promise<{ text: string; outcome: string }> {
+	private async execute(command: ParsedTelegramControlCommand): Promise<ControlExecutionResult> {
 		switch (command.action.kind) {
 			case "help":
 				return { text: HELP_TEXT, outcome: "ok" };
@@ -249,25 +257,50 @@ export class TelegramControlCommandService {
 		}
 	}
 
-	private formatStatus(): { text: string; outcome: string } {
+	private formatStatus(): ControlExecutionResult {
 		const lines: string[] = [];
+		const richSections: string[] = [];
 		for (const bot of this.bots) {
 			const snapshot = this.runtimes.get(bot.id)?.controlSnapshot();
 			const aggregate = this.db
 				.query(
-					"SELECT COUNT(*) runs, COALESCE(SUM(context_tokens), 0) context_tokens, COALESCE(SUM(output_tokens), 0) output_tokens, COALESCE(SUM(cost), 0) cost FROM llm_runs WHERE bot_id = ?",
+					`SELECT COUNT(*) runs,
+					        COALESCE(SUM(context_tokens), 0) context_tokens,
+					        COALESCE(SUM(output_tokens), 0) output_tokens,
+					        COALESCE(SUM(reasoning_tokens), 0) reasoning_tokens,
+					        COALESCE(SUM(cache_read), 0) cache_read,
+					        COALESCE(SUM(cache_write), 0) cache_write,
+					        COALESCE(SUM(cache_miss), 0) cache_miss,
+					        COALESCE(SUM(cost), 0) cost
+					   FROM llm_runs WHERE bot_id = ?`,
 				)
-				.get(bot.id) as { runs: number; context_tokens: number; output_tokens: number; cost: number };
+				.get(bot.id) as {
+				runs: number;
+				context_tokens: number;
+				output_tokens: number;
+				reasoning_tokens: number;
+				cache_read: number;
+				cache_write: number;
+				cache_miss: number;
+				cost: number;
+			};
+			if (lines.length > 0) lines.push("");
 			lines.push(
 				`${bounded(bot.id)} · ${bounded(bot.name)} · ${snapshot?.state ?? "unavailable"}`,
 				`epoch=${snapshot?.epoch ?? "-"} model=${bounded(snapshot?.model ?? bot.model)}`,
 				`routing_p=${bot.routingP} cooldown_ms=${bot.samplingCooldownMs}`,
-				`runs=${aggregate.runs} context=${aggregate.context_tokens} output=${aggregate.output_tokens} cost=$${aggregate.cost.toFixed(4)}`,
+				`runs=${aggregate.runs} context=${aggregate.context_tokens} output=${aggregate.output_tokens} reasoning=${aggregate.reasoning_tokens}`,
+				`cache_read=${aggregate.cache_read} cache_write=${aggregate.cache_write} cache_miss=${aggregate.cache_miss} cost=$${aggregate.cost.toFixed(4)}`,
 			);
 			if (snapshot?.lastCompact)
 				lines.push(`last_compact=${snapshot.lastCompact.outcome} at=${snapshot.lastCompact.at}`);
+			richSections.push(statusRichSection(bot, snapshot, aggregate));
 		}
-		return { text: boundedReply(lines.join("\n")), outcome: "ok" };
+		return {
+			text: boundedReply(lines.join("\n")),
+			richText: boundedRichStatus(richSections),
+			outcome: "ok",
+		};
 	}
 
 	/** Write-through: the config file is the only source of truth, so the new value survives restarts. */
@@ -347,12 +380,14 @@ export class TelegramControlCommandService {
 		command: ParsedTelegramControlCommand,
 		text: string | null,
 		duplicate: boolean,
+		richText?: string,
 	): TelegramControlResult {
 		return {
 			chatId: command.chatId,
 			replyToMessageId: command.messageId,
 			replyBotId: command.replyBotId,
 			text: text == null ? null : boundedReply(text),
+			...(richText && richText.length <= MAX_REPLY_CHARS ? { richText } : {}),
 			duplicate,
 		};
 	}
@@ -411,6 +446,70 @@ function bounded(value: string): string {
 
 function boundedReply(value: string): string {
 	return value.length <= MAX_REPLY_CHARS ? value : `${value.slice(0, MAX_REPLY_CHARS - 1)}…`;
+}
+
+function escapeRichMarkdown(value: string): string {
+	return bounded(value).replace(/[\\`*_[\]{}()#+\-.!|>]/g, "\\$&");
+}
+
+function statusIcon(state: RuntimeControlSnapshot["state"] | "unavailable"): string {
+	if (state === "idle") return "🟢";
+	if (state === "cooldown") return "🟡";
+	if (state === "stopping" || state === "unavailable") return "🔴";
+	return "🔵";
+}
+
+function statusLabel(state: RuntimeControlSnapshot["state"] | "unavailable"): string {
+	if (state === "idle") return "空闲";
+	if (state === "busy") return "生成中";
+	if (state === "cooldown") return "冷却中";
+	if (state === "compacting") return "压缩中";
+	if (state === "stopping") return "停止中";
+	return "不可用";
+}
+
+function statusRichSection(
+	bot: BotConfig,
+	snapshot: RuntimeControlSnapshot | undefined,
+	aggregate: {
+		runs: number;
+		context_tokens: number;
+		output_tokens: number;
+		reasoning_tokens: number;
+		cache_read: number;
+		cache_write: number;
+		cache_miss: number;
+		cost: number;
+	},
+): string {
+	const state = snapshot?.state ?? "unavailable";
+	const compact = snapshot?.lastCompact
+		? `${escapeRichMarkdown(snapshot.lastCompact.outcome)} · ${new Date(snapshot.lastCompact.at).toISOString()}`
+		: "暂无";
+	return [
+		`## ${escapeRichMarkdown(bot.name)} · ${escapeRichMarkdown(bot.id)}`,
+		`- **状态**：${statusIcon(state)} ${statusLabel(state)}`,
+		`- **上下文**：epoch ${snapshot?.epoch ?? "-"} · ${escapeRichMarkdown(snapshot?.model ?? bot.model)}`,
+		`- **路由**：routing ${bot.routingP} · cooldown ${bot.samplingCooldownMs} ms`,
+		`- **累计**：${aggregate.runs} runs · ${aggregate.context_tokens} context · ${aggregate.output_tokens} output · ${aggregate.reasoning_tokens} reasoning`,
+		`- **缓存**：${aggregate.cache_read} read · ${aggregate.cache_write} write · ${aggregate.cache_miss} miss`,
+		`- **费用**：$${aggregate.cost.toFixed(4)}`,
+		`- **最近压缩**：${compact}`,
+	].join("\n");
+}
+
+function boundedRichStatus(sections: readonly string[]): string {
+	let output = "# Telegram Agent 状态";
+	for (const section of sections) {
+		const candidate = `${output}\n\n${section}`;
+		if (candidate.length > MAX_REPLY_CHARS) {
+			const omitted = "\n\n_其余 bot 已省略。_";
+			if (output.length + omitted.length <= MAX_REPLY_CHARS) output += omitted;
+			break;
+		}
+		output = candidate;
+	}
+	return output;
 }
 
 const USAGE_TEXT = [

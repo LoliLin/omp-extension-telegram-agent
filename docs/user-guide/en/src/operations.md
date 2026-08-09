@@ -43,6 +43,8 @@ Never start two daemons against one copied database in the same directory.
 
 Public read commands are `/help` and `/status`.
 
+`/status` uses a Telegram rich message to show each bot's state, model/epoch, routing, cache, tokens, cost, and latest compaction. If Telegram definitively rejects the rich-message method or format before creating a message, the daemon sends one independently generated plain-text projection instead. It does not resend after timeouts, rate limits, server failures, or other uncertain outcomes, preventing duplicate replies.
+
 Only `telegram_admins` may run:
 
 ```text
