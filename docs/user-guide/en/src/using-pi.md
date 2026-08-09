@@ -59,7 +59,7 @@ Pi's native footer renders `↑/↓/R/W/CH/$/context/model`; `/tg status` expand
 
 - Assistant thinking/text/tool partials update one Pi-native card in place. Persistent LOCAL/Telegram events replace them at completion; partials are not stored in SQLite.
 - Local assistant text when a bot does not call `send` remains feed-only and never reaches the group.
-- Vision is off by default. When explicitly enabled, photo, sticker, and video vision runs lazily within deployment budgets only when a real bot turn needs media context. A video contributes at most three frames sampled by a fixed normal distribution centered on its midpoint, all interpreted in one vision call. Opening the UI never adds a provider call.
+- Vision is off by default. When explicitly enabled, photo, sticker, and video vision runs lazily only when a real bot turn needs media context. A video contributes at most three fixed representative frames, all interpreted in one vision call. Opening the UI never adds a provider call.
 - A vision description belongs to the shared group message, so global and every one-bot feed render it directly below the media. A one-bot filter limits only LOCAL events and usage.
 - User- and bot-sent static photos/stickers share the local display path. Videos, animations, video notes, video documents, and video stickers retain a media placeholder and can receive a vision description. Inline visibility still follows Pi terminal capabilities; text, media labels, and vision descriptions remain readable fallbacks.
 

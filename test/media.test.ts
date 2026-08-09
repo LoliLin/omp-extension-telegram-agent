@@ -479,11 +479,11 @@ describe("cross-bot media acquisition", () => {
 				cacheDir: join(directory, "media"),
 				scheduler,
 				videoTranscoder: { ffmpeg: true, ffprobe: true },
-				extractFrames: async (input: { fileUniqueId: string }) => {
-					started.push(input.fileUniqueId);
+				extractFrames: async () => {
+					started.push(`video-${started.length + 1}`);
 					active++;
 					peak = Math.max(peak, active);
-					if (input.fileUniqueId === "video-one") {
+					if (started.length === 1) {
 						firstEntered();
 						await firstGate;
 					}
@@ -501,11 +501,11 @@ describe("cross-bot media acquisition", () => {
 			await entered;
 			const second = ensureVision(db, api as never, "A", "video-two", executor, options);
 			await new Promise<void>((resolve) => queueMicrotask(resolve));
-			expect(started).toEqual(["video-one"]);
+			expect(started).toEqual(["video-1"]);
 			expect(telegramCalls).toEqual(["get:video-one-file", "download:videos/video-one-file.mp4"]);
 			releaseFirst();
 			expect(await Promise.all([first, second])).toEqual(["description-0.5", "description-0.5"]);
-			expect(started).toEqual(["video-one", "video-two"]);
+			expect(started).toEqual(["video-1", "video-2"]);
 			expect(telegramCalls).toEqual([
 				"get:video-one-file",
 				"download:videos/video-one-file.mp4",
@@ -664,22 +664,11 @@ describe("video frame sampling", () => {
 		);
 	});
 
-	test("uses deterministic truncated-normal positions centered on the middle", () => {
-		const first = sampleVideoFrameFractions("same-video", 3);
-		expect(sampleVideoFrameFractions("same-video", 3)).toEqual(first);
-		expect(first).toHaveLength(3);
-		expect(first).toEqual([...first].sort((left, right) => left - right));
-		expect(first.every((position) => position >= 0.05 && position <= 0.95)).toBe(true);
-
-		let middle = 0;
-		let edges = 0;
-		for (let index = 0; index < 2_000; index++) {
-			for (const position of sampleVideoFrameFractions(`video-${index}`, 3)) {
-				if (position >= 1 / 3 && position <= 2 / 3) middle++;
-				if (position <= 1 / 6 || position >= 5 / 6) edges++;
-			}
-		}
-		expect(middle).toBeGreaterThan(edges * 2);
+	test("uses fixed representative frame positions", () => {
+		expect(sampleVideoFrameFractions(0)).toEqual([]);
+		expect(sampleVideoFrameFractions(1)).toEqual([0.5]);
+		expect(sampleVideoFrameFractions(2)).toEqual([1 / 3, 2 / 3]);
+		expect(sampleVideoFrameFractions(3)).toEqual([0.2, 0.5, 0.8]);
 	});
 
 	test("probes once, extracts at most three frames, and removes temporary output", async () => {
@@ -699,7 +688,7 @@ describe("video frame sampling", () => {
 			},
 		};
 		const result = await extractVideoFrames(
-			{ fileUniqueId: "video-id", sourcePath, sourceBytes: new Uint8Array(), sourceExtension: "mp4" },
+			{ sourcePath, sourceBytes: new Uint8Array(), sourceExtension: "mp4" },
 			{ runner },
 		);
 		expect(result.ok).toBe(true);

@@ -102,7 +102,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确�
 - foreground 每轮默认最多 2 个 media、deployment并发 2。图片在provider边界占slot；视频在Telegram下载前预留同一个全局slot，并一直持有到本地抽帧和单次vision请求结束，避免多bot并行放大FFmpeg负载。scheduler只有一个FIFO并发门，不维护重启即丢失的小时/每日计数。
 - persistent media identity cache 在 bots 间复用。新的非空结果只追加 `media_update` event，不改写旧 message entry。
 - Telegram下载严格配对bot-specific `file_id`与对应Bot API；回复bot缺mapping时可复用其他已配置接收bot的source。这是provider外的确定性本地准备，不改变消息grammar或主对话每turn token。
-- video、animation、video note、video MIME document与video sticker先按identity固定种子从以50%时点为均值的截断正态分布取最多3帧，再在一次独立vision请求中提交全部帧。结果仍只追加既有`media_update` grammar；persistent/cross-bot hit不增加调用。
+- video、animation、video note、video MIME document与video sticker按时长取1–3帧；位置固定为中点、三分点或20%/50%/80%，再在一次独立vision请求中提交全部帧。结果仍只追加既有`media_update` grammar；persistent/cross-bot hit不增加调用。
 - `ffmpeg`/`ffprobe`缺失在Telegram下载前成为provider外no-op：无vision调用、无动态provider payload、无主对话token，也不写terminal vision cache。CLI/operator log/debug提示安装用途，群内上下文不增加提示文字。
 - photo/sticker display cache、`media_ready`、TUI card 与 `vision_update` IPC 都是 provider 外 side channel。
 - compaction 单独使用配置的廉价模型与 `cacheRetention: "none"`；vision/compaction 不继承主模型的 reasoning 默认。

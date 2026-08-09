@@ -38,7 +38,7 @@ const PHOTO_PROMPT = `你在帮一个群聊 bot 理解图片。简短描述：�
 
 const STICKER_PROMPT = `你在帮一个群聊 bot 理解一张 sticker（聊天表情贴图）。把它理解为一种聊天表达，输出短描述：communicative intent（想表达什么）、emotion、intensity、gesture/画面要点、可见文字。一两句话，用中文，例如"得意的赞同，smug/amused，中等强度"。直接给描述不要客套。`;
 
-const VIDEO_PROMPT = `你在帮一个群聊 bot 理解一段视频。下面是按时间顺序、以视频中点为高概率区域抽取的代表帧。综合描述动作或变化、人物与物体、重要文字/OCR、对聊天有用的信息和不确定处。2-3 句话以内，用中文，直接给描述不要客套；不要把单帧猜测说成确定的完整情节。`;
+const VIDEO_PROMPT = `你在帮一个群聊 bot 理解一段视频。下面是按时间顺序抽取的代表帧。综合描述动作或变化、人物与物体、重要文字/OCR、对聊天有用的信息和不确定处。2-3 句话以内，用中文，直接给描述不要客套；不要把单帧猜测说成确定的完整情节。`;
 
 const VIDEO_STICKER_PROMPT = `你在帮一个群聊 bot 理解一个 video sticker。下面是按时间顺序抽取的代表帧。把它理解为聊天表达，概括动作变化、communicative intent、emotion、intensity、gesture/画面要点和可见文字。一两句话，用中文，直接给描述不要客套。`;
 
@@ -490,7 +490,6 @@ async function ensureVisionPrepared(
 	let images: VisionImageInput[];
 	if (video) {
 		const prepared = await (options.extractFrames ?? extractVideoFrames)({
-			fileUniqueId,
 			sourcePath: local.sourcePath,
 			sourceBytes: local.bytes,
 			sourceExtension: local.sourceExtension,

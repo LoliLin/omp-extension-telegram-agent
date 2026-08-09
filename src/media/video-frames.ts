@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +24,6 @@ export type VideoFrameResult =
 	| { ok: false; outcome: VideoFrameOutcome };
 
 export interface VideoFrameInput {
-	fileUniqueId: string;
 	sourcePath: string | null;
 	sourceBytes: Uint8Array;
 	sourceExtension: string;
@@ -77,37 +75,12 @@ export function videoTranscoderAdvisory(required: boolean, availability: VideoTr
 	return `warning: video recognition is disabled because ${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} unavailable; install the FFmpeg package and restart (it is used only to sample video frames; chat, image vision, and sticker sending continue normally)`;
 }
 
-function seededRandom(identity: string): () => number {
-	const digest = createHash("sha256").update(identity).digest();
-	let state = digest.readUInt32LE(0) || 0x9e3779b9;
-	return () => {
-		state ^= state << 13;
-		state ^= state >>> 17;
-		state ^= state << 5;
-		return (state >>> 0) / 0x1_0000_0000;
-	};
-}
-
-/** Deterministic samples from N(0.5, 0.18), truncated to the useful 5%-95% duration range. */
-export function sampleVideoFrameFractions(fileUniqueId: string, requested = VIDEO_FRAME_MAX): number[] {
+/** Fixed representative positions keep extraction deterministic and explainable. */
+export function sampleVideoFrameFractions(requested = VIDEO_FRAME_MAX): number[] {
 	const count = Math.min(VIDEO_FRAME_MAX, Math.max(0, Math.floor(requested)));
-	if (count === 0) return [];
-	const random = seededRandom(fileUniqueId);
-	const positions: number[] = [];
-	for (let attempts = 0; positions.length < count && attempts < 96; attempts++) {
-		const u1 = Math.max(Number.EPSILON, random());
-		const u2 = random();
-		const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-		const position = 0.5 + normal * 0.18;
-		if (position < 0.05 || position > 0.95) continue;
-		if (positions.some((existing) => Math.abs(existing - position) < 0.04)) continue;
-		positions.push(Number(position.toFixed(6)));
-	}
-	for (const fallback of [0.5, 0.35, 0.65]) {
-		if (positions.length >= count) break;
-		if (!positions.some((existing) => Math.abs(existing - fallback) < 0.04)) positions.push(fallback);
-	}
-	return positions.sort((left, right) => left - right).slice(0, count);
+	if (count === 1) return [0.5];
+	if (count === 2) return [1 / 3, 2 / 3];
+	return count === 3 ? [0.2, 0.5, 0.8] : [];
 }
 
 function frameCount(durationSeconds: number): number {
@@ -172,7 +145,7 @@ export async function extractVideoFrames(
 		const durationSeconds = parseDuration(probe.stdout);
 		if (durationSeconds == null) return { ok: false, outcome: "video_probe_failed" };
 
-		const positions = sampleVideoFrameFractions(input.fileUniqueId, frameCount(durationSeconds));
+		const positions = sampleVideoFrameFractions(frameCount(durationSeconds));
 		const frames: VideoFrame[] = [];
 		for (let index = 0; index < positions.length; index++) {
 			const position = positions[index]!;
