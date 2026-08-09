@@ -21,7 +21,11 @@ import {
 	COMPACTION_SUMMARY_PROMPT,
 } from "../src/agent/prompt.ts";
 import { toolsHash } from "../src/agent/tools.ts";
-import { stickerCatalogPromptBlock } from "../src/media/sticker-catalog.ts";
+import {
+	appendStickerCandidateSuffix,
+	recentContextStickerCandidates,
+	stickerCatalogPromptBlock,
+} from "../src/media/sticker-catalog.ts";
 import {
 	NO_SEND_MARKER,
 	TELEGRAM_CONTEXT_TYPE,
@@ -30,12 +34,12 @@ import {
 } from "../src/agent/extensions/index.ts";
 
 const GOLDEN = {
-	schemaVersion: 9,
+	schemaVersion: 10,
 	systemZhTemplate: "0dadcaf37061",
 	systemEnTemplate: "fabd0ba82eab",
 	serialize: "68a17d6e5c05",
 	eventSerialize: "4a57de738bf9",
-	tools: "8e125a32e3f6",
+	tools: "d89dbe3ebe1b",
 	compactionPrompt: "045a5241fdd7",
 	extensionOrder: "e04f7032d531",
 	contextProtocol: "a9ca6974ac5f",
@@ -252,4 +256,83 @@ test("sticker catalog prompt block grammar stable (identity-only, per-bot)", () 
 	expect(stickerCatalogPromptBlock(db, "A", ["Mikufufu"])).toBe(block);
 	expect(stickerCatalogPromptBlock(db, "B", ["Mikufufu"])).toContain("🅱️ s3");
 	expect(stickerCatalogPromptBlock(db, "B", ["Mikufufu"])).not.toContain("s1");
+});
+
+test("recent visible user stickers form a bounded final suffix", () => {
+	const db = new Database(":memory:");
+	db.exec(readFileSync("src/db/schema.sql", "utf8"));
+	const chatId = -1004402809405;
+	const insertMedia = db.prepare(
+		"INSERT INTO media (file_unique_id, kind, sticker_emoji, vision) VALUES (?, 'sticker', ?, ?)",
+	);
+	const insertMapping = db.prepare("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES (?, ?, ?)");
+	const insertMessage = db.prepare(
+		`INSERT INTO messages
+			(chat_id, message_id, date, sender_id, display_name, is_bot, media, first_seen_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 'A')`,
+	);
+	const insertVisible = db.prepare(
+		"INSERT INTO bot_visible_messages (bot_id, chat_id, message_id, context_epoch) VALUES ('A', ?, ?, 1)",
+	);
+
+	for (let index = 1; index <= 10; index++) {
+		const fileUniqueId = `user-sticker-${index}`;
+		insertMedia.run(
+			fileUniqueId,
+			"😺",
+			JSON.stringify({ model: "m", kind: "sticker", text: `emotion-${index}`, at: 1 }),
+		);
+		insertMapping.run("A", `file-${index}`, fileUniqueId);
+		insertMessage.run(
+			chatId,
+			index,
+			100 + index,
+			index,
+			`user-${index}`,
+			0,
+			JSON.stringify({ kind: "sticker", file_unique_id: fileUniqueId, sticker_emoji: "😺" }),
+		);
+		if (index <= 5) insertVisible.run(chatId, index);
+	}
+
+	insertMedia.run("bot-sticker", "🤖", JSON.stringify({ model: "m", kind: "sticker", text: "bot", at: 1 }));
+	insertMapping.run("A", "bot-file", "bot-sticker");
+	insertMessage.run(
+		chatId,
+		11,
+		111,
+		999,
+		"bot",
+		1,
+		JSON.stringify({ kind: "sticker", file_unique_id: "bot-sticker", sticker_emoji: "🤖" }),
+	);
+	insertMedia.run("other-bot-only", "🅱️", JSON.stringify({ model: "m", kind: "sticker", text: "B only", at: 1 }));
+	insertMapping.run("B", "b-file", "other-bot-only");
+	insertMessage.run(
+		chatId,
+		12,
+		112,
+		12,
+		"user-12",
+		0,
+		JSON.stringify({ kind: "sticker", file_unique_id: "other-bot-only", sticker_emoji: "🅱️" }),
+	);
+
+	const block = recentContextStickerCandidates(db, "A", chatId, 1, [6, 7, 8, 9, 10, 11, 12]);
+	expect(block).toBe(`Available stickers (recent context):
+s10 = 😺 emotion-10
+s9 = 😺 emotion-9
+s8 = 😺 emotion-8
+s7 = 😺 emotion-7
+s6 = 😺 emotion-6
+s5 = 😺 emotion-5
+s4 = 😺 emotion-4
+s3 = 😺 emotion-3`);
+	expect(block).not.toContain("bot");
+	expect(block).not.toContain("B only");
+	const providerText = appendStickerCandidateSuffix("serialized messages", block);
+	expect(providerText).toBe(`serialized messages
+
+${block}`);
+	expect(providerText.endsWith(block)).toBe(true);
 });

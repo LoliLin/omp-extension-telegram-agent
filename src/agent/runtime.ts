@@ -60,7 +60,9 @@ import {
 } from "../media/vision.ts";
 import type { MediaDownloadApi } from "../media/local-cache.ts";
 import {
+	appendStickerCandidateSuffix,
 	ensureStickerCatalog,
+	recentContextStickerCandidates,
 	stickerCatalogPromptBlock,
 	stickerCatalogSnapshotHash,
 } from "../media/sticker-catalog.ts";
@@ -805,7 +807,7 @@ export class BotRuntime {
 			} | null;
 			if (!row)
 				throw new Error(
-					`unknown sticker id: ${params.sticker} (use a short_id from the Sticker 目录 in the system prompt)`,
+					`unknown sticker id: ${params.sticker} (use a short_id from the Sticker 目录 or latest recent-context candidates)`,
 				);
 			stickerFileId = fileIdForBot(this.db, this.bot.id, row.file_unique_id);
 			if (!stickerFileId) {
@@ -1177,13 +1179,25 @@ export class BotRuntime {
 			if (highWater > consumedSeq) setConsumedSeq(this.db, this.bot.id, chatId, highWater);
 			return replyObligationCount(this.db, this.bot.id, chatId) > 0;
 		}
+		const stickerCandidates = recentContextStickerCandidates(
+			this.db,
+			this.bot.id,
+			chatId,
+			this.epoch,
+			packed.visibleMessageIds,
+		);
+		const stickerCandidateTokens = stickerCandidates ? estimateProviderTokensUpperBound(`\n\n${stickerCandidates}`) : 0;
+		const providerText =
+			stickerCandidates && packed.estimatedTokens + stickerCandidateTokens <= suffixBudget
+				? appendStickerCandidateSuffix(packed.text, stickerCandidates)
+				: packed.text;
 
 		const selectedIds = new Set(packed.visibleMessageIds);
 		const delivered = obligations.filter((obligation) => selectedIds.has(obligation.messageId));
 		const details: TelegramContextDetails = {
 			version: TELEGRAM_CONTEXT_VERSION,
 			consumedSeq: highWater,
-			providerText: packed.text,
+			providerText,
 			visibleMessageIds: packed.visibleMessageIds,
 			events: packed.events.map((event) => ({
 				ingestSeq: event.ingestSeq,
@@ -1196,7 +1210,7 @@ export class BotRuntime {
 		this.currentTriggerMessageId = packed.events.at(-1)?.messageId ?? this.currentTriggerMessageId;
 		this.pendingInputMetrics = {
 			inputEvents: packed.events.length,
-			estimatedTokens: estimateProviderTokensUpperBound(packed.text),
+			estimatedTokens: estimateProviderTokensUpperBound(providerText),
 			rowsScanned,
 			visionCalls: this.pendingInputMetrics.visionCalls,
 		};
@@ -1206,7 +1220,7 @@ export class BotRuntime {
 		for (const messageId of packed.visibleMessageIds) this.visibleMessageIds.add(messageId);
 		try {
 			await this.session.sendCustomMessage(
-				{ customType: TELEGRAM_CONTEXT_TYPE, content: packed.text, display: false, details },
+				{ customType: TELEGRAM_CONTEXT_TYPE, content: providerText, display: false, details },
 				{ triggerTurn: true },
 			);
 		} catch (error) {

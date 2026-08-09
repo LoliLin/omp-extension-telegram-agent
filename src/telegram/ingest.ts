@@ -103,6 +103,17 @@ function recordMedia(db: Database, botId: string, m: CanonicalMessage): void {
 		media.file_id,
 		media.file_unique_id,
 	);
+	if (media.kind === "sticker") {
+		const row = db.query("SELECT rowid FROM media WHERE file_unique_id = ?").get(media.file_unique_id) as {
+			rowid: number;
+		} | null;
+		if (row) {
+			db.query("UPDATE media SET short_id = ? WHERE file_unique_id = ? AND short_id IS NULL").run(
+				`s${row.rowid}`,
+				media.file_unique_id,
+			);
+		}
+	}
 }
 
 function insertMessage(db: Database, botId: string, m: CanonicalMessage): IngestResult {

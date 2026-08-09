@@ -127,7 +127,7 @@ export interface BotConfig {
 	maxSuffixTokens?: number;
 	maxMessageTokens?: number;
 	tools: BotToolsConfig;
-	/** Telegram sticker set names; locally retrieved into a bounded per-turn suffix. */
+	/** Telegram sticker set names pinned as this bot's stable, identity-only catalog. */
 	stickerSets: string[];
 }
 

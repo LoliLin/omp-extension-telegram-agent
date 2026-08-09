@@ -3,7 +3,8 @@
 // identity + per-bot file_id persisted, and short_ids assigned from rowids. The catalog is
 // serialized identity-only (set + emoji + short_id, no vision text) into the stable system
 // prompt, so the prefix is fully determined by config + DB catalog and stays stable across
-// restarts (cache schema v9). Photo/foreground vision is unrelated and lives in vision.ts.
+// restarts. Recent visible user stickers are a separate bounded dynamic tail (cache schema v10).
+// Photo/foreground vision is unrelated and lives in vision.ts.
 
 import type { Database } from "bun:sqlite";
 import { errorCategory, log } from "../observability/log.ts";
@@ -11,6 +12,8 @@ import { createHash } from "node:crypto";
 import type { BotApi } from "../telegram/api.ts";
 
 export const STICKER_CATALOG_MAX = 120; // bounded local inventory and startup work
+export const CONTEXT_STICKER_CANDIDATE_MAX = 8;
+const CONTEXT_STICKER_SCAN_MAX = 64;
 
 export interface CatalogSticker {
 	file_unique_id: string;
@@ -161,6 +164,99 @@ export function stickerCatalogPromptBlock(db: Database, botId: string, sets: rea
 	if (rows.length === 0) return "";
 	const lines = rows.map((row) => `- [${row.sticker_set ?? ""}] ${row.sticker_emoji ?? ""} ${row.short_id}`);
 	return `# Sticker 目录\n\n你可以用 send 的 sticker 参数发送以下 sticker（填 short_id，不得编造其他 id）：\n\n${lines.join("\n")}`;
+}
+
+interface ContextStickerRow {
+	rowid: number;
+	file_unique_id: string;
+	short_id: string | null;
+	sticker_set: string | null;
+	sticker_emoji: string | null;
+	vision: string | null;
+}
+
+function stickerDescription(row: ContextStickerRow): string {
+	if (row.vision) {
+		try {
+			const text = (JSON.parse(row.vision) as { text?: unknown }).text;
+			if (typeof text === "string" && text.trim()) return text.replace(/\s+/g, " ").trim().slice(0, 60);
+		} catch {
+			// A malformed historical vision cache does not hide an otherwise sendable sticker.
+		}
+	}
+	return row.sticker_set ? `[${row.sticker_set}]` : "";
+}
+
+/**
+ * The newest distinct user stickers genuinely present in this bot's current context generation.
+ * Candidates are bot-sendable, bounded, and assigned the global s<media.rowid> identity lazily
+ * for historical rows created before ingest assigned sticker short ids.
+ */
+export function recentContextStickerCandidates(
+	db: Database,
+	botId: string,
+	chatId: number,
+	epoch: number,
+	newlyVisibleMessageIds: readonly number[],
+	limit = CONTEXT_STICKER_CANDIDATE_MAX,
+): string {
+	const boundedLimit = Math.min(CONTEXT_STICKER_CANDIDATE_MAX, Math.max(0, Math.floor(limit)));
+	if (boundedLimit === 0) return "";
+	const rows = db
+		.query(`
+			WITH visible(message_id) AS (
+				SELECT message_id
+				  FROM bot_visible_messages
+				 WHERE bot_id = ?1 AND chat_id = ?2 AND context_epoch = ?3
+				UNION
+				SELECT CAST(value AS INTEGER) FROM json_each(?4)
+			)
+			SELECT media.rowid, media.file_unique_id, media.short_id,
+			       media.sticker_set, media.sticker_emoji, media.vision
+			  FROM visible
+			  JOIN messages message
+			    ON message.chat_id = ?2 AND message.message_id = visible.message_id
+			  JOIN media
+			    ON media.file_unique_id = json_extract(message.media, '$.file_unique_id')
+			 WHERE message.is_bot = 0
+			   AND json_extract(message.media, '$.kind') = 'sticker'
+			   AND EXISTS (
+			     SELECT 1 FROM media_file_ids mapping
+			      WHERE mapping.bot_id = ?1 AND mapping.file_unique_id = media.file_unique_id
+			   )
+			 ORDER BY message.date DESC, message.message_id DESC
+			 LIMIT ?5
+		`)
+		.all(
+			botId,
+			chatId,
+			epoch,
+			JSON.stringify([...new Set(newlyVisibleMessageIds)]),
+			CONTEXT_STICKER_SCAN_MAX,
+		) as ContextStickerRow[];
+	const seen = new Set<string>();
+	const lines: string[] = [];
+	for (const row of rows) {
+		if (seen.has(row.file_unique_id)) continue;
+		seen.add(row.file_unique_id);
+		const shortId = row.short_id ?? `s${row.rowid}`;
+		if (!row.short_id) {
+			db.query("UPDATE media SET short_id = ? WHERE file_unique_id = ? AND short_id IS NULL").run(
+				shortId,
+				row.file_unique_id,
+			);
+		}
+		const description = stickerDescription(row);
+		lines.push(`${shortId} = ${row.sticker_emoji ?? ""}${description ? ` ${description}` : ""}`.trim());
+		if (lines.length >= boundedLimit) break;
+	}
+	return lines.length > 0 ? `Available stickers (recent context):\n${lines.join("\n")}` : "";
+}
+
+/** Keep dynamic candidates after every serialized message/delta so the preceding cache prefix is untouched. */
+export function appendStickerCandidateSuffix(providerText: string, candidateBlock: string): string {
+	const block = candidateBlock.trim();
+	return block ? `${providerText}\n\n${block}` : providerText;
 }
 
 /** Fingerprint the exact identity state that shapes the prompt block; vision text never participates. */

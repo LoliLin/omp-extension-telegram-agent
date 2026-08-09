@@ -4,8 +4,8 @@
 
 ## 1. Cache 经济（项目核心 invariant）
 
-- **已修**：sticker catalog snapshot hash 曾包含异步回填的 vision 文本——回填完成前每次重启 fingerprint 漂移，provider 前缀 cache 全失效。v9 修复为 catalog identity-only 固化进 system prompt，top-K 检索与 vision 回填整体删除（`src/agent/prompt.ts:6` `CACHE_SCHEMA_VERSION = 9`）。
-- **已修**：top-K sticker 候选曾注入每轮最后一条 message 的 suffix，使该 message 永远无法被 cache 复用。已随 v9 一并删除。
+- **已修**：sticker catalog snapshot hash 曾包含异步回填的 vision 文本——回填完成前每次重启 fingerprint 漂移，provider 前缀 cache 全失效。v9 修复为 catalog identity-only 固化进 system prompt，旧 top-K 检索与 catalog vision 回填整体删除。
+- **已修**：旧语义 top-K 曾扫描全库并注入每轮最后一条 message 的 suffix，导致该动态尾部本身无法复用；v9 删除。后续 v10 按明确产品需求新增了不同机制：只列当前 generation 真正 visible、该 bot 可发送的最近 8 个用户 sticker，并严格追加在本轮新 entry 最后，不改写此前 prefix。当前权威规则见`docs/cache.md`。
 - **保留**：`streamFunction` 猴补丁（`src/agent/runtime.ts:431-436`）向每次请求注入 `cacheRetention`，是项目中唯一的 Pi 私有缝。pi-ai 的 `StreamOptions` 有 `cacheRetention`，但 pi-coding-agent 不从 settings 透传，无公开替代。**升级 Pi 时必须验证此缝仍生效**；cache-observer 实测 payload 兜底（`src/observability/provider-context.ts`）。
 - **保留**：extension 顺序是双真相源——声明常量 `TELEGRAM_EXTENSION_ORDER`（`src/agent/extensions/index.ts`）与 `runtime.ts` 的注册数组手工同步。改注册顺序必须同步常量。
 - **刻意不统一**：`src/agent/token-packer.ts:15` 用 UTF-8 bytes/2 作 token 上界估算。Pi 的 estimateTokens（chars/4）对中文低估 2-3 倍，bytes/2 是刻意的保守上界，不要"统一"成 Pi 的算法。

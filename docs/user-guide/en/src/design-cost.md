@@ -12,7 +12,7 @@ This avoids an entire unnecessary call instead of shaving a few tokens after sta
 
 ## 2. A stable provider prefix reuses cache
 
-The shared protocol comes first, followed by the persona, then a bounded identity-only sticker catalog, then fixed-order tool schemas. This maximizes the byte-identical prefix shared by bots. New messages append only to the suffix; the sticker catalog holds just set + emoji + short_id lines (with a hard cap), pinned once instead of changing every turn.
+The shared protocol comes first, followed by the persona, then a bounded identity-only sticker catalog, then fixed-order tool schemas. This maximizes the byte-identical prefix shared by bots. The catalog holds only capped set + emoji + short_id lines and remains pinned. A separate list of at most eight recent user stickers that are visible in the current context and sendable by this bot is appended only after the current turn's serialized messages; it never rewrites the preceding cached prefix and is omitted when the suffix budget cannot fit it.
 
 A fingerprint covers the Pi/provider/model/cache policy, protocol, persona, serializer, compaction, extensions, and tools. A cache-visible change increments the schema and creates a new session/epoch before restoration; an old session file is retained but never resumed under a different identity. UI, telemetry, and operator commands may not alter provider bytes. See [Cache engineering](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md).
 
@@ -30,7 +30,7 @@ Compaction uses a configured cheap task model with provider cache retention disa
 
 ## 5. Media vision runs lazily and reuses results
 
-Photos and stickers enter canonical SQLite first. Vision is disabled by default. When explicitly enabled, a deployment scheduler bounds foreground media, concurrency, per-chat hourly calls, and daily calls. Results are persisted by media identity, reused across bots, and appended as immutable media-update events instead of rewriting old context. UI updates consume cached results without adding a model call.
+Photos and stickers from users and bots enter canonical SQLite first and share one bounded display cache. SQLite stores only a cache-relative filename, so moving a deployment does not pin TUI rendering to the previous absolute path. Vision is disabled by default. When explicitly enabled, a deployment scheduler bounds foreground media, concurrency, per-chat hourly calls, and daily calls. Results are persisted by media identity, reused across bots, and appended as immutable media-update events instead of rewriting old context. UI updates consume cached results without adding a model call.
 
 See the [Vision architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md).
 

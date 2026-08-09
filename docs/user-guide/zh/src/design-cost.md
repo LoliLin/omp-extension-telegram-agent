@@ -12,7 +12,7 @@ mention、reply、配置名称和HMAC概率桶都由本地代码判断。普通�
 
 ## 2. Stable provider prefix 复用cache
 
-共享协议位于最前，persona随后，末尾是有界的 identity-only sticker 目录，再之后是固定顺序tool schema，让多只bot尽可能共享逐字节相同的prefix。新消息只追加suffix；sticker 目录只含 set + emoji + short_id（有上限），一次固化后不再每轮变化。
+共享协议位于最前，persona随后，末尾是有界的 identity-only sticker 目录，再之后是固定顺序tool schema，让多只bot尽可能共享逐字节相同的prefix。固定目录只含有上限的 set + emoji + short_id。另一份最多8条的动态候选只取当前context真正可见、且该bot可发送的最近用户sticker，并严格追加在本轮序列化消息之后；它不改写此前prefix，suffix预算不足时整体省略。
 
 fingerprint覆盖Pi/provider/model/cache policy、protocol、persona、serializer、compaction、extensions与tools。cache-visible内容变化必须升级schema，并在restore前创建新session/epoch；旧session文件保留，但不会用不同identity恢复。UI、telemetry和operator命令不能偷偷改变provider bytes。权威规则见[Cache工程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md)。
 
@@ -30,7 +30,7 @@ compaction使用配置的廉价task model且关闭provider cache retention，因
 
 ## 5. 媒体视觉按需执行并复用结果
 
-照片和sticker先落canonical DB，vision默认关闭。显式开启后，deployment scheduler会分别限制foreground媒体数、并发、每群每小时调用和每日调用。结果按media identity持久化并在bot之间复用，以immutable media-update event追加而不是改写旧context；UI使用缓存结果原位更新，不额外调用模型。
+用户和bot的照片/sticker都先落canonical DB并共用一条有界展示缓存；SQLite只保存cache-relative文件名，deployment移动后不会继续把TUI绑定到旧绝对路径。vision默认关闭。显式开启后，deployment scheduler会分别限制foreground媒体数、并发、每群每小时调用和每日调用。结果按media identity持久化并在bot之间复用，以immutable media-update event追加而不是改写旧context；UI使用缓存结果原位更新，不额外调用模型。
 
 权威流程见[架构的 Vision 章节](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md)。
 

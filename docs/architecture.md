@@ -103,8 +103,8 @@
 - **attach 过滤**：`/tg attach <bot-id>` 以单 bot 视角观察——daemon 端对 snapshot / history / broadcast / usage 过滤 agent_events（群消息始终全量）；不指定时为全局视角。listener在有效hello建立global或单bot scope前保持静默；extension先按本地配置校验id，daemon在hello边界独立校验，stale/未知filter必须断开listener，绝不静默降级为全局视角。
 - **Pi 原生 telemetry footer**：SQLite 保留期 lifetime 的 `cacheMiss/output/cacheRead/cacheWrite/cost` 映射到 Pi 原生 `↑/↓/R/W/CH/$`，最近 run 提供 current context，配置提供 model/reasoning；全局只聚合当前配置 bots 并取最新 run 的 model。snapshot 附全历史基线（`lastId` 防 live 双计），llm_run 经 additive IPC 推送 cache/reasoning/latency。telemetry view 只存在于内存，委托 `FooterComponent` 处理 theme/width/cwd/git/status；`panel off` 恢复 operator session default footer，完整 lifetime/latest 明细由 `/tg status` 通知。
 - **Pi 原生 assistant stream**：runtime 将 Pi assistant `message_start/update/end` 转成有界完整快照（thinking/text/至多 4 个 tool args），daemon 按 bot filter只向 live listener 推送，不写 SQLite/snapshot/history/Pi session。feed 最多保留 32 张临时 `Container`/`Box`/`Text` 卡片，end/abort/disconnect 原位移除，迟到 ended id 被有界 tombstone 忽略；最终 LOCAL/tool/Telegram event继续走既有单次持久链路。extension 从 `setFooter` factory保留 session `TUI.requestRender()`，每次 feed 变化只请求宿主刷新；Pi 自己约 16 ms 合帧，`panel off` 不销毁 render handle。
-- **媒体内联**：终端能力只读 Pi `getCapabilities()`。PNG 直接交给 Pi `Image`；Pi 判定为 Kitty protocol 时，JPEG/WebP/GIF 先用 coding-agent 公开的 `convertToPng()` 异步归一化，完成后只重建引用同一文件的原生卡片并请求 host render。sticker 使用 Pi `Image` 的 24×12 cell 上限，photo 等其他图片保留 56×16；比例、窄宽度 clamp、resize、crop 与 fallback 仍全部由 Pi 负责。转换按 path + size + mtime revision 合并 in-flight，结果/失败共用最多 32 项、32 MiB 的 LRU（单项 8 MiB，pending 32）；detach/restart/shutdown 会移除旧 feed callback。iTerm2/无图像能力继续走 Pi 自身 Image/fallback，WebM等不支持格式保留文字占位。IPC 只传 `mediaPath`/`mediaDesc`；source 读取仍限 1 MiB，base64与绝对路径不进入日志、DB、session或provider。
-- **photo readiness**：poller先提交raw/canonical/offset，daemon再broadcast placeholder并把photo identity交给后台queue；routing/nobody/busy不影响下载。live queue按identity去重、最多2 active/128 pending；startup按最新`media.rowid`只排100条`local_path IS NULL`。precache和vision共享同一Telegram download in-flight；下载source必须保持`media_file_ids.bot_id/file_id`与同一个bot的Bot API配对，优先回复bot自己的mapping，不存在时使用任一已配置且拥有mapping的接收bot，绝不能把一个bot的`file_id`交给另一个bot。支持的≤1 MiB静态文件以hash basename写同目录0600临时文件后rename，成功才更新`media.local_path`并广播`media_ready`。timeline用256项/10分钟乱序cache把path合入live/history消息，feed只重建匹配slot并请求Pi host render；不新增entry、vision或LLM call。shutdown先stop/abort queue再关DB，失败只留label fallback与脱敏聚合。
+- **媒体内联**：终端能力只读 Pi `getCapabilities()`。PNG 直接交给 Pi `Image`；Pi 判定为 Kitty protocol 时，JPEG/WebP/GIF 先用 coding-agent 公开的 `convertToPng()` 异步归一化，完成后只重建引用同一文件的原生卡片并请求 host render。sticker 使用 Pi `Image` 的 24×12 cell 上限，photo 等其他图片保留 56×16；比例、窄宽度 clamp、resize、crop 与 fallback 仍全部由 Pi 负责。转换按 path + size + mtime revision 合并 in-flight，结果/失败共用最多 32 项、32 MiB 的 LRU（单项 8 MiB，pending 32）；detach/restart/shutdown 会移除旧 feed callback。iTerm2/无图像能力继续走 Pi 自身 Image/fallback，WebM等不支持格式保留文字占位。IPC 只传 owner-local `mediaPath`/`mediaDesc`；source 读取仍限 1 MiB，base64与绝对路径不进入日志、DB、session或provider。SQLite 只保存 cache-relative basename，IPC 在当前 deployment 的 `data/media` 内解析。
+- **media readiness**：poller先提交raw/canonical/offset，daemon再broadcast placeholder并把 user/bot 的 photo 或 sticker identity交给同一个后台queue；agent 自发媒体也在 canonical insert 后走这条队列，routing/nobody/busy不影响下载。live queue按identity去重、最多2 active/128 pending；startup先把旧绝对`local_path`按basename迁到当前`data/media`，找不到现存文件就清空，再按最新`media.rowid`只排100条`local_path IS NULL`。display cache和vision共享同一Telegram download in-flight；下载source必须保持`media_file_ids.bot_id/file_id`与同一个bot的Bot API配对，优先回复bot自己的mapping，不存在时使用任一已配置且拥有mapping的接收bot，绝不能把一个bot的`file_id`交给另一个bot。支持的≤1 MiB静态文件以hash basename写同目录0600临时文件后rename，成功才把basename写入`media.local_path`并广播`media_ready`。timeline用256项/10分钟乱序cache把path合入live/history消息，feed只重建匹配slot并请求Pi host render；不新增entry、vision或LLM call。shutdown先stop/abort queue再关DB，失败只留label fallback与脱敏聚合。
 
 ## Vision
 
@@ -115,7 +115,7 @@
 - JPEG/PNG原样作为Pi `ImageContent`发送；静态WebP/GIF先走Pi公开`convertToPng()`，TGS/WebM/未知格式确定性fallback且不调用provider。每次`completeSimple()`固定low、256 output tokens、90秒abort、provider retry 0；上游失败/空响应只落固定outcome，不写错误正文。
 - production vision event只含kind、source/converted bytes bucket、latency、input/output/reasoning token、cost与outcome；不含media identity/path/prompt/response。deployment scheduler默认并发2、每轮foreground最多2、每群每小时24、每日200。direct reply媒体优先；失败、unsupported或budget exceeded使用确定性fallback。
 - foreground vision的runtime可以与最先收到Telegram update的bot不同；本地媒体层必须复用正确接收bot的下载能力，只有所有已配置bot都没有该media mapping时才返回`file_id_unavailable`。这不增加provider call、retry或等待第二个poller。
-- 新的非空描述持久化后追加唯一`media_update` event；已经写入session的message entry不重算、不重写。vision 只覆盖照片/图片；sticker catalog 不做 vision 回填，其 identity snapshot 只参与 fingerprint。
+- 新的非空描述持久化后追加唯一`media_update` event；已经写入session的message entry不重算、不重写。vision 只覆盖消息里的 photo/sticker；固定 sticker catalog 不做 vision 回填，其 identity snapshot 只参与 fingerprint。
 - 新的非空描述成功写入 DB 后，`ensureVision` 只发布一次 `(fileUniqueId,text)`；cache hit、unsupported、空结果与失败不发布。background catalog 与 lazy batch 共用同一 in-flight promise，因此 UI transport 不增加 vision provider call。
 - `MsgItem.fileUniqueId` 与 additive `vision_update` 经 daemon IPC 广播给所有 live transcript；单bot filter只过滤LOCAL/usage，不过滤共享群消息及其视觉描述。旧 client 可忽略新字段/帧。snapshot/history 仍从同一 `media.vision` 读取，provider serialization 不变。
 - timeline 以 256-entry / 10-minute map 有界缓存乱序 update；message/live/history 到达时按 `fileUniqueId` 合并。已显示消息收到新描述时，feed 更新所有匹配 item 并用 Pi component tree 原位 rebuild，不追加 session entry；重复 update 幂等。
@@ -124,14 +124,15 @@
 ## Sticker 可发送性
 
 - `media.file_unique_id` / `short_id` 是共享身份；`media_file_ids(bot_id,file_id,file_unique_id)` 才是 bot-specific 可发送能力。
-- catalog block 只用当前 bot mapping 过滤后的可发送 sticker 构建；set name 不能证明可发送。固定 catalog 以 identity-only 行（每行 set + emoji + short_id，按 set 名 + rowid 排序，上限 `STICKER_CATALOG_MAX` 条）固化在 system prompt 尾部，完整进入 stable prefix；不做每轮 top-K 检索，也没有动态候选 suffix。
+- catalog block 只用当前 bot mapping 过滤后的可发送 sticker 构建；set name 不能证明可发送。固定 catalog 以 identity-only 行（每行 set + emoji + short_id，按 set 名 + rowid 排序，上限 `STICKER_CATALOG_MAX` 条）固化在 system prompt 尾部，完整进入 stable prefix。
+- runtime 不恢复旧的全库语义 top-K；它只从当前 generation 真正 visible 的消息与本轮新 visible 消息中选最近 8 个不同的用户 sticker，再按当前 bot mapping 过滤。候选块严格追加在本轮消息 suffix 最后，预算不足整体省略；历史 sticker 的 short id 按 `s<media.rowid>` 惰性补齐。
 - `send` tool 在任何 network call 前再次用同一 mapping 做 preflight；若已提交的 short id 缺 mapping，记录 `candidate_invariant`，不会先发文字再失败。
 - catalog 启动日志给出fetched/catalog/sendable/missing_file_id；缺mapping行不进入 catalog block。short id仍可由本地send preflight解析。
 
 ## Provider context flow
 
 - 稳定prefix：共享群聊protocol先于persona，末尾是 identity-only sticker catalog block，之后是固定顺序tool name/description/parameter schema。
-- 动态suffix：有界immutable event batch、reply obligation、media delta与tool outputs，只追加。
+- 动态suffix：有界immutable event batch、reply obligation、media delta与tool outputs只追加；最近上下文 sticker 候选是本轮 event projection 后的最终有界块。
 - `bot_cursors`保证业务消费单调；`bot_visible_messages`只表示当前generation真实可见的完整消息。两者不混用。
 - 成功compaction替换visible refs并开启新epoch但不改cursor；完整fingerprint不匹配则在restore前建立新session/epoch。
 - payload observer只持久化deployment-local HMAC和首个差异位置；不保存provider plaintext。

@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 9; // v9: fixed sticker catalog pinned into system prompt; per-turn retrieval dropped; generic multi-bot protocol
+export const CACHE_SCHEMA_VERSION = 10; // v10: recent visible user stickers restored as a bounded dynamic suffix
 
 // Fixed shared protocol is deliberately the first byte of every bot's system prompt so bots in
 // the same provider/cache cohort share the longest possible exact prefix.
