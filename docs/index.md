@@ -17,7 +17,7 @@
 - `engineering/development-guide.md` — **LLM 开发指南，日常开发流程以此为准**（含提交与追溯规则）
 - `engineering/documentation-guide.md` — 文档写作规范
 - `engineering/debugging-guide.md` — **结构化日志、只读诊断与新功能 Debug impact 规范**
-- `engineering/code-review-2608.md` — 2026-08 全面 review 结论与 Pi 能力审计（已删包袱清单，避免重复调查）
+- `dev/req-investigation.md` — 2026-08-09 界面显示与 Telegram 状态消息调查、边界和验收标准
 - `testing.md` — 测试策略、规范命令、当前状态
 - `runbooks/` — 可重复操作流程（daemon 运维）
 
