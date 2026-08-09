@@ -136,17 +136,28 @@ describe("Pi context protocol", () => {
 
 	test("unpublished assistant prose is absent from the next context", () => {
 		let unpublished = "";
+		let displayed: unknown = null;
 		const result = applyAssistantPersistencePolicy(
 			{
 				role: "assistant",
-				content: [{ type: "text", text: "private draft that was never sent" }],
+				content: [
+					{ type: "thinking", thinking: "real chain of thought" },
+					{ type: "text", text: "private draft that was never sent" },
+				],
 			} as never,
 			(text) => {
 				unpublished = text;
 			},
+			(message) => {
+				displayed = message.content;
+			},
 		);
 
 		expect(unpublished).toBe("private draft that was never sent");
+		expect(displayed).toEqual([
+			{ type: "thinking", thinking: "real chain of thought" },
+			{ type: "text", text: "private draft that was never sent" },
+		]);
 		expect((result as { content: unknown }).content).toEqual([{ type: "text", text: NO_SEND_MARKER }]);
 		expect(JSON.stringify(result)).not.toContain("private draft");
 	});

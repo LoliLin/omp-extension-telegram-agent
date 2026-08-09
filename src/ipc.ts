@@ -110,9 +110,29 @@ export interface MediaReadyUpdate {
 	mediaPath: string;
 }
 
-export interface AgentStreamToolCall {
-	name: string;
-	arguments: string;
+export type AgentActivityContent = { type: "text"; text: string } | { type: "thinking"; thinking: string };
+
+export interface AgentActivityAssistantSection {
+	type: "assistant";
+	content: AgentActivityContent[];
+	stopReason: "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";
+}
+
+export interface AgentActivityEventSection {
+	type: "event";
+	kind: string;
+	detail: string;
+}
+
+export type AgentActivitySection = AgentActivityAssistantSection | AgentActivityEventSection;
+
+/** Bounded, TUI-only projection of one complete Pi agent run. */
+export interface AgentActivity {
+	version: 1;
+	activityId: string;
+	startedAt: number;
+	sections: AgentActivitySection[];
+	truncated: boolean;
 }
 
 interface AgentStreamBase {
@@ -124,11 +144,7 @@ interface AgentStreamBase {
 
 /** Ephemeral assistant display state. It is never persisted or replayed in snapshots. */
 export type AgentStreamFrame = AgentStreamBase &
-	(
-		| { phase: "start" }
-		| { phase: "update"; thinking: string; text: string; toolCalls: AgentStreamToolCall[] }
-		| { phase: "end" }
-	);
+	({ phase: "start" } | { phase: "update"; activity: AgentActivity } | { phase: "end" });
 
 export type SendMessageErrorCode =
 	| "invalid_request"

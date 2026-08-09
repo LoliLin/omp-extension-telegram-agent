@@ -328,15 +328,18 @@ export class IpcServer {
 				? this.db
 						.query(
 							`SELECT * FROM agent_events
-						 WHERE bot_id = ?5 AND ((ts < ?1) OR (?2 = 0 AND ts = ?1 AND id < ?3) OR (?2 = 1 AND ts = ?1))
-						 ORDER BY ts DESC, id DESC LIMIT ?4`,
+							 WHERE bot_id = ?5
+							   AND (kind = 'agent_activity' OR json_extract(payload, '$.activity_id') IS NULL)
+							   AND ((ts < ?1) OR (?2 = 0 AND ts = ?1 AND id < ?3) OR (?2 = 1 AND ts = ?1))
+							 ORDER BY ts DESC, id DESC LIMIT ?4`,
 						)
 						.all(ts, rank, id, limit, filter)
 				: this.db
 						.query(
 							`SELECT * FROM agent_events
-						 WHERE (ts < ?1) OR (?2 = 0 AND ts = ?1 AND id < ?3) OR (?2 = 1 AND ts = ?1)
-						 ORDER BY ts DESC, id DESC LIMIT ?4`,
+							 WHERE (kind = 'agent_activity' OR json_extract(payload, '$.activity_id') IS NULL)
+							   AND ((ts < ?1) OR (?2 = 0 AND ts = ?1 AND id < ?3) OR (?2 = 1 AND ts = ?1))
+							 ORDER BY ts DESC, id DESC LIMIT ?4`,
 						)
 						.all(ts, rank, id, limit)
 		) as { id: number; bot_id: string; ts: number; kind: string; payload: string }[];

@@ -78,6 +78,7 @@
 
 - append-only 本地行为流：assistant/tool/vision/usage/compaction/error/send/control/context commit 等。
 - unpublished assistant prose 可以留在本地审计，但 provider session 仅保留 `[no_send]`。
+- 一次agent run的原始assistant/tool/send事件用payload内的`activity_id`关联；settle时另追加一条有界`agent_activity`作为TUI单卡投影。原始行仍是debug authority，timeline只隐藏带`activity_id`的新式原始行，不重写旧历史。
 - error/send/vision telemetry 使用固定 category 与 bounded fields，不保存 token、正文、prompt、response、完整 URL、path 或 stack。
 
 ### llm_runs

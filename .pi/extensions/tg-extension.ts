@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { spawn } from "node:child_process";
 import {
+	AssistantMessageComponent,
 	convertToPng,
 	FooterComponent,
 	VERSION,
@@ -13,7 +14,16 @@ import {
 import * as Tui from "@earendil-works/pi-tui";
 import { loadConfig, type BotConfig } from "../../src/config.ts";
 import { redactDaemonLog } from "../../src/daemon/control.ts";
-import type { AgentStreamFrame, BotStats, EvtItem, MsgItem, TimelineItem } from "../../src/ipc.ts";
+import type {
+	AgentActivity,
+	AgentActivityAssistantSection,
+	AgentActivityEventSection,
+	AgentStreamFrame,
+	BotStats,
+	EvtItem,
+	MsgItem,
+	TimelineItem,
+} from "../../src/ipc.ts";
 import { runNativeConfigWizard, type PiModelPreflight } from "../../src/onboarding/config-wizard.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
@@ -463,8 +473,8 @@ function statsText(botId: string, stats: BotStats): string {
 function eventBody(event: EvtItem): string {
 	try {
 		const payload = JSON.parse(event.payload) as Record<string, unknown>;
-		if (event.evtKind === "thinking") return `thinking · ${sanitize(String(payload.text ?? "")).slice(0, 400)}`;
-		if (event.evtKind === "assistant_text") return sanitize(String(payload.text ?? "")).slice(0, 400);
+		if (event.evtKind === "thinking") return `thinking · ${sanitize(String(payload.text ?? ""))}`;
+		if (event.evtKind === "assistant_text") return sanitize(String(payload.text ?? ""));
 		if (event.evtKind === "tool_call")
 			return `${sanitize(String(payload.tool ?? "tool"))} · ${sanitize(JSON.stringify(payload.args ?? {})).slice(0, 180)}`;
 		if (event.evtKind === "tool_result")
@@ -472,6 +482,80 @@ function eventBody(event: EvtItem): string {
 		return `${sanitize(event.evtKind)} · ${sanitize(event.payload).slice(0, 240)}`;
 	} catch {
 		return sanitize(event.evtKind);
+	}
+}
+
+function activityEventBody(section: AgentActivityEventSection): string {
+	let payload: Record<string, unknown> = {};
+	try {
+		const parsed = JSON.parse(section.detail) as unknown;
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) payload = parsed as Record<string, unknown>;
+	} catch {
+		return `${sanitize(section.kind)} · ${sanitize(section.detail)}`;
+	}
+	const tool = sanitize(String(payload.tool ?? "tool"));
+	if (section.kind === "tool_call") return `${tool} · ${sanitize(JSON.stringify(payload.args ?? {}))}`;
+	if (section.kind === "tool_result") return `${tool} · ${payload.isError ? "error" : "done"}`;
+	if (section.kind === "markdown_sent") return `markdown sent · #${sanitize(String(payload.message_id ?? "?"))}`;
+	if (section.kind === "plain_fallback") return `plain fallback · #${sanitize(String(payload.message_id ?? "?"))}`;
+	if (section.kind === "send") {
+		const sent = Array.isArray(payload.sent) ? payload.sent.map((id) => `#${sanitize(String(id))}`).join(", ") : "";
+		return `sent${sent ? ` · ${sent}` : ""}`;
+	}
+	if (section.kind === "send_degraded") return `send degraded · ${sanitize(String(payload.outcome ?? "unknown"))}`;
+	return `${sanitize(section.kind.replaceAll("_", " "))} · ${sanitize(section.detail)}`;
+}
+
+function nativeAssistantSection(section: AgentActivityAssistantSection, ts: number): AssistantMessageComponent {
+	return new AssistantMessageComponent(
+		{
+			role: "assistant",
+			content: section.content.map((content) =>
+				content.type === "text"
+					? { type: "text" as const, text: sanitize(content.text) }
+					: { type: "thinking" as const, thinking: sanitize(content.thinking) },
+			),
+			stopReason: section.stopReason,
+			timestamp: ts,
+		} as never,
+		false,
+	);
+}
+
+/** One Pi-native assistant/tool presentation for an entire daemon agent run. */
+export function activityComponent(
+	botId: string,
+	botName: string,
+	activity: AgentActivity,
+	theme: Theme,
+	status = "ACTIVITY",
+): Tui.Component {
+	const box = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
+	box.addChild(
+		cardHeader(`${botName} · bot ${botId}`, `${status} · ${fmtClock(activity.startedAt)}`, theme, "warning"),
+	);
+	for (const section of activity.sections) {
+		if (section.type === "assistant") box.addChild(nativeAssistantSection(section, activity.startedAt));
+		else box.addChild(new Tui.Text(theme.fg("accent", activityEventBody(section)), 0, 0));
+	}
+	if (activity.truncated) box.addChild(new Tui.Text(theme.fg("warning", "activity display truncated"), 0, 0));
+	return box;
+}
+
+function parsedActivity(event: EvtItem): AgentActivity | null {
+	if (event.evtKind !== "agent_activity") return null;
+	try {
+		const value = JSON.parse(event.payload) as Partial<AgentActivity>;
+		if (value.version !== 1 || typeof value.activityId !== "string" || !Array.isArray(value.sections)) return null;
+		return {
+			version: 1,
+			activityId: value.activityId,
+			startedAt: typeof value.startedAt === "number" ? value.startedAt : event.ts,
+			sections: value.sections as AgentActivity["sections"],
+			truncated: value.truncated === true,
+		};
+	} catch {
+		return null;
 	}
 }
 
@@ -499,6 +583,10 @@ export function itemComponent(
 	theme: Theme,
 	resolveMedia: MediaImageResolver = readMediaImage,
 ): Tui.Component {
+	if (item.kind === "evt") {
+		const activity = parsedActivity(item);
+		if (activity) return activityComponent(item.botId, item.botName, activity, theme);
+	}
 	const box = new Tui.Box(1, 0, (text) =>
 		theme.bg(item.kind === "msg" && !item.isBot ? "userMessageBg" : "customMessageBg", text),
 	);
@@ -551,15 +639,7 @@ export function itemComponent(
 }
 
 export function streamComponent(stream: Extract<AgentStreamFrame, { phase: "update" }>, theme: Theme): Tui.Component {
-	const box = new Tui.Box(1, 0, (text) => theme.bg("customMessageBg", text));
-	box.addChild(
-		cardHeader(`${stream.botName} · bot ${stream.botId}`, `STREAMING · ${fmtClock(stream.ts)}`, theme, "warning"),
-	);
-	if (stream.thinking) box.addChild(new Tui.Text(theme.fg("muted", `thinking · ${sanitize(stream.thinking)}`), 0, 0));
-	if (stream.text) box.addChild(new Tui.Text(theme.fg("customMessageText", sanitize(stream.text)), 0, 0));
-	for (const tool of stream.toolCalls)
-		box.addChild(new Tui.Text(theme.fg("accent", `${sanitize(tool.name)} · ${sanitize(tool.arguments)}`), 0, 0));
-	return box;
+	return activityComponent(stream.botId, stream.botName, stream.activity, theme, "STREAMING");
 }
 
 type FooterBot = Pick<BotConfig, "id" | "model" | "reasoningEffort">;
@@ -899,7 +979,19 @@ export class TelegramFeed extends Tui.Container {
 		this.streams.delete(key);
 		this.streams.set(
 			key,
-			stream.phase === "start" ? { ...stream, phase: "update", thinking: "", text: "", toolCalls: [] } : stream,
+			stream.phase === "start"
+				? {
+						...stream,
+						phase: "update",
+						activity: {
+							version: 1,
+							activityId: stream.streamId,
+							startedAt: stream.ts,
+							sections: [],
+							truncated: false,
+						},
+					}
+				: stream,
 		);
 		this.rebuildStreams();
 	}

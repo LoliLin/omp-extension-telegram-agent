@@ -4,6 +4,7 @@
 import type { Database } from "bun:sqlite";
 import { readFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
 	createAgentSession,
 	DefaultResourceLoader,
@@ -73,7 +74,7 @@ import {
 	replyObligationCount,
 } from "../db/reply-obligations.ts";
 import type { RoutingTrigger, TriggerResult, TriggerSource } from "./router.ts";
-import type { AgentStreamFrame, AgentStreamToolCall } from "../ipc.ts";
+import type { AgentStreamFrame } from "../ipc.ts";
 import { consumedControlMessageIds } from "../telegram/control-command.ts";
 import { classifyPiProviderFailure } from "./model-runtime.ts";
 import {
@@ -107,15 +108,31 @@ import { buildContextFingerprint, canResumeContextSession, sha256 } from "./cont
 import { parsePiModelReference, type PiRequestThinkingLevel } from "./model-ref.ts";
 import type { VisionScheduler } from "../media/vision-scheduler.ts";
 import { log } from "../observability/log.ts";
+import { AgentActivityCollector } from "./activity.ts";
 
 const MAX_EVENT_SCAN = 256;
 const MAX_OBLIGATION_SCAN = 64;
 const TELEGRAM_CONTEXT_COMMIT_TYPE = "telegram_context_commit_v2";
 const EPOCH_KEY = "context_epoch";
-const STREAM_TEXT_MAX = 4096;
-const STREAM_TOOL_ARGS_MAX = 2048;
-const STREAM_TOOLS_MAX = 4;
 const VISION_BATCH_CONCURRENCY = 2;
+
+const ACTIVITY_RAW_EVENT_KINDS = new Set([
+	"assistant_text",
+	"thinking",
+	"tool_call",
+	"tool_result",
+	"tool_search",
+	"tool_fetch",
+	"tool_run_js",
+	"markdown_sent",
+	"plain_fallback",
+	"send",
+	"send_degraded",
+	"error",
+]);
+const ACTIVITY_DETAIL_EVENT_KINDS = new Set(
+	[...ACTIVITY_RAW_EVENT_KINDS].filter((kind) => kind !== "assistant_text" && kind !== "thinking"),
+);
 
 export type RuntimeControlState = "idle" | "busy" | "cooldown" | "stopping" | "compacting";
 
@@ -140,14 +157,6 @@ interface SendFailure {
 function rawTelegramMessageId(raw: Record<string, unknown>): number | null {
 	const id = raw.message_id;
 	return typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? id : null;
-}
-
-function boundedDisplay(value: string, max: number): string {
-	return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
-}
-
-function displayJson(value: unknown): string {
-	return JSON.stringify(value ?? {}) ?? "{}";
 }
 
 export class BotRuntime {
@@ -182,6 +191,9 @@ export class BotRuntime {
 	private toolsHash = "";
 	private streamSequence = 0;
 	private activeStreamId: string | null = null;
+	private activitySequence = 0;
+	private activity: AgentActivityCollector | null = null;
+	private activeAssistantMessage: Extract<AgentMessage, { role: "assistant" }> | null = null;
 	private contextFingerprint = "";
 	private telemetryHmacKey = "";
 	private staticPrefixTokenEstimate = 0;
@@ -399,13 +411,16 @@ export class BotRuntime {
 				this.pendingPayloadObservations.push(observation);
 				if (this.pendingPayloadObservations.length > 8) this.pendingPayloadObservations.shift();
 			}),
-			makeAssistantPersistencePolicyExtension((text) => {
-				this.recordEvent("assistant_text", { text });
-				log.info("agent_runtime", "model_silence", {
-					bot_id: this.bot.id,
-					trigger_message_id: this.currentTriggerMessageId,
-				});
-			}),
+			makeAssistantPersistencePolicyExtension(
+				(text) => {
+					this.recordEvent("assistant_text", { text });
+					log.info("agent_runtime", "model_silence", {
+						bot_id: this.bot.id,
+						trigger_message_id: this.currentTriggerMessageId,
+					});
+				},
+				(message) => this.captureAssistantActivity(message),
+			),
 		];
 		const loader = new DefaultResourceLoader({
 			cwd: this.config.dataDir,
@@ -541,6 +556,7 @@ export class BotRuntime {
 			const now = Date.now();
 			switch (event.type) {
 				case "agent_start":
+					this.beginAssistantActivity(now);
 					this.running = true;
 					this.runStartTs = now;
 					this.providerCallsInRun = 0;
@@ -549,7 +565,6 @@ export class BotRuntime {
 					break;
 				case "message_start":
 					if (event.message.role === "assistant") {
-						this.beginAssistantStream(now);
 						this.updateAssistantStream(event.message, now);
 					}
 					break;
@@ -559,7 +574,6 @@ export class BotRuntime {
 				case "message_end": {
 					const msg = event.message;
 					if (msg.role === "assistant") {
-						this.endAssistantStream(now);
 						const thinking = msg.content
 							.filter((c) => c.type === "thinking")
 							.map((c) => (c as { thinking: string }).thinking)
@@ -570,7 +584,6 @@ export class BotRuntime {
 					break;
 				}
 				case "agent_end":
-					this.endAssistantStream(now);
 					break;
 				case "tool_execution_start":
 					this.recordEvent("tool_call", { tool: event.toolName, args: event.args });
@@ -603,7 +616,7 @@ export class BotRuntime {
 					break;
 				case "agent_settled":
 					this.running = false;
-					this.endAssistantStream(now);
+					this.finishAssistantActivity(now);
 					// no flush re-trigger here: the flush loop owns pendingTrigger (REQ-AGENT-0001 R1)
 					break;
 				case "compaction_end":
@@ -613,10 +626,12 @@ export class BotRuntime {
 		});
 	}
 
-	private beginAssistantStream(now: number): void {
-		this.endAssistantStream(now);
+	private beginAssistantActivity(now: number): void {
+		if (this.activity) return;
 		const streamId = `${this.bot.id}-${++this.streamSequence}`;
 		this.activeStreamId = streamId;
+		this.activity = new AgentActivityCollector(`${this.bot.id}:${now}:${++this.activitySequence}`, now);
+		this.activeAssistantMessage = null;
 		if (!this.wantsAssistantStream()) return;
 		this.streamSink?.({
 			phase: "start",
@@ -632,35 +647,48 @@ export class BotRuntime {
 		now: number,
 	): void {
 		if (message.role !== "assistant") return;
-		if (!this.activeStreamId) this.beginAssistantStream(now);
+		if (!this.activity || !this.activeStreamId) this.beginAssistantActivity(now);
+		this.activeAssistantMessage = message;
+		this.emitAssistantActivity(now);
+	}
+
+	private captureAssistantActivity(message: Extract<AgentMessage, { role: "assistant" }>): void {
+		if (!this.activity) this.beginAssistantActivity(Date.now());
+		this.activity?.captureAssistant(message);
+		this.activeAssistantMessage = null;
+		this.emitAssistantActivity(Date.now());
+	}
+
+	private emitAssistantActivity(now: number): void {
 		const streamId = this.activeStreamId;
-		if (!streamId || !this.wantsAssistantStream()) return;
-		const text = message.content
-			.filter((content) => content.type === "text")
-			.map((content) => content.text)
-			.join("\n");
-		const thinking = message.content
-			.filter((content) => content.type === "thinking")
-			.map((content) => content.thinking)
-			.join("\n");
-		const toolCalls: AgentStreamToolCall[] = message.content
-			.filter((content) => content.type === "toolCall")
-			.slice(0, STREAM_TOOLS_MAX)
-			.map((content) => ({
-				name: boundedDisplay(content.name, 80),
-				arguments: boundedDisplay(displayJson(content.arguments), STREAM_TOOL_ARGS_MAX),
-			}));
-		if (!text && !thinking && toolCalls.length === 0) return;
+		const activity = this.activity;
+		if (!streamId || !activity || !this.wantsAssistantStream()) return;
+		const snapshot = activity.snapshot(this.activeAssistantMessage);
+		if (snapshot.sections.length === 0) return;
 		this.streamSink?.({
 			phase: "update",
 			streamId,
 			botId: this.bot.id,
 			botName: this.bot.name,
 			ts: now,
-			text: boundedDisplay(text, STREAM_TEXT_MAX),
-			thinking: boundedDisplay(thinking, STREAM_TEXT_MAX),
-			toolCalls,
+			activity: snapshot,
 		});
+	}
+
+	private finishAssistantActivity(now: number): void {
+		const activity = this.activity;
+		if (!activity) {
+			this.endAssistantStream(now);
+			return;
+		}
+		const snapshot = activity.snapshot(this.activeAssistantMessage);
+		this.activity = null;
+		this.activeAssistantMessage = null;
+		try {
+			if (snapshot.sections.length > 0) this.recordEvent("agent_activity", snapshot);
+		} finally {
+			this.endAssistantStream(now);
+		}
 	}
 
 	private endAssistantStream(now = Date.now()): void {
@@ -1389,10 +1417,19 @@ export class BotRuntime {
 	}
 
 	private recordEvent(kind: string, payload: unknown): void {
+		const activity = this.activity;
+		const grouped = activity != null && ACTIVITY_RAW_EVENT_KINDS.has(kind);
+		const storedPayload = grouped
+			? payload && typeof payload === "object" && !Array.isArray(payload)
+				? { ...(payload as Record<string, unknown>), activity_id: activity.activityId }
+				: { value: payload, activity_id: activity.activityId }
+			: payload;
+		if (grouped && ACTIVITY_DETAIL_EVENT_KINDS.has(kind)) activity.captureEvent(kind, payload);
 		this.db
 			.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (?, ?, ?, ?)")
-			.run(this.bot.id, Date.now(), kind, JSON.stringify(payload));
-		this.eventSink?.(kind, payload);
+			.run(this.bot.id, Date.now(), kind, JSON.stringify(storedPayload));
+		if (grouped) this.emitAssistantActivity(Date.now());
+		else this.eventSink?.(kind, payload);
 	}
 
 	private recordUsage(

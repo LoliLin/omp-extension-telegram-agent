@@ -7,14 +7,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Tui from "@earendil-works/pi-tui";
-import type { Theme } from "@earendil-works/pi-coding-agent";
-import { itemComponent } from "../.pi/extensions/tg-extension.ts";
+import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
+import { activityComponent, itemComponent } from "../.pi/extensions/tg-extension.ts";
 import { openDb } from "../src/db/db.ts";
 import { IpcServer } from "../src/daemon/ipc-server.ts";
 import {
 	encodeFrame,
 	FrameDecoder,
 	type EvtItem,
+	type AgentActivity,
 	type MsgItem,
 	type ServerMessage,
 	type TimelineItem,
@@ -30,6 +31,7 @@ const logLines: string[] = [];
 let restoreLogSink: (() => void) | null = null;
 
 beforeAll(() => {
+	initTheme("dark");
 	restoreLogSink = setLogSink((line) => logLines.push(line));
 });
 
@@ -223,6 +225,80 @@ describe("cross-bot media acquisition", () => {
 });
 
 describe("Pi attach media presentation", () => {
+	test("projects one activity card while retaining its raw diagnostic events", () => {
+		const directory = temporaryDirectory("tg-activity-timeline-");
+		const db = openDb(join(directory, "agent.db"));
+		try {
+			db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('A', 1, 'tool_call', ?)").run(
+				JSON.stringify({ tool: "send", activity_id: "A:1" }),
+			);
+			db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('A', 2, 'tool_result', ?)").run(
+				JSON.stringify({ tool: "send", isError: false, activity_id: "A:1" }),
+			);
+			db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('A', 3, 'agent_activity', ?)").run(
+				JSON.stringify({
+					version: 1,
+					activityId: "A:1",
+					startedAt: 1,
+					sections: [{ type: "event", kind: "tool_result", detail: '{"tool":"send","isError":false}' }],
+					truncated: false,
+				}),
+			);
+			const ipc = new IpcServer(db, join(directory, "daemon.sock"), new Map([["A", "bot A"]]), new Map());
+			const items = (
+				ipc as unknown as {
+					loadTimeline(cursor: null, limit: number, filter: string | null): TimelineItem[];
+				}
+			).loadTimeline(null, 100, "A");
+			expect(items.map((item) => (item.kind === "evt" ? item.evtKind : item.kind))).toEqual(["agent_activity"]);
+			expect(
+				db
+					.query("SELECT kind FROM agent_events WHERE json_extract(payload, '$.activity_id') = 'A:1' ORDER BY id")
+					.all(),
+			).toEqual([{ kind: "tool_call" }, { kind: "tool_result" }]);
+		} finally {
+			db.close();
+		}
+	});
+
+	test("renders real thinking, full assistant text, and send progress in one activity card", () => {
+		const theme = {
+			fg: (_color: string, value: string) => value,
+			bg: (_color: string, value: string) => value,
+			bold: (value: string) => value,
+		} as Theme;
+		const longText = `normal-output-start ${"x".repeat(700)} normal-output-end`;
+		const activity: AgentActivity = {
+			version: 1,
+			activityId: "A:1",
+			startedAt: 1_786_251_069_000,
+			truncated: false,
+			sections: [
+				{
+					type: "assistant",
+					content: [
+						{ type: "thinking", thinking: "real chain of thought" },
+						{ type: "text", text: longText },
+					],
+					stopReason: "stop",
+				},
+				{ type: "event", kind: "tool_call", detail: '{"tool":"send","args":{"message":"hello"}}' },
+				{ type: "event", kind: "tool_result", detail: '{"tool":"send","isError":false}' },
+				{ type: "event", kind: "markdown_sent", detail: '{"message_id":42}' },
+				{ type: "event", kind: "send", detail: '{"sent":[42]}' },
+			],
+		};
+
+		const rendered = activityComponent("A", "bot A", activity, theme).render(100).join("\n");
+		expect(rendered).toContain("real chain of thought");
+		expect(rendered).toContain("normal-output-start");
+		expect(rendered).toContain("normal-output-end");
+		expect(rendered).toContain("send");
+		expect(rendered).toContain("done");
+		expect(rendered).toContain("markdown sent");
+		expect(rendered.match(/bot A · bot A/g)).toHaveLength(1);
+	});
+
 	test("renders the vision description below the native image", () => {
 		Tui.setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
 		Tui.setCellDimensions({ widthPx: 8, heightPx: 16 });

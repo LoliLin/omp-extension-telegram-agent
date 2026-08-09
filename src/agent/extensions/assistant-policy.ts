@@ -15,8 +15,10 @@ function assistantText(message: Extract<AgentMessage, { role: "assistant" }>): s
 export function applyAssistantPersistencePolicy(
 	message: AgentMessage,
 	onUnpublishedText?: (text: string) => void,
+	onDisplayMessage?: (message: Extract<AgentMessage, { role: "assistant" }>) => void,
 ): AgentMessage {
 	if (message.role !== "assistant") return message;
+	onDisplayMessage?.(message);
 	const text = assistantText(message);
 	const toolCalls = message.content.filter((content) => content.type === "toolCall");
 	if (toolCalls.length === 0) {
@@ -27,13 +29,16 @@ export function applyAssistantPersistencePolicy(
 	return protocolContent.length === message.content.length ? message : { ...message, content: protocolContent };
 }
 
-export function makeAssistantPersistencePolicyExtension(onUnpublishedText?: (text: string) => void): InlineExtension {
+export function makeAssistantPersistencePolicyExtension(
+	onUnpublishedText?: (text: string) => void,
+	onDisplayMessage?: (message: Extract<AgentMessage, { role: "assistant" }>) => void,
+): InlineExtension {
 	return {
 		name: "tg-assistant-persistence",
 		hidden: true,
 		factory: (pi) => {
 			pi.on("message_end", (event) => ({
-				message: applyAssistantPersistencePolicy(event.message, onUnpublishedText),
+				message: applyAssistantPersistencePolicy(event.message, onUnpublishedText, onDisplayMessage),
 			}));
 		},
 	};
