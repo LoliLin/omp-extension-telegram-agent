@@ -107,6 +107,8 @@ Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确�
 - Pi 达到配置阈值时，`tg-compaction` 用状态导向 prompt 生成不超过 800 字的摘要，并保留配置的 recent tail。
 - 空摘要、provider failure 或 abort 会 cancel；cursor、visible refs 与 epoch 均不伪造变化。
 - 成功结果的 structured details 保存当前 `consumedSeq` 与 retained `visibleMessageIds`。runtime 用这些 details 替换 visibility、推进 epoch；`consumedSeq` 永不回退。
+- visibility与epoch提交后，provider外observer按所有当前配置bot的visible refs、未消费event与reply obligation，对本地媒体cache做最多256项回收。它只清可再生文件与`local_path`，失败不改变compaction结果；startup backfill复用同一引用边界，避免重新下载已回收历史。
+- 媒体回收不修改session、summary、message/event serialization、vision结果或provider payload，因此不改变cache schema，也不增加LLM call/token。
 - 手工 `/compact` 复用同一边界，不向模型注入 operator 指令。
 
 ## Payload 诊断与 telemetry

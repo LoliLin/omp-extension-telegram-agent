@@ -27,6 +27,7 @@ import { claimRoutingDecision, finishRoutingClaim } from "../db/routing-claims.t
 import { applyRetention } from "../db/retention.ts";
 import { log } from "../observability/log.ts";
 import { inspectVideoTranscoder } from "../media/video-frames.ts";
+import { pruneUnreferencedMediaCache } from "../media/lifecycle.ts";
 
 const rootDir = process.cwd();
 const config = loadConfig(rootDir);
@@ -210,6 +211,19 @@ for (const [botId, rt] of runtimes) {
 	};
 	rt.usageSink = (run) => ipc.broadcastUsage(run);
 	rt.visionSink = (fileUniqueId, text) => ipc.broadcastVision({ fileUniqueId, text });
+	rt.mediaPruneSink = () => {
+		const result = pruneUnreferencedMediaCache(db, mediaDir, [...runtimes.keys()]);
+		if (result.scanned === 0) return;
+		const fields = {
+			bot_id: botId,
+			scanned: result.scanned,
+			deleted: result.deleted,
+			stale: result.stale,
+			failed: result.failed,
+		};
+		if (result.failed > 0) log.warn("media_cache", "post_compaction_pruned", fields);
+		else log.info("media_cache", "post_compaction_pruned", fields);
+	};
 	rt.streamSink = (stream) => ipc.broadcastStream(stream);
 	rt.streamDemand = () => ipc.hasStreamListener(botId);
 }

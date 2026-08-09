@@ -57,10 +57,11 @@ bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整�
 
 1. canonical `messages.media`与`media_file_ids`证明哪个bot拥有可用`file_id`；`file_id`只能交给同一bot的Bot API。
 2. `media.local_path`与`media_cache_ready/skip/error`证明本地媒体准备，不证明vision provider已经运行。视频path只是本地source，不会进入IPC。
-3. 视频先检查`video_transcoder`；`video_transcoder_unavailable`可在安装后重试，`video_probe_failed`/`video_frame_extraction_failed`证明失败发生在provider前。不得记录命令stderr或path。
-4. `agent_events.kind=vision`的固定`outcome`、`frames`与`providerCalled`证明foreground识别结果；跨bot路由时应使用任一已配置且有mapping的接收bot，`file_id_unavailable`只表示所有可用source均缺失。
-5. 非空`media.vision`与对应`message_events.kind=media_update`证明描述已持久化并进入append-only provider队列；主模型选择别的话题不等于没有识图。
-6. `/tg attach`的snapshot/history直接读`media.vision`，live路径读`vision_update`；全局、A、B等filter都应显示同一群消息描述，filter只限制LOCAL/usage。
+3. 成功compaction后，`media_cache.post_compaction_pruned`只聚合`scanned/deleted/stale/failed`；`failed>0`保留DB path供下次重试，全部无候选时合法静默。`prune_observer_failed`表示observer自身失败，但compaction仍已提交。两者都不得加入media identity或path。
+4. 视频先检查`video_transcoder`；`video_transcoder_unavailable`可在安装后重试，`video_probe_failed`/`video_frame_extraction_failed`证明失败发生在provider前。不得记录命令stderr或path。
+5. `agent_events.kind=vision`的固定`outcome`、`frames`与`providerCalled`证明foreground识别结果；跨bot路由时应使用任一已配置且有mapping的接收bot，`file_id_unavailable`只表示所有可用source均缺失。
+6. 非空`media.vision`与对应`message_events.kind=media_update`证明描述已持久化并进入append-only provider队列；主模型选择别的话题不等于没有识图。
+7. `/tg attach`的snapshot/history直接读`media.vision`，live路径读`vision_update`；全局、A、B等filter都应显示同一群消息描述，filter只限制LOCAL/usage。
 
 不得把私人图片、OCR正文、`file_unique_id`、`file_id`或本地path复制进daemon日志；内容取证只在明确授权的本机SQLite/provider-context检查中短暂查看。
 

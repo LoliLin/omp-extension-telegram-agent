@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { log } from "../observability/log.ts";
 import {
 	ensureLocalMedia,
-	isVideoMedia,
 	isDisplayReadyPath,
+	isVideoMedia,
 	MEDIA_CACHE_MAX_BYTES,
 	resolveMediaCachePath,
 	type EnsureLocalMediaOptions,
@@ -12,6 +12,7 @@ import {
 	type LocalMediaFailure,
 	type MediaDownloadApi,
 } from "./local-cache.ts";
+import { listReferencedMissingDisplayMediaIds } from "./lifecycle.ts";
 
 export const MEDIA_CACHE_CONCURRENCY = 2;
 export const MEDIA_CACHE_MAX_PENDING = 128;
@@ -142,21 +143,14 @@ export class MediaCacheQueue {
 	/** Enqueue only the newest bounded set; daemon ready never awaits these jobs. */
 	scheduleBackfill(): number {
 		if (this.stopped) return 0;
-		const rows = this.db
-			.query(
-				`SELECT file_unique_id FROM media
-				  WHERE local_path IS NULL
-				    AND (kind = 'photo' OR (kind = 'sticker' AND COALESCE(mime, 'image/webp') = 'image/webp'))
-				  ORDER BY rowid DESC LIMIT ?`,
-			)
-			.all(this.backfillLimit) as { file_unique_id: string }[];
+		const fileUniqueIds = listReferencedMissingDisplayMediaIds(this.db, [...this.apis.keys()], this.backfillLimit);
 		let count = 0;
-		for (const row of rows) {
+		for (const fileUniqueId of fileUniqueIds) {
 			const mappings = this.db
 				.query("SELECT bot_id FROM media_file_ids WHERE file_unique_id = ? ORDER BY rowid")
-				.all(row.file_unique_id) as { bot_id: string }[];
+				.all(fileUniqueId) as { bot_id: string }[];
 			const mapping = mappings.find((candidate) => this.apis.has(candidate.bot_id));
-			if (mapping && this.schedule(mapping.bot_id, row.file_unique_id)) count++;
+			if (mapping && this.schedule(mapping.bot_id, fileUniqueId)) count++;
 		}
 		return count;
 	}

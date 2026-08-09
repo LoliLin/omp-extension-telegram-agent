@@ -3,7 +3,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createConnection, createServer } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Tui from "@earendil-works/pi-tui";
@@ -23,6 +23,7 @@ import {
 } from "../src/ipc.ts";
 import { ensureLocalMedia, reconcileMediaCachePaths, type MediaDownloadApi } from "../src/media/local-cache.ts";
 import { MediaCacheQueue } from "../src/media/media-cache.ts";
+import { pruneUnreferencedMediaCache } from "../src/media/lifecycle.ts";
 import { ensureStickerCatalog } from "../src/media/sticker-catalog.ts";
 import {
 	createPiVisionExecutor,
@@ -612,6 +613,140 @@ describe("video frame sampling", () => {
 		expect(calls).toBe(1);
 		const content = (captured as { messages: Array<{ content: Array<{ type: string }> }> }).messages[0]!.content;
 		expect(content.filter((item) => item.type === "image")).toHaveLength(3);
+	});
+});
+
+describe("post-compaction media cache pruning", () => {
+	test("deletes only unreferenced files and does not backfill them on restart", async () => {
+		const directory = temporaryDirectory("tg-media-prune-");
+		const mediaDir = join(directory, "media");
+		mkdirSync(mediaDir, { recursive: true });
+		const db = openDb(join(directory, "agent.db"));
+		const chatId = -1001;
+		const cases = [
+			"visible-a",
+			"visible-b",
+			"obligation",
+			"unreferenced",
+			"stale",
+			"failed",
+			"pending",
+			"visible-missing",
+		];
+		const downloadCalls: string[] = [];
+		const api: MediaDownloadApi = {
+			getFile: async (fileId) => {
+				downloadCalls.push(`get:${fileId}`);
+				return { file_path: "photos/recovered.jpg" };
+			},
+			downloadFile: async (filePath) => {
+				downloadCalls.push(`download:${filePath}`);
+				return new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+			},
+		};
+		const queue = new MediaCacheQueue(db, new Map([["A", api]]), { cacheDir: mediaDir });
+		try {
+			for (let index = 0; index < cases.length; index++) {
+				const id = cases[index]!;
+				const filename = `${id}.jpg`;
+				if (id !== "stale" && id !== "visible-missing") {
+					writeFileSync(join(mediaDir, filename), new Uint8Array([index + 1]));
+				}
+				db.query(
+					"INSERT INTO media (file_unique_id, kind, mime, local_path, vision) VALUES (?, 'photo', 'image/jpeg', ?, ?)",
+				).run(
+					id,
+					id === "visible-missing" ? null : filename,
+					JSON.stringify({ model: "test", kind: "photo", text: `vision-${id}` }),
+				);
+				db.query(
+					`INSERT INTO messages
+					  (chat_id, message_id, date, sender_id, display_name, is_bot, media, first_seen_by)
+					 VALUES (?, ?, ?, ?, ?, 0, ?, 'A')`,
+				).run(
+					chatId,
+					index + 1,
+					index + 1,
+					index + 10,
+					id,
+					JSON.stringify({ kind: "photo", file_unique_id: id, file_id: `${id}-file` }),
+				);
+			}
+			for (const id of ["unreferenced", "stale", "visible-missing"]) {
+				db.query("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', ?, ?)").run(
+					`${id}-file`,
+					id,
+				);
+			}
+			const highWater = (db.query("SELECT MAX(ingest_seq) value FROM message_events").get() as { value: number }).value;
+			db.query(
+				"INSERT INTO bot_cursors (bot_id, chat_id, consumed_seq, updated_at) VALUES ('A', ?, ?, 1), ('B', ?, ?, 1)",
+			).run(chatId, highWater, chatId, highWater - 2);
+			db.query(
+				"INSERT INTO bot_visible_messages (bot_id, chat_id, message_id, context_epoch) VALUES ('A', ?, 1, 2), ('B', ?, 2, 3), ('removed', ?, 4, 9), ('A', ?, 8, 2)",
+			).run(chatId, chatId, chatId, chatId);
+			db.query("INSERT INTO reply_obligations (bot_id, chat_id, message_id, created_at) VALUES ('A', ?, 3, 1)").run(
+				chatId,
+			);
+
+			const first = pruneUnreferencedMediaCache(db, mediaDir, ["A", "B"], {
+				remove: (path) => {
+					if (path.endsWith("failed.jpg")) throw new Error("simulated unlink failure");
+					try {
+						unlinkSync(path);
+						return "deleted";
+					} catch (error) {
+						if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+						throw error;
+					}
+				},
+			});
+			expect(first).toEqual({ scanned: 3, deleted: 1, stale: 1, failed: 1 });
+			expect(existsSync(join(mediaDir, "unreferenced.jpg"))).toBe(false);
+			expect(existsSync(join(mediaDir, "failed.jpg"))).toBe(true);
+			expect(db.query("SELECT file_unique_id, local_path, vision FROM media ORDER BY rowid").all()).toEqual([
+				{ file_unique_id: "visible-a", local_path: "visible-a.jpg", vision: expect.any(String) },
+				{ file_unique_id: "visible-b", local_path: "visible-b.jpg", vision: expect.any(String) },
+				{ file_unique_id: "obligation", local_path: "obligation.jpg", vision: expect.any(String) },
+				{ file_unique_id: "unreferenced", local_path: null, vision: expect.any(String) },
+				{ file_unique_id: "stale", local_path: null, vision: expect.any(String) },
+				{ file_unique_id: "failed", local_path: "failed.jpg", vision: expect.any(String) },
+				{ file_unique_id: "pending", local_path: "pending.jpg", vision: expect.any(String) },
+				{ file_unique_id: "visible-missing", local_path: null, vision: expect.any(String) },
+			]);
+			expect(queue.scheduleBackfill()).toBe(1);
+			await queue.whenIdle();
+			expect(downloadCalls).toEqual(["get:visible-missing-file", "download:photos/recovered.jpg"]);
+			expect(
+				(
+					db.query("SELECT local_path FROM media WHERE file_unique_id = 'visible-missing'").get() as {
+						local_path: string | null;
+					}
+				).local_path,
+			).not.toBeNull();
+			expect(
+				db
+					.query(
+						"SELECT file_unique_id FROM media WHERE file_unique_id IN ('unreferenced', 'stale') AND local_path IS NOT NULL",
+					)
+					.all(),
+			).toEqual([]);
+
+			db.exec("DELETE FROM bot_visible_messages; DELETE FROM reply_obligations;");
+			db.query("UPDATE bot_cursors SET consumed_seq = ?").run(highWater);
+			expect(pruneUnreferencedMediaCache(db, mediaDir, ["A", "B"])).toEqual({
+				scanned: 6,
+				deleted: 6,
+				stale: 0,
+				failed: 0,
+			});
+			expect(db.query("SELECT COUNT(*) count FROM media WHERE local_path IS NOT NULL").get()).toEqual({ count: 0 });
+			expect(db.query("SELECT COUNT(*) count FROM messages").get()).toEqual({ count: 8 });
+			expect(db.query("SELECT COUNT(*) count FROM media WHERE vision IS NOT NULL").get()).toEqual({ count: 8 });
+		} finally {
+			await queue.stop();
+			db.close();
+		}
 	});
 });
 

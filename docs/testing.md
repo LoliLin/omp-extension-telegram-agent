@@ -19,7 +19,7 @@
 - `runjs.test.ts` — run_js sandbox：正常计算可用，host realm 隔离与资源限制成立。
 - `search.test.ts` — TinyFish search/fetch 契约：参数边界、SSRF prefilter（public IP 表）、untrusted boundary、telemetry 脱敏；只用本地 Bun server。
 - `db.test.ts` — SQLite migration：旧库迁移幂等且保留历史 telemetry。
-- `media.test.ts` — 跨bot Telegram media source配对、static/animated/video sticker metadata与原始file_id发送、图片/视频vision singleflight/persistent cache、确定性截断正态抽帧、multi-image单调用、部署路径迁移、static sticker展示缓存，以及Pi attach filter握手、activity单卡/原生thinking/完整正文、视觉描述乱序合并与卡片位置。
+- `media.test.ts` — 跨bot Telegram media source配对、static/animated/video sticker metadata与原始file_id发送、图片/视频vision singleflight/persistent cache、确定性截断正态抽帧、multi-image单调用、部署路径迁移、static sticker展示缓存、compaction后跨bot引用保护/失败重试/启动不复活回收文件，以及Pi attach filter握手、activity单卡/原生thinking/完整正文、视觉描述乱序合并与卡片位置。
 - `telegram-control.test.ts` — `/status` 的 InputRichMessage Markdown、统计数字千位分隔与缓存命中率、独立 plain projection、create→canonical persistence，以及仅在确定性rich拒绝时单次fallback的exactly-once边界。
 - `telemetry.test.ts` — footer、Pi/Telegram status共享读模型：latest排除compaction、lifetime/live totals包含compaction、runtime snapshot、统一字段顺序、context/window与`CH = R/(↑+R+W)`派生口径，并守卫reasoning与video transcoder debug finding。
 

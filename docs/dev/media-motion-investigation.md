@@ -47,10 +47,12 @@ Animated TGS 在本需求中保证可发送，不做视觉渲染。Video WEBM st
 每次成功 compaction 替换 visibility 后，daemon 运行一次有界回收。一个本地媒体文件只要满足以下任一条件就仍被引用：
 
 - 它所属消息在任一**当前配置 bot** 的当前 epoch `bot_visible_messages` 中；
-- 消息的初始 event 尚未被任一当前配置 bot cursor 消费；
+- 消息仍有非 `media_update` event 尚未被任一当前配置 bot cursor 消费；
 - 未完成的 direct-reply obligation 引用该消息。
 
 其余 `local_path` 可删除。回收 MUST 先验证 basename 解析后仍位于当前 `data/media`，再删除文件，最后把 `media.local_path` 置空；文件不存在时清理 stale DB path；其他 unlink 失败则保留 DB path，供下次重试。每次最多处理固定批量，observer 失败不得改变 compaction 成功结果。
+
+daemon 启动期的静态媒体 backfill MUST 使用同一引用判定，只恢复仍活跃的缺失文件；不得把 compaction 已回收的历史文件无条件下载回来。
 
 回收只删除 cache file，不删除：
 

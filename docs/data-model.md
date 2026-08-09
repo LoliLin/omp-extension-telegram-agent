@@ -73,6 +73,7 @@
 - `media.file_unique_id` 是共享身份；`media_file_ids(bot_id,file_id,file_unique_id)` 是 bot-specific 可发送能力。
 - short id 由 rowid 单调分配；不能用 `COUNT+1`。
 - vision 按 identity 持久化并跨 bot 复用。Sticker 的 `mime` 规范化为 `image/webp`、`application/x-tgsticker` 或 `video/webm`，供 catalog 标注格式；可发送性仍以 bot-specific mapping 为准。≤1 MiB static display image与≤20 MiB video source先写0600临时文件再同目录rename；bytes与绝对path不进SQLite，`local_path`只保存当前`data/media`内的cache-relative basename。daemon启动按basename迁移旧绝对值，缺失或不支持的目标清空；video path只供本地抽帧，不进入IPC。
+- `local_path` 是可再生cache指针，不是媒体事实。任一当前配置bot的visible message、pending reply obligation或未消费非`media_update` event构成活跃引用；成功compaction提交visibility后最多清理256个无引用文件。unlink成功/文件已缺失才置空path，其他失败保留以便重试；启动backfill也只恢复仍有活跃引用的static display缺口。回收不删除media row、vision、short id、format、file mapping、canonical history或session。
 
 ### agent_events
 
@@ -100,7 +101,7 @@ daemon 启动时执行一次、之后每 24 小时执行 maintenance，并做 pa
 - `raw_updates`：30 天；
 - `message_events`：365 天。
 
-旧 `message_events` 只有在 `ingest_seq <=` 该 chat 所有已知 bot cursor 的最小值，且没有 reply obligation 引用该 message 时才删除。canonical `messages`/revisions/media/session 文件不由这条自动 retention 清理。
+旧 `message_events` 只有在 `ingest_seq <=` 该 chat 所有已知 bot cursor 的最小值，且没有 reply obligation 引用该 message 时才删除。canonical `messages`/revisions/media/session 文件不由这条定时 retention 清理；可再生的`media.local_path`文件另由成功compaction后的引用回收处理。
 
 ## ID / dedupe 边界
 

@@ -32,6 +32,8 @@ compaction使用配置的廉价task model且关闭provider cache retention，因
 
 用户和bot的static照片/sticker都先落canonical DB并共用一条有界展示缓存；video source只在真实vision turn中lazy准备。SQLite只保存cache-relative文件名，deployment移动后不会继续把TUI绑定到旧绝对路径。vision默认关闭。显式开启后，deployment scheduler会分别限制foreground媒体数、并发、每群每小时调用和每日调用；每个video最多3帧但只用一次provider调用。结果按media identity持久化并在bot之间复用，以immutable media-update event追加而不是改写旧context；UI使用缓存结果原位更新，不额外调用模型。
 
+成功compaction后，daemon会删除所有当前配置bot都不再引用的有界批次本地媒体文件；未消费消息与待回复媒体仍保留。消息、视觉描述、sticker short id和Telegram file mapping不会删除，因此以后重新需要时可以下载source，并继续复用已有vision结果。restart也不会把这批无引用历史自动下载回来。
+
 权威流程见[架构的 Vision 章节](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md)。
 
 ## 6. 网页只按需读取且结果有界

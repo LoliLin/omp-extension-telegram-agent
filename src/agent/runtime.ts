@@ -204,6 +204,8 @@ export class BotRuntime {
 	usageSink: ((run: UsageRun) => void) | null = null;
 	/** Optional sink for newly persisted media descriptions (REQ-UI-0006). */
 	visionSink: VisionUpdateSink | null = null;
+	/** Bounded cache observer invoked only after successful compaction visibility commits. */
+	mediaPruneSink: (() => void) | null = null;
 	/** Ephemeral Pi-feed assistant snapshots; never persisted (REQ-UI-0010). */
 	streamSink: ((frame: AgentStreamFrame) => void) | null = null;
 	/** Lets the daemon avoid building snapshots when no matching listener completed hello. */
@@ -710,6 +712,14 @@ export class BotRuntime {
 		replaceVisibleMessageIds(this.db, this.bot.id, chatId, this.epoch, kept);
 		this.recordEvent("compaction", { epoch: this.epoch, kept: kept.length });
 		log.info("agent_runtime", "compaction_committed", { bot_id: this.bot.id, epoch: this.epoch, kept: kept.length });
+		try {
+			this.mediaPruneSink?.();
+		} catch {
+			log.error("media_cache", "prune_observer_failed", {
+				bot_id: this.bot.id,
+				category: "observer_failed",
+			});
+		}
 	}
 
 	/** session_before_compact handler: empty summary is refused via cancel, never persisted. */

@@ -26,7 +26,7 @@ bun run stop                       # SIGTERM 优雅停止
 ```
 
 - 配置了sticker sets时，首次Telegram catalog拉取可能延长启动；以后复用本地DB。vision默认关闭，只有显式启用（或legacy配置明确写辅助视觉模型）才会产生视觉工作。`start`会在60秒内等socket；超时但child仍存活时只报告starting，并提示用`status` / `daemon.log`确认。
-- daemon启动会把历史`media.local_path`按basename迁到当前deployment的`data/media`；static photo/sticker恢复可显示状态，video source恢复为lazy抽帧输入，缺失项清空。该过程不调用vision或聊天provider。
+- daemon启动会把历史`media.local_path`按basename迁到当前deployment的`data/media`；static photo/sticker恢复可显示状态，video source恢复为lazy抽帧输入，缺失项清空。启动backfill最多恢复100个仍被当前配置bot上下文、未消费event或reply obligation引用的static缺口，不会重新下载compaction已回收的无引用历史。该过程不调用vision或聊天provider。
 - 视频识别要求PATH中同时存在`ffmpeg`与`ffprobe`。macOS可用`brew install ffmpeg`，Arch Linux可用`sudo pacman -S ffmpeg`，Debian/Ubuntu可用`sudo apt install ffmpeg`。缺失时daemon仍启动，static image vision不受影响；`bun run debug`会输出`video_transcoder_unavailable`。
 - 每 bot 启动日志的 `sticker-catalog` 行会报告 `catalog/sendable/missing_file_id`；`missing_file_id>0` 的条目不会暴露给该 bot。检查 set 名/token 权限或 Telegram `getStickerSet` 失败，不要复制另一个 bot 的 file_id。
 - 配置错误会在启动期逐条列出（stderr / daemon.log），不会静默跑坏配置。
@@ -94,7 +94,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 
 - 命令默认作用于接收消息的 bot；`/<command>@<bot_username>` 由该 suffix bot 定向回复/执行；未知 deployment suffix 不接管。
 - `set` 写穿 `telegram.config.ts`（原子写入 + 全量 loadConfig 校验，任何一步失败回滚文件），成功后立即更新内存 effective 值；重启后仍然生效。routing_p 总和超过 1 时校验失败、整次拒绝。
-- `compact` 只作用于接收/定向的单个 bot，不接受自定义 instructions。busy/stopping bot 不会被 abort。它会调用既有辅助摘要模型并产生相应费用。
+- `compact` 只作用于接收/定向的单个 bot，不接受自定义 instructions。busy/stopping bot 不会被 abort。它会调用既有辅助摘要模型并产生相应费用；成功提交新visibility后，还会按全部当前配置bot的引用回收最多256个本地媒体cache文件。该observer不删历史/vision/file mapping，失败不回滚compact；有候选时日志记录`post_compaction_pruned`聚合数。
 - 回复始终引用原命令。命令 edit 只消费、不执行；replay/second-bot 副本不会重复 mutation 或回复。发送结果未知时 daemon 不自动重试。
 
 ## 新增一个 bot

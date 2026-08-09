@@ -32,6 +32,8 @@ Compaction uses a configured cheap task model with provider cache retention disa
 
 Static photos and stickers from users and bots enter canonical SQLite first and share one bounded display cache; video sources are prepared lazily only for a real vision turn. SQLite stores only a cache-relative filename, so moving a deployment does not pin TUI rendering to the previous absolute path. Vision is disabled by default. When explicitly enabled, a deployment scheduler bounds foreground media, concurrency, per-chat hourly calls, and daily calls; each video contributes at most three frames but only one provider call. Results are persisted by media identity, reused across bots, and appended as immutable media-update events instead of rewriting old context. UI updates consume cached results without adding a model call.
 
+After a successful compaction, the daemon deletes a bounded batch of local media files no longer referenced by any configured bot; unconsumed messages and pending replies remain protected. Messages, vision descriptions, sticker short IDs, and Telegram file mappings remain durable, so a future turn can reacquire the source while reusing an existing vision result. Restart does not automatically download that unreferenced history again.
+
 See the [Vision architecture](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/architecture.md).
 
 ## 6. Pages are retrieved only on demand and stay bounded

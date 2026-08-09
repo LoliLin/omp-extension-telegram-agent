@@ -57,7 +57,9 @@ Another process is long-polling with the same token. Run `bun run restart`; the 
 
 ## Images do not render inline
 
-A new user- or bot-sent static photo/sticker first shows its media label, then the daemon downloads it in the background and updates the same Pi card. This does not depend on routing or vision; animated/video media retains a text placeholder. On startup, legacy absolute cache paths are rebased by filename when the file exists in the current `data/media`; missing entries are cleared before the newest 100 static display gaps are backfilled, so very old gaps may require later restarts to continue.
+A new user- or bot-sent static photo/sticker first shows its media label, then the daemon downloads it in the background and updates the same Pi card. This does not depend on routing or vision; animated/video media retains a text placeholder. On startup, legacy absolute cache paths are rebased by filename when the file exists in the current `data/media`; missing entries are cleared before at most 100 recent static display gaps still referenced by current context, an unconsumed event, or a pending reply are backfilled.
+
+After successful compaction, a bounded batch of local media files no longer referenced by any configured bot is removed automatically. An old Pi card falling back to its label is therefore expected and does not mean that the message, vision result, or Telegram file mapping was lost. Restart does not unconditionally download those files again just for historical display.
 
 If new media remains label-only, inspect only the fixed `media_cache_ready/skip/error` category and queue number in redacted logs, then check the 1 MiB limit, static-image format, terminal image capability, and project Pi version. Pi still selects Kitty, iTerm2, or native text fallback. Do not add terminal escapes or bypass Pi components. Record terminal type, tmux state, media kind, fixed outcome, and whether a local path exists—never a token, absolute path, or private image contents.
 

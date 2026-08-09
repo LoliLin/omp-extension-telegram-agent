@@ -57,7 +57,9 @@ bun run pi --version
 
 ## 图片没有内联显示
 
-用户或bot新发的static photo/sticker会先显示media label，再由daemon后台下载并在同一Pi卡片原位出现；它不依赖routing或vision。animated/video媒体保留文字placeholder。daemon启动时会把旧绝对cache path按文件名迁到当前`data/media`，不存在的记录先清空，再只回填最新100条static display缺口，所以很旧的缺口可能要等后续restart继续补齐。
+用户或bot新发的static photo/sticker会先显示media label，再由daemon后台下载并在同一Pi卡片原位出现；它不依赖routing或vision。animated/video媒体保留文字placeholder。daemon启动时会把旧绝对cache path按文件名迁到当前`data/media`，不存在的记录先清空，再只回填仍被当前上下文、未消费event或待回复义务引用的最新100条static display缺口。
+
+成功compaction后，所有当前配置bot都不再引用的本地媒体cache会按有界批次自动删除；旧Pi卡片因此只剩label是预期行为，不代表消息、vision结果或Telegram file mapping丢失。restart不会为了历史展示把这些文件无条件下载回来。
 
 若新媒体持续只有label，先在脱敏日志中查`media_cache_ready/skip/error`的固定category与queue数字，再检查文件是否超过1 MiB、是否为支持的静态图片格式、terminal图像能力和当前项目Pi版本。Pi根据当前capability选择Kitty/iTerm2/native fallback；不要手写terminal escape或绕过Pi组件。稳定复现时只记录terminal、tmux状态、媒体种类、固定outcome和“是否有本地path”，不要附带token、绝对path或私人图片本体。
 
