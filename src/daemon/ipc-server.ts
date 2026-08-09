@@ -1,6 +1,7 @@
 // IPC server inside the daemon: serves snapshots/history from SQLite and broadcasts live items.
 
 import type { Database } from "bun:sqlite";
+import { dirname, join } from "node:path";
 import { errorCategory, log } from "../observability/log.ts";
 import { rmSync, existsSync, chmodSync } from "node:fs";
 import type {
@@ -20,6 +21,7 @@ import type {
 } from "../ipc.ts";
 import { encodeFrame, FrameDecoder, FrameOverflowError } from "../ipc.ts";
 import type { MessageRow } from "../agent/serialize.ts";
+import { isDisplayReadyPath, resolveMediaCachePath } from "../media/local-cache.ts";
 
 const SNAPSHOT_LIMIT = 100;
 const HISTORY_LIMIT = 100;
@@ -43,6 +45,7 @@ export class IpcServer {
 	private sockPath: string;
 	private botNames: Map<string, string>;
 	private botUserIds: Map<string, number>;
+	private mediaDir: string;
 	private listeners = new Set<SocketLike>();
 	private decoders = new WeakMap<object, FrameDecoder>();
 	private outQueues = new WeakMap<object, OutQueue>();
@@ -60,6 +63,7 @@ export class IpcServer {
 	) {
 		this.db = db;
 		this.sockPath = sockPath;
+		this.mediaDir = join(dirname(sockPath), "media");
 		this.botNames = botNames;
 		this.botUserIds = botUserIds;
 	}
@@ -364,7 +368,8 @@ export class IpcServer {
 					.query("SELECT local_path, vision FROM media WHERE file_unique_id = ?")
 					.get(media.file_unique_id) as { local_path: string | null; vision: string | null } | null;
 				if (row) {
-					mediaPath = row.local_path ?? null;
+					const resolved = resolveMediaCachePath(this.mediaDir, row.local_path);
+					mediaPath = isDisplayReadyPath(resolved) ? resolved : null;
 					if (row.vision) {
 						const v = JSON.parse(row.vision) as { text: string | null };
 						mediaDesc = v.text?.trim() || null;

@@ -12,7 +12,7 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 
 export const MEDIA_CACHE_MAX_BYTES = 1024 * 1024;
 export const MEDIA_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
@@ -139,6 +139,50 @@ export function isDisplayReadyPath(path: string | null, fileOps: MediaCacheFileO
 	}
 }
 
+/** Resolve the cache-relative filename stored in SQLite inside this deployment's media directory. */
+export function resolveMediaCachePath(cacheDir: string, storedPath: string | null): string | null {
+	if (!storedPath || storedPath.includes("\0")) return null;
+	const filename = basename(storedPath);
+	if (!filename || filename === "." || filename === ".." || !staticMediaMimeForPath(filename)) return null;
+	return join(cacheDir, filename);
+}
+
+/**
+ * Canonicalize legacy absolute cache paths after a checkout/deployment move. Existing files are
+ * addressed by basename inside the configured cache directory; missing/unsupported entries are
+ * cleared so the bounded display-media queue can acquire them again.
+ */
+export function reconcileMediaCachePaths(
+	db: Database,
+	cacheDir: string,
+	fileOps: MediaCacheFileOps = defaultFileOps,
+): { migrated: number; invalidated: number } {
+	const rows = db.query("SELECT file_unique_id, local_path FROM media WHERE local_path IS NOT NULL").all() as {
+		file_unique_id: string;
+		local_path: string;
+	}[];
+	let migrated = 0;
+	let invalidated = 0;
+	const update = db.query("UPDATE media SET local_path = ? WHERE file_unique_id = ?");
+	const reconcile = db.transaction(() => {
+		for (const row of rows) {
+			const resolved = resolveMediaCachePath(cacheDir, row.local_path);
+			if (resolved && isDisplayReadyPath(resolved, fileOps)) {
+				const canonical = basename(resolved);
+				if (row.local_path !== canonical) {
+					update.run(canonical, row.file_unique_id);
+					migrated++;
+				}
+				continue;
+			}
+			update.run(null, row.file_unique_id);
+			invalidated++;
+		}
+	});
+	reconcile();
+	return { migrated, invalidated };
+}
+
 function readExisting(
 	path: string,
 	fileOps: MediaCacheFileOps,
@@ -219,6 +263,7 @@ async function ensureLocalMediaInner(
 	options: EnsureLocalMediaOptions,
 ): Promise<LocalMediaResult> {
 	const fileOps = options.fileOps ?? defaultFileOps;
+	const cacheDir = options.cacheDir ?? join(process.cwd(), "data", "media");
 	const signal = options.signal;
 	if (signal?.aborted) return { ok: false, outcome: "aborted" };
 	const media = db.query("SELECT kind, local_path FROM media WHERE file_unique_id = ?").get(fileUniqueId) as {
@@ -230,13 +275,14 @@ async function ensureLocalMediaInner(
 	}
 	const kind = media.kind;
 	if (media.local_path) {
-		const existing = readExisting(media.local_path, fileOps);
+		const existingPath = resolveMediaCachePath(cacheDir, media.local_path);
+		const existing = existingPath ? readExisting(existingPath, fileOps) : null;
 		if (existing) {
 			return {
 				ok: true,
 				kind,
 				...existing,
-				mediaPath: existing.bytes.byteLength <= MEDIA_CACHE_MAX_BYTES ? media.local_path : null,
+				mediaPath: existing.bytes.byteLength <= MEDIA_CACHE_MAX_BYTES ? existingPath : null,
 				cacheOutcome: existing.bytes.byteLength <= MEDIA_CACHE_MAX_BYTES ? "cached" : "oversize",
 			};
 		}
@@ -271,18 +317,12 @@ async function ensureLocalMediaInner(
 
 	let mediaPath: string | null = null;
 	try {
-		mediaPath = installMediaCacheFile(
-			options.cacheDir ?? join(process.cwd(), "data", "media"),
-			fileUniqueId,
-			extension,
-			bytes,
-			fileOps,
-		);
+		mediaPath = installMediaCacheFile(cacheDir, fileUniqueId, extension, bytes, fileOps);
 		if (signal?.aborted) {
 			fileOps.remove(mediaPath);
 			return { ok: false, outcome: "aborted" };
 		}
-		db.query("UPDATE media SET local_path = ? WHERE file_unique_id = ?").run(mediaPath, fileUniqueId);
+		db.query("UPDATE media SET local_path = ? WHERE file_unique_id = ?").run(basename(mediaPath), fileUniqueId);
 	} catch {
 		if (mediaPath) {
 			try {

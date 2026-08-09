@@ -57,9 +57,9 @@ bun run pi --version
 
 ## 图片没有内联显示
 
-新photo会先显示media label，再由daemon后台下载并在同一Pi卡片原位出现；它不依赖bot是否回应或vision是否运行。daemon启动也只回填最新100条缺图记录，所以很旧的记录可能要等后续restart继续补齐。
+用户或bot新发的photo/sticker会先显示media label，再由daemon后台下载并在同一Pi卡片原位出现；它不依赖routing或vision。daemon启动时会把旧绝对cache path按文件名迁到当前`data/media`，不存在的记录先清空，再只回填最新100条，所以很旧的缺口可能要等后续restart继续补齐。
 
-若新photo持续只有label，先在脱敏日志中查`media_cache_ready/skip/error`的固定category与queue数字，再检查文件是否超过1 MiB、terminal图像能力和当前项目Pi版本。Pi根据当前capability选择Kitty/iTerm2/native fallback；不要手写terminal escape或绕过Pi组件。稳定复现时只记录terminal、tmux状态、媒体种类、固定outcome和“是否有本地path”，不要附带token、绝对path或私人图片本体。
+若新媒体持续只有label，先在脱敏日志中查`media_cache_ready/skip/error`的固定category与queue数字，再检查文件是否超过1 MiB、是否为支持的静态图片格式、terminal图像能力和当前项目Pi版本。Pi根据当前capability选择Kitty/iTerm2/native fallback；不要手写terminal escape或绕过Pi组件。稳定复现时只记录terminal、tmux状态、媒体种类、固定outcome和“是否有本地path”，不要附带token、绝对path或私人图片本体。
 
 ## 搜索或网页读取失败
 

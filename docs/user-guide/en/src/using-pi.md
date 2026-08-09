@@ -61,7 +61,7 @@ Pi's native footer renders `↑/↓/R/W/CH/$/context/model`. Lifetime values cov
 - Local assistant text when a bot does not call `send` remains feed-only and never reaches the group.
 - Vision is off by default. When explicitly enabled, photo and sticker vision runs lazily within deployment budgets only when a real bot turn needs media context; opening the UI never adds a vision call.
 - A vision description belongs to the shared group message, so global and every one-bot feed render it directly below the media. A one-bot filter limits only LOCAL events and usage.
-- Inline image visibility follows Pi terminal capabilities and local media preparation. Text, media labels, and vision descriptions remain readable fallbacks.
+- User- and bot-sent photos/stickers use the same local media preparation path and render in the same native cards. Inline visibility still follows Pi terminal capabilities; text, media labels, and vision descriptions remain readable fallbacks.
 
 ## Web search and link reading
 

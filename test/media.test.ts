@@ -3,7 +3,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createConnection, createServer } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Tui from "@earendil-works/pi-tui";
@@ -20,9 +20,10 @@ import {
 	type TimelineItem,
 	type UsageRun,
 } from "../src/ipc.ts";
-import { ensureLocalMedia, type MediaDownloadApi } from "../src/media/local-cache.ts";
+import { ensureLocalMedia, reconcileMediaCachePaths, type MediaDownloadApi } from "../src/media/local-cache.ts";
+import { MediaCacheQueue } from "../src/media/media-cache.ts";
 import { setLogSink } from "../src/observability/log.ts";
-import { TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
+import { readMediaImage, TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
 
 const temporaryDirectories = new Set<string>();
 const logLines: string[] = [];
@@ -138,6 +139,84 @@ describe("cross-bot media acquisition", () => {
 			expect(result.ok).toBe(true);
 			expect(calls).toEqual(["B:getFile:file-from-B", "B:downloadFile:photos/shared.jpg"]);
 		} finally {
+			db.close();
+		}
+	});
+
+	test("rebases migrated sticker paths and projects bot media from the current cache", () => {
+		const directory = temporaryDirectory("tg-media-rebase-");
+		const mediaDir = join(directory, "media");
+		mkdirSync(mediaDir, { recursive: true });
+		writeFileSync(join(mediaDir, "bot-sticker.webp"), new Uint8Array([1, 2, 3, 4]));
+		const db = openDb(join(directory, "agent.db"));
+		try {
+			db.query(
+				"INSERT INTO media (file_unique_id, kind, local_path) VALUES ('bot-sticker', 'sticker', '/Users/old/project/data/media/bot-sticker.webp')",
+			).run();
+			db.query(
+				`INSERT INTO messages
+					(chat_id, message_id, date, sender_id, display_name, is_bot, media, first_seen_by)
+				 VALUES (?, 42, 100, 777, 'bot', 1, ?, 'A')`,
+			).run(-1001, JSON.stringify({ kind: "sticker", file_unique_id: "bot-sticker", sticker_emoji: "😺" }));
+
+			expect(reconcileMediaCachePaths(db, mediaDir)).toEqual({ migrated: 1, invalidated: 0 });
+			const stored = db.query("SELECT local_path FROM media WHERE file_unique_id = 'bot-sticker'").get() as {
+				local_path: string;
+			};
+			expect(stored.local_path).toBe("bot-sticker.webp");
+
+			const ipc = new IpcServer(db, join(directory, "daemon.sock"), new Map([["A", "bot"]]), new Map([["A", 777]]));
+			const row = db.query("SELECT * FROM messages WHERE message_id = 42").get() as never;
+			const item = ipc.msgToItem(row);
+			expect(item.isBot).toBe(true);
+			expect(item.mediaPath).toBe(join(mediaDir, "bot-sticker.webp"));
+			expect(readMediaImage(item)?.filename).toBe(join(mediaDir, "bot-sticker.webp"));
+		} finally {
+			db.close();
+		}
+	});
+
+	test("prepares an outgoing bot sticker through the shared display-media queue", async () => {
+		const directory = temporaryDirectory("tg-bot-sticker-cache-");
+		const db = openDb(join(directory, "agent.db"));
+		const calls: string[] = [];
+		const api: MediaDownloadApi = {
+			getFile: async (fileId) => {
+				calls.push(`get:${fileId}`);
+				return { file_path: "stickers/sent.webp" };
+			},
+			downloadFile: async (filePath) => {
+				calls.push(`download:${filePath}`);
+				return new Uint8Array([1, 2, 3, 4]);
+			},
+		};
+		const readyEvents: { fileUniqueId: string; mediaPath: string }[] = [];
+		const queue = new MediaCacheQueue(db, new Map([["A", api]]), {
+			cacheDir: join(directory, "media"),
+			onReady: (fileUniqueId, mediaPath) => {
+				readyEvents.push({ fileUniqueId, mediaPath });
+			},
+		});
+		try {
+			db.query("INSERT INTO media (file_unique_id, kind) VALUES ('sent-sticker', 'sticker')").run();
+			db.query(
+				"INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', 'bot-file-id', 'sent-sticker')",
+			).run();
+			expect(
+				queue.scheduleMessage("A", {
+					media: JSON.stringify({ kind: "sticker", file_unique_id: "sent-sticker" }),
+				}),
+			).toBe(true);
+			await queue.whenIdle();
+			expect(calls).toEqual(["get:bot-file-id", "download:stickers/sent.webp"]);
+			expect(readyEvents[0]?.fileUniqueId).toBe("sent-sticker");
+			expect(readyEvents[0]?.mediaPath.startsWith(join(directory, "media"))).toBe(true);
+			const stored = db.query("SELECT local_path FROM media WHERE file_unique_id = 'sent-sticker'").get() as {
+				local_path: string;
+			};
+			expect(stored.local_path).not.toContain("/");
+		} finally {
+			await queue.stop();
 			db.close();
 		}
 	});

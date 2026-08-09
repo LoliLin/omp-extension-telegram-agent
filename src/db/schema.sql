@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS media (
 	mime TEXT,
 	width INTEGER,
 	height INTEGER,
-	local_path TEXT, -- downloaded cache
+	local_path TEXT, -- cache-relative filename; resolved inside configured data/media
 	vision TEXT, -- JSON: {model, kind, text, at} — shared by both bots
 	sticker_set TEXT,
 	sticker_emoji TEXT,

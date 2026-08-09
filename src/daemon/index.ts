@@ -19,7 +19,8 @@ import { createSharedModelRuntime, piAuthSource } from "../agent/model-runtime.t
 import { parsePiModelReference } from "../agent/model-ref.ts";
 import { assertPiVisionExecutorReady, createPiVisionExecutor } from "../media/vision.ts";
 import { VisionScheduler } from "../media/vision-scheduler.ts";
-import { PhotoCacheQueue } from "../media/photo-cache.ts";
+import { MediaCacheQueue } from "../media/media-cache.ts";
+import { reconcileMediaCachePaths } from "../media/local-cache.ts";
 import { composeDeployment, composePollers } from "./composition.ts";
 import type { IngestResult } from "../telegram/ingest.ts";
 import { claimRoutingDecision, finishRoutingClaim } from "../db/routing-claims.ts";
@@ -59,6 +60,11 @@ const visionScheduler = config.vision?.enabled
 		})
 	: null;
 const db = openDb(config.dbPath);
+const mediaDir = join(config.dataDir, "media");
+const mediaPathReconciliation = reconcileMediaCachePaths(db, mediaDir);
+if (mediaPathReconciliation.migrated > 0 || mediaPathReconciliation.invalidated > 0) {
+	log.info("media_cache", "paths_reconciled", mediaPathReconciliation);
+}
 const retentionConfig = config.retention ?? {
 	telemetryDays: 90,
 	rawUpdateDays: 30,
@@ -148,6 +154,18 @@ const manualSend = new ManualSendService(db, Number(`-100${config.groupPeerId}`)
 ipc = new IpcServer(db, join(config.dataDir, "daemon.sock"), botNames, botUserIds, (request) =>
 	manualSend.send(request),
 );
+const mediaCache = new MediaCacheQueue(db, botApis, {
+	cacheDir: mediaDir,
+	onReady: (fileUniqueId, mediaPath) => ipc.broadcastMediaReady({ fileUniqueId, mediaPath }),
+	onTelemetry: (event) => {
+		log.info("media_cache", event.event, {
+			kind: event.kind,
+			outcome: event.outcome,
+			bytes_bucket: event.bytesBucket,
+			queue_depth: event.queueDepth,
+		});
+	},
+});
 for (const [botId, rt] of runtimes) {
 	rt.eventSink = (kind, payload) => {
 		ipc.broadcast({
@@ -164,7 +182,10 @@ for (const [botId, rt] of runtimes) {
 		const row = db
 			.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
 			.get(m.chat.id, m.message_id) as MessageRow | null;
-		if (row) ipc.broadcast(ipc.msgToItem(row));
+		if (row) {
+			ipc.broadcast(ipc.msgToItem(row));
+			mediaCache.scheduleMessage(botId, row);
+		}
 	};
 	rt.usageSink = (run) => ipc.broadcastUsage(run);
 	rt.visionSink = (fileUniqueId, text) => ipc.broadcastVision({ fileUniqueId, text });
@@ -172,20 +193,8 @@ for (const [botId, rt] of runtimes) {
 	rt.streamDemand = () => ipc.hasStreamListener(botId);
 }
 ipc.start();
-const photoCache = new PhotoCacheQueue(db, botApis, {
-	cacheDir: join(config.dataDir, "media"),
-	onReady: (fileUniqueId, mediaPath) => ipc.broadcastMediaReady({ fileUniqueId, mediaPath }),
-	onTelemetry: (event) => {
-		log.info("media_cache", event.event, {
-			kind: event.kind,
-			outcome: event.outcome,
-			bytes_bucket: event.bytesBucket,
-			queue_depth: event.queueDepth,
-		});
-	},
-});
-const photoBackfillCount = photoCache.scheduleBackfill();
-log.info("media_cache", "startup_scheduled", { scheduled: photoBackfillCount, limit: 100, concurrency: 2 });
+const mediaBackfillCount = mediaCache.scheduleBackfill();
+log.info("media_cache", "startup_scheduled", { scheduled: mediaBackfillCount, limit: 100, concurrency: 2 });
 
 const telegramControl = new TelegramControlCommandService(db, config.bots, rootDir, runtimes, config.telegramAdmins);
 const telegramControlCoordinator = new TelegramControlCoordinator(
@@ -293,7 +302,7 @@ const pollers = composePollers(
 			if (row) {
 				ipc.broadcast(ipc.msgToItem(row));
 				// Poller offset + canonical row are durable before this non-blocking side effect.
-				photoCache.scheduleMessage(botId, row);
+				mediaCache.scheduleMessage(botId, row);
 			}
 		}
 	},
@@ -314,9 +323,9 @@ async function shutdown(signal: string) {
 	hardTimer.unref?.();
 	for (const p of pollers) p.stop();
 	clearInterval(retentionTimer);
-	const photoCacheStop = photoCache.stop();
+	const mediaCacheStop = mediaCache.stop();
 	for (const rt of runtimes.values()) await rt.stop();
-	await photoCacheStop;
+	await mediaCacheStop;
 	if (controlTasks.size > 0) {
 		await Promise.race([Promise.allSettled([...controlTasks]), new Promise((resolve) => setTimeout(resolve, 5_000))]);
 	}

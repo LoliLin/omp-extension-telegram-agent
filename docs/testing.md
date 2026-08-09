@@ -19,7 +19,7 @@
 - `runjs.test.ts` — run_js sandbox：正常计算可用，host realm 隔离与资源限制成立。
 - `search.test.ts` — TinyFish search/fetch 契约：参数边界、SSRF prefilter（public IP 表）、untrusted boundary、telemetry 脱敏；只用本地 Bun server。
 - `db.test.ts` — SQLite migration：旧库迁移幂等且保留历史 telemetry。
-- `media.test.ts` — 跨bot Telegram media source配对、共享下载，以及Pi attach filter握手、视觉描述乱序合并与卡片位置。
+- `media.test.ts` — 跨bot Telegram media source配对与共享下载、部署路径迁移、bot自发sticker展示缓存，以及Pi attach filter握手、视觉描述乱序合并与卡片位置。
 
 ## 测试选择规则
 

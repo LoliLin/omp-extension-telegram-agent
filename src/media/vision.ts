@@ -384,9 +384,8 @@ async function ensureVisionInner(
 		return null;
 	}
 	const text = result.text?.trim() || null;
-	db.query("UPDATE media SET vision = ?, local_path = COALESCE(?, local_path) WHERE file_unique_id = ?").run(
+	db.query("UPDATE media SET vision = ? WHERE file_unique_id = ?").run(
 		JSON.stringify({ model: executor.modelRef, kind, text, outcome: result.telemetry.outcome, at: Date.now() }),
-		local.mediaPath,
 		fileUniqueId,
 	);
 	if (text) appendMediaUpdateEvents(db, fileUniqueId, text);

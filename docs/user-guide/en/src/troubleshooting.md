@@ -57,9 +57,9 @@ Another process is long-polling with the same token. Run `bun run restart`; the 
 
 ## Images do not render inline
 
-A new photo first shows its media label, then the daemon downloads it in the background and updates the same Pi card. This does not depend on a bot responding or on vision running. Startup backfills only the newest 100 missing records, so very old gaps may require later restarts to continue.
+A new user- or bot-sent photo/sticker first shows its media label, then the daemon downloads it in the background and updates the same Pi card. This does not depend on routing or vision. On startup, legacy absolute cache paths are rebased by filename when the file exists in the current `data/media`; missing entries are cleared before the newest 100 are backfilled, so very old gaps may require later restarts to continue.
 
-If a new photo remains label-only, inspect only the fixed `media_cache_ready/skip/error` category and queue number in redacted logs, then check the 1 MiB limit, terminal image capability, and project Pi version. Pi still selects Kitty, iTerm2, or native text fallback. Do not add terminal escapes or bypass Pi components. Record terminal type, tmux state, media kind, fixed outcome, and whether a local path exists—never a token, absolute path, or private image contents.
+If new media remains label-only, inspect only the fixed `media_cache_ready/skip/error` category and queue number in redacted logs, then check the 1 MiB limit, static-image format, terminal image capability, and project Pi version. Pi still selects Kitty, iTerm2, or native text fallback. Do not add terminal escapes or bypass Pi components. Record terminal type, tmux state, media kind, fixed outcome, and whether a local path exists—never a token, absolute path, or private image contents.
 
 ## Search or page retrieval fails
 

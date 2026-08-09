@@ -1,54 +1,58 @@
 import type { Database } from "bun:sqlite";
+import { join } from "node:path";
 import { log } from "../observability/log.ts";
 import {
 	ensureLocalMedia,
 	isDisplayReadyPath,
 	MEDIA_CACHE_MAX_BYTES,
+	resolveMediaCachePath,
 	type EnsureLocalMediaOptions,
 	type LocalMediaCacheOutcome,
 	type LocalMediaFailure,
 	type MediaDownloadApi,
 } from "./local-cache.ts";
 
-export const PHOTO_CACHE_CONCURRENCY = 2;
-export const PHOTO_CACHE_MAX_PENDING = 128;
-export const PHOTO_CACHE_BACKFILL_LIMIT = 100;
+export const MEDIA_CACHE_CONCURRENCY = 2;
+export const MEDIA_CACHE_MAX_PENDING = 128;
+export const MEDIA_CACHE_BACKFILL_LIMIT = 100;
 
-export type PhotoCacheBytesBucket = "unavailable" | "lt_32_kib" | "32_128_kib" | "128_512_kib" | "512_kib_1_mib";
-export type PhotoCacheOutcome = LocalMediaFailure | LocalMediaCacheOutcome | "queue_overflow" | "observer_failed";
+export type DisplayMediaKind = "photo" | "sticker";
+export type MediaCacheBytesBucket = "unavailable" | "lt_32_kib" | "32_128_kib" | "128_512_kib" | "512_kib_1_mib";
+export type MediaCacheOutcome = LocalMediaFailure | LocalMediaCacheOutcome | "queue_overflow" | "observer_failed";
 
-export interface PhotoCacheTelemetry {
+export interface MediaCacheTelemetry {
 	event: "media_cache_ready" | "media_cache_skip" | "media_cache_error";
-	kind: "photo";
-	outcome: PhotoCacheOutcome;
-	bytesBucket: PhotoCacheBytesBucket;
+	kind: DisplayMediaKind;
+	outcome: MediaCacheOutcome;
+	bytesBucket: MediaCacheBytesBucket;
 	queueDepth: number;
 }
 
-export interface PhotoCacheOptions extends EnsureLocalMediaOptions {
+export interface MediaCacheOptions extends EnsureLocalMediaOptions {
 	concurrency?: number;
 	maxPending?: number;
 	backfillLimit?: number;
 	onReady?: (fileUniqueId: string, mediaPath: string) => void;
-	onTelemetry?: (telemetry: PhotoCacheTelemetry) => void;
+	onTelemetry?: (telemetry: MediaCacheTelemetry) => void;
 	stopTimeoutMs?: number;
 }
 
-interface PhotoJob {
+interface MediaJob {
 	botId: string;
 	fileUniqueId: string;
+	kind: DisplayMediaKind;
 }
 
-function bytesBucket(bytes: number): PhotoCacheBytesBucket {
+function bytesBucket(bytes: number): MediaCacheBytesBucket {
 	if (bytes < 32 * 1024) return "lt_32_kib";
 	if (bytes < 128 * 1024) return "32_128_kib";
 	if (bytes < 512 * 1024) return "128_512_kib";
 	return "512_kib_1_mib";
 }
 
-/** Bounded, non-blocking photo cache queue owned by the daemon lifecycle. */
-export class PhotoCacheQueue {
-	private readonly queue: PhotoJob[] = [];
+/** Bounded, sender-agnostic display cache queue for Telegram photos and stickers. */
+export class MediaCacheQueue {
+	private readonly queue: MediaJob[] = [];
 	private readonly scheduled = new Set<string>();
 	private readonly activeTasks = new Set<Promise<void>>();
 	private readonly idleWaiters = new Set<() => void>();
@@ -64,19 +68,19 @@ export class PhotoCacheQueue {
 	constructor(
 		private readonly db: Database,
 		private readonly apis: ReadonlyMap<string, MediaDownloadApi>,
-		private readonly options: PhotoCacheOptions = {},
+		private readonly options: MediaCacheOptions = {},
 	) {
 		this.concurrency = Math.min(
-			PHOTO_CACHE_CONCURRENCY,
-			Math.max(1, Math.floor(options.concurrency ?? PHOTO_CACHE_CONCURRENCY)),
+			MEDIA_CACHE_CONCURRENCY,
+			Math.max(1, Math.floor(options.concurrency ?? MEDIA_CACHE_CONCURRENCY)),
 		);
 		this.maxPending = Math.min(
-			PHOTO_CACHE_MAX_PENDING,
-			Math.max(1, Math.floor(options.maxPending ?? PHOTO_CACHE_MAX_PENDING)),
+			MEDIA_CACHE_MAX_PENDING,
+			Math.max(1, Math.floor(options.maxPending ?? MEDIA_CACHE_MAX_PENDING)),
 		);
 		this.backfillLimit = Math.min(
-			PHOTO_CACHE_BACKFILL_LIMIT,
-			Math.max(1, Math.floor(options.backfillLimit ?? PHOTO_CACHE_BACKFILL_LIMIT)),
+			MEDIA_CACHE_BACKFILL_LIMIT,
+			Math.max(1, Math.floor(options.backfillLimit ?? MEDIA_CACHE_BACKFILL_LIMIT)),
 		);
 		this.stopTimeoutMs = Math.max(0, Math.floor(options.stopTimeoutMs ?? 5_000));
 	}
@@ -91,31 +95,33 @@ export class PhotoCacheQueue {
 		return this.peak;
 	}
 
-	/** Queue one canonical photo identity. Returns immediately and never blocks polling. */
+	/** Queue one canonical display-media identity. Returns immediately and never blocks polling. */
 	schedule(botId: string, fileUniqueId: string): boolean {
 		if (this.stopped || !fileUniqueId || !this.apis.has(botId) || this.scheduled.has(fileUniqueId)) return false;
 		const row = this.db.query("SELECT kind, local_path FROM media WHERE file_unique_id = ?").get(fileUniqueId) as {
 			kind: string;
 			local_path: string | null;
 		} | null;
-		if (!row || row.kind !== "photo") return false;
-		if (isDisplayReadyPath(row.local_path, this.options.fileOps)) return false;
+		if (!row || (row.kind !== "photo" && row.kind !== "sticker")) return false;
+		const kind = row.kind as DisplayMediaKind;
+		const cacheDir = this.options.cacheDir ?? join(process.cwd(), "data", "media");
+		if (isDisplayReadyPath(resolveMediaCachePath(cacheDir, row.local_path), this.options.fileOps)) return false;
 		if (this.queue.length >= this.maxPending) {
-			this.emit("media_cache_skip", "queue_overflow", "unavailable");
+			this.emit(kind, "media_cache_skip", "queue_overflow", "unavailable");
 			return false;
 		}
 		this.scheduled.add(fileUniqueId);
-		this.queue.push({ botId, fileUniqueId });
+		this.queue.push({ botId, fileUniqueId, kind });
 		queueMicrotask(() => this.pump());
 		return true;
 	}
 
-	/** Schedule a photo referenced by one already-durable canonical message row. */
+	/** Schedule display media referenced by one already-durable canonical message row. */
 	scheduleMessage(botId: string, message: { media: string | null }): boolean {
 		if (!message.media) return false;
 		try {
 			const media = JSON.parse(message.media) as { kind?: unknown; file_unique_id?: unknown };
-			return media.kind === "photo" && typeof media.file_unique_id === "string"
+			return (media.kind === "photo" || media.kind === "sticker") && typeof media.file_unique_id === "string"
 				? this.schedule(botId, media.file_unique_id)
 				: false;
 		} catch {
@@ -127,7 +133,9 @@ export class PhotoCacheQueue {
 	scheduleBackfill(): number {
 		if (this.stopped) return 0;
 		const rows = this.db
-			.query("SELECT file_unique_id FROM media WHERE kind = 'photo' AND local_path IS NULL ORDER BY rowid DESC LIMIT ?")
+			.query(
+				"SELECT file_unique_id FROM media WHERE kind IN ('photo', 'sticker') AND local_path IS NULL ORDER BY rowid DESC LIMIT ?",
+			)
 			.all(this.backfillLimit) as { file_unique_id: string }[];
 		let count = 0;
 		for (const row of rows) {
@@ -180,7 +188,7 @@ export class PhotoCacheQueue {
 		}
 	}
 
-	private async run(job: PhotoJob): Promise<void> {
+	private async run(job: MediaJob): Promise<void> {
 		const api = this.apis.get(job.botId);
 		if (!api || this.stopped) return;
 		const result = await ensureLocalMedia(this.db, api, job.botId, job.fileUniqueId, {
@@ -192,6 +200,7 @@ export class PhotoCacheQueue {
 		if (this.stopped || this.controller.signal.aborted) return;
 		if (!result.ok) {
 			this.emit(
+				job.kind,
 				result.outcome === "unsupported_format" || result.outcome === "download_oversize"
 					? "media_cache_skip"
 					: "media_cache_error",
@@ -203,6 +212,7 @@ export class PhotoCacheQueue {
 		const bucket = bytesBucket(Math.min(result.bytes.byteLength, MEDIA_CACHE_MAX_BYTES));
 		if (!result.mediaPath) {
 			this.emit(
+				job.kind,
 				result.cacheOutcome === "install_failed" ? "media_cache_error" : "media_cache_skip",
 				result.cacheOutcome,
 				bucket,
@@ -212,15 +222,20 @@ export class PhotoCacheQueue {
 		try {
 			this.options.onReady?.(job.fileUniqueId, result.mediaPath);
 		} catch {
-			this.emit("media_cache_error", "observer_failed", bucket);
+			this.emit(job.kind, "media_cache_error", "observer_failed", bucket);
 			return;
 		}
-		this.emit("media_cache_ready", result.cacheOutcome, bucket);
+		this.emit(job.kind, "media_cache_ready", result.cacheOutcome, bucket);
 	}
 
-	private emit(event: PhotoCacheTelemetry["event"], outcome: PhotoCacheOutcome, bucket: PhotoCacheBytesBucket): void {
+	private emit(
+		kind: DisplayMediaKind,
+		event: MediaCacheTelemetry["event"],
+		outcome: MediaCacheOutcome,
+		bucket: MediaCacheBytesBucket,
+	): void {
 		try {
-			this.options.onTelemetry?.({ event, kind: "photo", outcome, bytesBucket: bucket, queueDepth: this.queue.length });
+			this.options.onTelemetry?.({ event, kind, outcome, bytesBucket: bucket, queueDepth: this.queue.length });
 		} catch {
 			log.error("media_cache", "telemetry_sink_failed", { category: "observer_failed" });
 		}

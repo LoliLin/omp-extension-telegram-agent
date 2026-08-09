@@ -61,7 +61,7 @@ Pi 原生 footer 显示 `↑/↓/R/W/CH/$/context/model`。lifetime 来自 SQLit
 - bot 没有调用 `send` 时的 local assistant text 只在 feed 可见，不会发群。
 - vision默认关闭。显式开启后，照片与sticker的视觉描述只在真实bot run需要时按deployment budget生成；UI本身不会额外触发vision provider。
 - 视觉描述属于共享群消息：全局与任一单bot feed都会把它显示在对应图片正下方；单bot filter只限制LOCAL事件与usage。
-- inline image 是否可见取决于 Pi terminal capability与本地媒体准备；文字、media label和视觉描述仍是可读 fallback。
+- 用户和bot发出的photo/sticker共用同一本地媒体准备链路，并在同一种native card里渲染；inline image是否可见仍取决于Pi terminal capability，文字、media label和视觉描述保持可读fallback。
 
 ## 网页搜索与链接读取
 

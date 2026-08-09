@@ -26,6 +26,7 @@ bun run stop                       # SIGTERM 优雅停止
 ```
 
 - 配置了sticker sets时，首次Telegram catalog拉取可能延长启动；以后复用本地DB。vision默认关闭，只有显式启用（或legacy配置明确写辅助视觉模型）才会产生视觉工作。`start`会在60秒内等socket；超时但child仍存活时只报告starting，并提示用`status` / `daemon.log`确认。
+- daemon启动会把历史`media.local_path`按basename迁到当前deployment的`data/media`；存在的用户/bot photo与sticker立即恢复可显示状态，缺失项清空后进入有界后台回填。该过程不调用vision或聊天provider。
 - 每 bot 启动日志的 `sticker-catalog` 行会报告 `catalog/sendable/missing_file_id`；`missing_file_id>0` 的条目不会暴露给该 bot。检查 set 名/token 权限或 Telegram `getStickerSet` 失败，不要复制另一个 bot 的 file_id。
 - 配置错误会在启动期逐条列出（stderr / daemon.log），不会静默跑坏配置。
 - 双 start 竞态由排他pid锁挡住；并发restart由`data/daemon.control.lock`串行，第二个立即报`restart already in progress`。
