@@ -1,11 +1,13 @@
 // Pure Pi extension and cache-identity contracts from review-260808.
 
 import { describe, expect, test } from "bun:test";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
 	buildContextFingerprint,
 	canResumeContextSession,
 	type ContextFingerprintInput,
 } from "../src/agent/context-fingerprint.ts";
+import { configureBotModelRuntime, inspectModelReasoning } from "../src/agent/model-runtime.ts";
 import {
 	NO_SEND_MARKER,
 	TELEGRAM_EXTENSION_ORDER,
@@ -38,6 +40,47 @@ function fingerprintInput(): ContextFingerprintInput {
 }
 
 describe("Pi context protocol", () => {
+	test("rejects a model-specific reasoning level that Pi would silently clamp", async () => {
+		const catalog = await ModelRuntime.create();
+		const model = catalog.getModel("deepseek", "deepseek-v4-flash");
+		expect(model).toBeDefined();
+		const runtime = {
+			getModel: (provider: string, modelId: string) =>
+				provider === "deepseek" && modelId === "deepseek-v4-flash" ? model : undefined,
+			hasConfiguredAuth: () => true,
+		};
+
+		expect(inspectModelReasoning(model!, "medium")).toEqual({
+			provider: "deepseek",
+			model: "deepseek-v4-flash",
+			requested: "medium",
+			effective: "high",
+			supported: ["off", "high", "max"],
+			valid: false,
+		});
+		await expect(
+			configureBotModelRuntime(
+				{
+					provider: "deepseek",
+					model: "deepseek-v4-flash",
+					thinkingLevel: "medium",
+					purpose: "bot:A",
+				},
+				runtime,
+			),
+		).rejects.toMatchObject({
+			category: "unsupported_reasoning_effort",
+			purpose: "bot:A",
+			reasoning: { requested: "medium", effective: "high", supported: ["off", "high", "max"] },
+		});
+		expect(
+			await configureBotModelRuntime(
+				{ provider: "deepseek", model: "deepseek-v4-flash", thinkingLevel: "high" },
+				runtime,
+			),
+		).toBe(runtime);
+	});
+
 	test("fingerprint changes and missing files prevent session resume", () => {
 		const original = buildContextFingerprint(fingerprintInput());
 		const changed = buildContextFingerprint({ ...fingerprintInput(), personaSha256: "persona-b" });

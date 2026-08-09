@@ -14,14 +14,14 @@
 `test/` 只保留长期 invariant 与安全边界的守卫，共 9 个测试文件：
 
 - `cache.test.ts` — cache golden：锁定 cache-visible protocol 的 hash（system prompt、tool schema 与顺序、消息/compaction 序列化 grammar、extension 顺序、sticker catalog block）。任何 provider-visible 变化都会在这里报警。
-- `context-protocol.test.ts` — context fingerprint / extension 契约：恢复 session 的 cache-identity 判断与 structured context 协议。
+- `context-protocol.test.ts` — context fingerprint / extension / model capability 契约：恢复 session 的 cache-identity 判断、structured context 协议，以及不允许 Pi 静默 clamp 不支持的 reasoning 档位。
 - `network-isolation.test.ts` — 证明 `bun test` 在真实 `.env` 存在时也机械拒绝外网 / 付费 API fetch（配合 `network-guard.ts` preload，只放行 loopback）。
 - `runjs.test.ts` — run_js sandbox：正常计算可用，host realm 隔离与资源限制成立。
 - `search.test.ts` — TinyFish search/fetch 契约：参数边界、SSRF prefilter（public IP 表）、untrusted boundary、telemetry 脱敏；只用本地 Bun server。
 - `db.test.ts` — SQLite migration：旧库迁移幂等且保留历史 telemetry。
 - `media.test.ts` — 跨bot Telegram media source配对、共享下载与vision singleflight/persistent cache、部署路径迁移、bot自发sticker展示缓存，以及Pi attach filter握手、activity单卡/原生thinking/完整正文、视觉描述乱序合并与卡片位置。
 - `telegram-control.test.ts` — `/status` 的 InputRichMessage Markdown、统计数字千位分隔与缓存命中率、独立 plain projection、create→canonical persistence，以及仅在确定性rich拒绝时单次fallback的exactly-once边界。
-- `telemetry.test.ts` — footer、Pi/Telegram status共享读模型：latest排除compaction、lifetime/live totals包含compaction、context/window与`CH = R/(↑+R+W)`派生口径。
+- `telemetry.test.ts` — footer、Pi/Telegram status共享读模型：latest排除compaction、lifetime/live totals包含compaction、runtime snapshot、统一字段顺序、context/window与`CH = R/(↑+R+W)`派生口径，并守卫reasoning debug finding。
 
 ## 测试选择规则
 

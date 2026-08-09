@@ -9,7 +9,9 @@ import { statsText } from "../.pi/extensions/tg-extension.ts";
 import { IpcServer } from "../src/daemon/ipc-server.ts";
 import { openDb } from "../src/db/db.ts";
 import { loadBotStats } from "../src/db/usage.ts";
-import type { BotStats, UsageRun } from "../src/ipc.ts";
+import type { BotStats, RuntimeControlSnapshot, UsageRun } from "../src/ipc.ts";
+import { buildDebugReport } from "../src/observability/debug-report.ts";
+import { BOT_STATUS_FIELD_KEYS } from "../src/observability/status.ts";
 import { summarizeBotUsage } from "../src/observability/usage.ts";
 import { TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
 
@@ -112,10 +114,30 @@ describe("unified usage telemetry", () => {
 
 			const stats = loadBotStats(db, "A");
 			const summary = summarizeBotUsage(stats, 128_000);
+			const runtime = {
+				state: "idle",
+				epoch: 3,
+				provider: "test",
+				model: "chat-model",
+				reasoningEffort: "high",
+				contextWindow: 128_000,
+				routingP: 0.25,
+				samplingCooldownMs: 2_000,
+				lastCompact: null,
+			} satisfies RuntimeControlSnapshot;
 			const piStatus = statsText(
 				"A",
 				stats,
-				{ id: "A", provider: "test", model: "chat-model", reasoningEffort: "medium" },
+				{
+					id: "A",
+					name: "Bot A",
+					provider: "test",
+					model: "chat-model",
+					reasoningEffort: "medium",
+					routingP: 0.25,
+					samplingCooldownMs: 2_000,
+				},
+				runtime,
 				{
 					modelRegistry: {
 						getAvailable: () => [
@@ -139,13 +161,56 @@ describe("unified usage telemetry", () => {
 			expect(summary.context).toEqual({ tokens: 1_000, contextWindow: 128_000, percent: 0.78125 });
 			expect(summary.cacheHitPercent).toBeCloseTo(46.666, 2);
 			expect(summary.averageLatencyMs).toBe(1_250);
-			expect(piStatus).toContain("test/chat-model:medium");
-			expect(piStatus).toContain("ctx 1.00K/128.0K (0.8%)");
-			expect(piStatus).toContain("CH46.7%");
+			expect(piStatus).toContain("model=test/chat-model · reasoning high · epoch 3");
+			expect(piStatus).not.toContain("reasoning medium");
+			expect(piStatus).toContain("context_current=1,000 / 128,000 (0.8%)");
+			expect(piStatus).toContain("cache_and_cost=CH 46.7% · $0.1500");
+			expect(
+				piStatus
+					.split("\n")
+					.slice(1)
+					.map((line) => line.slice(0, line.indexOf("="))),
+			).toEqual([...BOT_STATUS_FIELD_KEYS]);
 
 			const empty = summarizeBotUsage(loadBotStats(db, "B"), 128_000);
 			expect(empty.context).toEqual({ tokens: null, contextWindow: 128_000, percent: null });
 			expect(empty.cacheHitPercent).toBeNull();
+		} finally {
+			db.close();
+		}
+	});
+
+	test("debug report exposes requested, effective and supported reasoning", () => {
+		const db = openDb(":memory:");
+		try {
+			const diagnostic = {
+				bot_id: "A",
+				scope: "main" as const,
+				provider: "deepseek",
+				model: "deepseek-v4-flash",
+				requested: "medium",
+				effective: "high",
+				supported: ["off", "high", "max"],
+				valid: false,
+			};
+			const report = buildDebugReport(db, {
+				botIds: ["A"],
+				chatId: -1001,
+				sinceMs: 60_000,
+				now: 1_786_251_069_000,
+				modelReasoning: [diagnostic],
+			});
+
+			expect(report.model_reasoning_available).toBe(true);
+			expect(report.model_reasoning).toEqual([diagnostic]);
+			expect(report.findings).toContainEqual({
+				code: "unsupported_reasoning_effort",
+				bot_id: "A",
+				scope: "main",
+				requested: "medium",
+				effective: "high",
+				supported: ["off", "high", "max"],
+			});
 		} finally {
 			db.close();
 		}
@@ -168,9 +233,28 @@ describe("unified usage telemetry", () => {
 			compaction: false,
 		});
 		const socketPath = join(directory, "daemon.sock");
-		const ipc = new IpcServer(db, socketPath, new Map([["A", "bot A"]]), new Map([["A", 1]]));
+		const runtimeStatus = {
+			state: "idle",
+			epoch: 3,
+			provider: "deepseek",
+			model: "deepseek-v4-flash",
+			reasoningEffort: "high",
+			contextWindow: 1_000_000,
+			routingP: 0.25,
+			samplingCooldownMs: 2_000,
+			lastCompact: null,
+		} satisfies RuntimeControlSnapshot;
+		const ipc = new IpcServer(
+			db,
+			socketPath,
+			new Map([["A", "bot A"]]),
+			new Map([["A", 1]]),
+			null,
+			() => runtimeStatus,
+		);
 		ipc.start();
 		let baselineResolve!: () => void;
+		let baselineStatus: RuntimeControlSnapshot | undefined;
 		let updatedResolve!: (stats: BotStats) => void;
 		const baseline = new Promise<void>((resolve) => {
 			baselineResolve = resolve;
@@ -181,13 +265,17 @@ describe("unified usage telemetry", () => {
 		const client = new TimelineClient(socketPath, "A", {
 			onEvent: (event: TimelineEvent) => {
 				if (event.type !== "stats" || !event.stats.A) return;
-				if (event.stats.A.runs === 1) baselineResolve();
+				if (event.stats.A.runs === 1) {
+					baselineStatus = event.statuses.A;
+					baselineResolve();
+				}
 				if (event.stats.A.runs === 2) updatedResolve(event.stats.A);
 			},
 		});
 		try {
 			expect(await client.connect()).toBe(true);
 			await withTimeout(baseline, "baseline stats timed out");
+			expect(baselineStatus).toEqual(runtimeStatus);
 			const compaction: UsageRun = {
 				id: mainId + 1,
 				botId: "A",

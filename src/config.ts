@@ -507,10 +507,13 @@ export interface DebugDeploymentIdentity {
 		provider: string | null;
 		model: string | null;
 		reasoningEffort: string | null;
+		compactionModel: string;
 		cacheRetention: string;
 		tools: BotToolsConfig;
 		stickerSets: string[];
 	}>;
+	auxiliaryVisualModel: string;
+	visionEnabled: boolean;
 }
 
 /** Read only non-secret deployment identity for offline diagnostics; never resolves Pi auth/model defaults or token env values. */
@@ -520,6 +523,10 @@ export function loadDebugDeploymentIdentity(rootDir: string): DebugDeploymentIde
 	const raw = loadBotConfig(rootDir, env);
 	const groupPeerId = normalizePeerId(String(raw.group_peer_id ?? ""));
 	const rawBots = Array.isArray(raw.bots) ? (raw.bots as RawBotConfig[]) : [];
+	const defaultCompactionModel =
+		typeof raw.compaction_model === "string"
+			? normalizeAuxiliaryVisualModel(raw.compaction_model)!
+			: DEFAULT_AUXILIARY_VISUAL_MODEL;
 	const bots = rawBots.map((bot) => {
 		const id = typeof bot.id === "string" ? bot.id.trim() : "";
 		const tools = (bot.tools ?? {}) as Record<string, unknown>;
@@ -536,6 +543,10 @@ export function loadDebugDeploymentIdentity(rootDir: string): DebugDeploymentIde
 					: typeof raw.reasoning_effort === "string"
 						? raw.reasoning_effort
 						: null,
+			compactionModel:
+				typeof bot.compaction_model === "string"
+					? normalizeAuxiliaryVisualModel(bot.compaction_model)!
+					: defaultCompactionModel,
 			cacheRetention:
 				typeof bot.cache_retention === "string"
 					? bot.cache_retention
@@ -557,12 +568,19 @@ export function loadDebugDeploymentIdentity(rootDir: string): DebugDeploymentIde
 		throw new ConfigError(["[debug] deployment identity is invalid"]);
 	}
 	const dataDir = join(rootDir, "data");
+	const rawVision = raw.vision as { enabled?: unknown } | undefined;
 	return {
 		dataDir,
 		dbPath: typeof raw.db_path === "string" ? resolvePath(rootDir, raw.db_path) : join(dataDir, "agent.db"),
 		groupPeerId,
 		botIds: [...new Set(botIds)],
 		bots,
+		auxiliaryVisualModel:
+			typeof raw.auxiliary_visual_model === "string"
+				? normalizeAuxiliaryVisualModel(raw.auxiliary_visual_model)!
+				: DEFAULT_AUXILIARY_VISUAL_MODEL,
+		visionEnabled:
+			typeof rawVision?.enabled === "boolean" ? rawVision.enabled : raw.auxiliary_visual_model !== undefined,
 	};
 }
 

@@ -74,7 +74,7 @@ import {
 	replyObligationCount,
 } from "../db/reply-obligations.ts";
 import type { RoutingTrigger, TriggerResult, TriggerSource } from "./router.ts";
-import type { AgentStreamFrame, UsageRun } from "../ipc.ts";
+import type { AgentStreamFrame, RuntimeControlSnapshot, UsageRun } from "../ipc.ts";
 import { consumedControlMessageIds } from "../telegram/control-command.ts";
 import { classifyPiProviderFailure } from "./model-runtime.ts";
 import {
@@ -133,16 +133,6 @@ const ACTIVITY_RAW_EVENT_KINDS = new Set([
 const ACTIVITY_DETAIL_EVENT_KINDS = new Set(
 	[...ACTIVITY_RAW_EVENT_KINDS].filter((kind) => kind !== "assistant_text" && kind !== "thinking"),
 );
-
-export type RuntimeControlState = "idle" | "busy" | "cooldown" | "stopping" | "compacting";
-
-export interface RuntimeControlSnapshot {
-	state: RuntimeControlState;
-	epoch: number;
-	model: string;
-	contextWindow: number;
-	lastCompact: { at: number; outcome: "ok" | "failed" } | null;
-}
 
 export type ManualCompactResult =
 	| { ok: true; epoch: number; tokensBefore: number }
@@ -1283,8 +1273,12 @@ export class BotRuntime {
 		return {
 			state: this.controlCompacting ? "compacting" : this.samplingState(),
 			epoch: this.epoch,
-			model: this.bot.model,
+			provider: this.model.provider,
+			model: this.model.id,
+			reasoningEffort: this.session?.thinkingLevel ?? this.bot.reasoningEffort,
 			contextWindow: this.model.contextWindow,
+			routingP: this.bot.routingP,
+			samplingCooldownMs: this.bot.samplingCooldownMs,
 			lastCompact: this.lastControlCompact,
 		};
 	}

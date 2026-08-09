@@ -1,4 +1,6 @@
 // Local IPC between daemon (server) and TUI (client). Unix socket, JSONL frames.
+
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 // Protocol:
 //   C->S {type:"hello"}                       S->C {type:"snapshot", items: TimelineItem[]}
 //   C->S {type:"history", before, limit}      S->C {type:"history", items, hasMore}
@@ -95,10 +97,26 @@ export interface BotStats {
 	last: UsageRun | null;
 }
 
+export type RuntimeControlState = "idle" | "busy" | "cooldown" | "stopping" | "compacting";
+
+/** Daemon-resolved runtime truth shared by Telegram control, Pi status and Pi footer. */
+export interface RuntimeControlSnapshot {
+	state: RuntimeControlState;
+	epoch: number;
+	provider: string;
+	model: string;
+	reasoningEffort: ThinkingLevel;
+	contextWindow: number;
+	routingP: number;
+	samplingCooldownMs: number;
+	lastCompact: { at: number; outcome: "ok" | "failed" } | null;
+}
+
 /** Snapshot stats: lastId = max llm_runs.id included; pushes with id <= lastId are already inside. */
 export interface StatsSnapshot {
 	lastId: number;
 	bots: Record<string, BotStats>;
+	statuses: Record<string, RuntimeControlSnapshot>;
 }
 
 /** A newly persisted, non-empty vision description (REQ-UI-0006). */

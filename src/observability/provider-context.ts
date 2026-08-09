@@ -9,6 +9,7 @@ import { buildSystemPrompt } from "../agent/prompt.ts";
 import { TOOL_DEFS } from "../agent/tools.ts";
 import { stickerCatalogPromptBlock } from "../media/sticker-catalog.ts";
 import type { Database } from "bun:sqlite";
+import type { DebugModelReasoning } from "./debug-report.ts";
 
 function hash(value: string): string {
 	return createHash("sha256").update(value).digest("hex").slice(0, 12);
@@ -60,6 +61,7 @@ export function inspectProviderContext(
 	deployment: DebugDeploymentIdentity,
 	botId: string,
 	includeContent = false,
+	reasoning?: DebugModelReasoning,
 ) {
 	const bot = deployment.bots.find((entry) => entry.id === botId);
 	if (!bot) throw new Error(`unknown bot: ${botId}`);
@@ -102,7 +104,9 @@ export function inspectProviderContext(
 			provider: bot.provider ?? lastRun?.provider ?? context.model?.provider ?? null,
 			api: lastRun?.api ?? null,
 			model: bot.model ?? lastRun?.model ?? context.model?.modelId ?? null,
-			reasoning_effort: bot.reasoningEffort ?? context.thinkingLevel ?? null,
+			requested_reasoning_effort: reasoning?.requested ?? bot.reasoningEffort ?? context.thinkingLevel ?? null,
+			effective_reasoning_effort: reasoning?.effective ?? context.thinkingLevel ?? null,
+			supported_reasoning_efforts: reasoning?.supported ?? null,
 			cache_retention: bot.cacheRetention,
 			last_observed_tools_hash: lastRun?.toolsHash ?? null,
 		},

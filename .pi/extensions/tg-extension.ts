@@ -22,10 +22,12 @@ import type {
 	BotStats,
 	EvtItem,
 	MsgItem,
+	RuntimeControlSnapshot,
 	TimelineItem,
 } from "../../src/ipc.ts";
 import { runNativeConfigWizard, type PiModelPreflight } from "../../src/onboarding/config-wizard.ts";
-import { summarizeBotUsage, summarizeUsageContext } from "../../src/observability/usage.ts";
+import { buildBotStatusView, renderBotStatusPlain } from "../../src/observability/status.ts";
+import { summarizeUsageContext } from "../../src/observability/usage.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
 	mediaFileRevision,
@@ -57,7 +59,10 @@ type ProcessRunner = (command: string, args: readonly string[], options: { cwd: 
 type FeedEntry = { instanceId: string; filter: string | null };
 type ComposeIdentity = Pick<BotConfig, "id" | "name">;
 type ComposeMode = { kind: "scope" } | { kind: "bot"; identity: ComposeIdentity };
-type FooterBot = Pick<BotConfig, "id" | "provider" | "model" | "reasoningEffort">;
+type FooterBot = Pick<
+	BotConfig,
+	"id" | "name" | "provider" | "model" | "reasoningEffort" | "routingP" | "samplingCooldownMs"
+>;
 type FooterHost = Pick<ExtensionContext, "sessionManager" | "modelRegistry" | "model" | "thinkingLevel">;
 
 export type MediaConverter = (
@@ -443,61 +448,48 @@ function fmtDay(ts: number): string {
 	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-function fmtNum(value: number): string {
-	if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
-	if (value >= 10_000) return `${(value / 1000).toFixed(1)}K`;
-	if (value >= 1000) return `${(value / 1000).toFixed(2)}K`;
-	return String(Math.round(value));
-}
-
-function fmtDuration(value: number): string {
-	if (value < 1000) return `${Math.round(value)}ms`;
-	if (value < 10_000) return `${(value / 1000).toFixed(2)}s`;
-	return `${(value / 1000).toFixed(1)}s`;
-}
-
 function resolveFooterModel(
 	bot: FooterBot | undefined,
+	status: RuntimeControlSnapshot | undefined,
 	host: FooterHost,
 ): NonNullable<ExtensionContext["model"]> | undefined {
-	if (!bot) return host.model;
+	if (!bot && !status) return host.model;
+	const provider = status?.provider ?? bot?.provider;
+	const modelId = status?.model ?? bot?.model;
 	const configured = host.modelRegistry
 		.getAvailable()
-		.find((model) => model.provider === bot.provider && model.id === bot.model);
+		.find((model) => model.provider === provider && model.id === modelId);
 	if (configured) return configured;
-	if (host.model?.provider === bot.provider && host.model.id === bot.model) return host.model;
+	const activeModel = host.model;
+	if (activeModel && activeModel.provider === provider && activeModel.id === modelId) return activeModel;
 	return {
-		...(host.model ?? {}),
-		id: bot.model,
-		provider: bot.provider,
-		api: host.model?.api ?? "openai-completions",
-		contextWindow: 0,
-		reasoning: bot.reasoningEffort !== "off",
+		...(activeModel ?? {}),
+		id: modelId ?? "unknown",
+		provider: provider ?? "unknown",
+		api: activeModel?.api ?? "openai-completions",
+		contextWindow: status?.contextWindow ?? 0,
+		reasoning: (status?.reasoningEffort ?? bot?.reasoningEffort) !== "off",
 	} as NonNullable<ExtensionContext["model"]>;
 }
 
-function compactContext(tokens: number | null, contextWindow: number, percent: number | null): string {
-	const used = tokens == null ? "?" : fmtNum(tokens);
-	const window = contextWindow > 0 ? fmtNum(contextWindow) : "?";
-	return `${used}/${window} (${percent == null ? "?" : `${percent.toFixed(1)}%`})`;
-}
-
-export function statsText(botId: string, stats: BotStats, bot: FooterBot | undefined, host: FooterHost): string {
-	const model = resolveFooterModel(bot, host);
-	const summary = summarizeBotUsage(stats, model?.contextWindow ?? 0);
-	const modelLabel = `${model?.provider ?? bot?.provider ?? "unknown"}/${model?.id ?? bot?.model ?? "unknown"}:${bot?.reasoningEffort ?? host.thinkingLevel}`;
-	if (stats.runs === 0) {
-		return `${botId} · lifetime · no runs yet · ${modelLabel}\nlast · ctx ${compactContext(null, summary.context.contextWindow, null)}`;
-	}
-	const since = stats.firstRunTs != null ? `${fmtDay(stats.firstRunTs)} ${fmtClock(stats.firstRunTs)}` : "unknown";
-	const averageLatency = summary.averageLatencyMs == null ? "n/a" : fmtDuration(summary.averageLatencyMs);
-	const last = stats.last;
-	const lastLine = last
-		? `last · ep${last.epoch} · ctx ${compactContext(summary.context.tokens, summary.context.contextWindow, summary.context.percent)} · ↑${fmtNum(last.cacheMiss)} ↓${fmtNum(last.outputTokens)} R${fmtNum(last.cacheRead)} W${fmtNum(last.cacheWrite ?? 0)} · reasoning ${fmtNum(last.reasoningTokens ?? 0)} · ${last.latencyMs == null ? "latency n/a" : fmtDuration(last.latencyMs)} · $${last.cost.toFixed(last.cost >= 1 ? 2 : 4)}`
-		: `last · ep${stats.epoch} · unavailable`;
-	const cacheHit = summary.cacheHitPercent == null ? "CH—" : `CH${summary.cacheHitPercent.toFixed(1)}%`;
-	const totalLine = `total · prompt ${fmtNum(stats.contextTokens)} · ↑${fmtNum(stats.cacheMiss)} ↓${fmtNum(stats.outputTokens)} R${fmtNum(stats.cacheRead)} W${fmtNum(summary.cacheWrite)} · reasoning ${fmtNum(summary.reasoningTokens)} · $${stats.cost.toFixed(stats.cost >= 1 ? 2 : 4)} · ${cacheHit} · avg ${averageLatency}`;
-	return `${botId} · lifetime · ${stats.runs} runs since ${since} · ${modelLabel}\n${lastLine}\n${totalLine}`;
+export function statsText(
+	botId: string,
+	stats: BotStats,
+	bot: FooterBot | undefined,
+	status: RuntimeControlSnapshot | undefined,
+	host: FooterHost,
+): string {
+	const model = resolveFooterModel(bot, status, host);
+	const identity: FooterBot = bot ?? {
+		id: botId,
+		name: botId,
+		provider: status?.provider ?? model?.provider ?? "unknown",
+		model: status?.model ?? model?.id ?? "unknown",
+		reasoningEffort: status?.reasoningEffort ?? host.thinkingLevel ?? "off",
+		routingP: status?.routingP ?? 0,
+		samplingCooldownMs: status?.samplingCooldownMs ?? 0,
+	};
+	return renderBotStatusPlain(buildBotStatusView(identity, stats, status, model?.contextWindow ?? 0));
 }
 
 function eventBody(event: EvtItem): string {
@@ -675,6 +667,7 @@ export function streamComponent(stream: Extract<AgentStreamFrame, { phase: "upda
 /** Read-only IPC telemetry view consumed by Pi's own FooterComponent. */
 export class TelegramFooterTelemetry {
 	private stats: Record<string, BotStats> = {};
+	private statuses: Record<string, RuntimeControlSnapshot> = {};
 	private requestRender: (() => void) | null = null;
 
 	constructor(
@@ -683,8 +676,9 @@ export class TelegramFooterTelemetry {
 		private readonly host: FooterHost,
 	) {}
 
-	update(stats: Record<string, BotStats>): void {
+	update(stats: Record<string, BotStats>, statuses: Record<string, RuntimeControlSnapshot>): void {
 		this.stats = stats;
+		this.statuses = statuses;
 		this.requestRender?.();
 	}
 
@@ -693,10 +687,10 @@ export class TelegramFooterTelemetry {
 		const telemetry = this;
 		const sessionView = {
 			get state() {
-				const { bot } = telemetry.scope();
+				const { bot, status } = telemetry.scope();
 				return {
-					model: telemetry.modelFor(bot),
-					thinkingLevel: bot?.reasoningEffort ?? telemetry.host.thinkingLevel,
+					model: telemetry.modelFor(bot, status),
+					thinkingLevel: status?.reasoningEffort ?? bot?.reasoningEffort ?? telemetry.host.thinkingLevel,
 				};
 			},
 			sessionManager: {
@@ -712,6 +706,7 @@ export class TelegramFooterTelemetry {
 
 	private scope(): {
 		bot: FooterBot | undefined;
+		status: RuntimeControlSnapshot | undefined;
 		latest: NonNullable<BotStats["last"]> | null;
 		totals: {
 			runs: number;
@@ -743,17 +738,20 @@ export class TelegramFooterTelemetry {
 		const bot = this.filter
 			? selectedBots[0]
 			: (this.bots.find((candidate) => candidate.id === latest?.botId) ?? selectedBots[0]);
-		return { bot, latest, totals };
+		return { bot, status: bot ? this.statuses[bot.id] : undefined, latest, totals };
 	}
 
-	private modelFor(bot: FooterBot | undefined): NonNullable<ExtensionContext["model"]> | undefined {
-		return resolveFooterModel(bot, this.host);
+	private modelFor(
+		bot: FooterBot | undefined,
+		status: RuntimeControlSnapshot | undefined,
+	): NonNullable<ExtensionContext["model"]> | undefined {
+		return resolveFooterModel(bot, status, this.host);
 	}
 
 	private entries(): unknown[] {
-		const { bot, totals } = this.scope();
+		const { bot, status, totals } = this.scope();
 		if (totals.runs === 0) return [];
-		const model = this.modelFor(bot);
+		const model = this.modelFor(bot, status);
 		const totalTokens = totals.cacheMiss + totals.cacheRead + totals.cacheWrite + totals.outputTokens;
 		return [
 			{
@@ -783,8 +781,8 @@ export class TelegramFooterTelemetry {
 	}
 
 	private contextUsage(): { tokens: number | null; contextWindow: number; percent: number | null } {
-		const { bot, latest } = this.scope();
-		const contextWindow = this.modelFor(bot)?.contextWindow ?? 0;
+		const { bot, status, latest } = this.scope();
+		const contextWindow = status?.contextWindow ?? this.modelFor(bot, status)?.contextWindow ?? 0;
 		return summarizeUsageContext(latest, contextWindow);
 	}
 }
@@ -799,6 +797,7 @@ export class TelegramFeed extends Tui.Container {
 	private readonly streams = new Map<string, Extract<AgentStreamFrame, { phase: "update" }>>();
 	private readonly endedStreams = new Set<string>();
 	private statsValue: Record<string, BotStats> = {};
+	private statusesValue: Record<string, RuntimeControlSnapshot> = {};
 	private statusValue = "connecting...";
 	private closed = false;
 	private mediaGeneration = 0;
@@ -839,6 +838,9 @@ export class TelegramFeed extends Tui.Container {
 	}
 	get stats(): Record<string, BotStats> {
 		return this.statsValue;
+	}
+	get statuses(): Record<string, RuntimeControlSnapshot> {
+		return this.statusesValue;
 	}
 	get status(): string {
 		return this.statusValue;
@@ -893,6 +895,7 @@ export class TelegramFeed extends Tui.Container {
 			}
 		} else if (event.type === "stats") {
 			this.statsValue = event.stats;
+			this.statusesValue = event.statuses;
 		} else if (event.type === "vision") {
 			let updated = false;
 			for (let index = 0; index < this.items.length; index++) {
@@ -1107,12 +1110,17 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	const getTelemetryBots = (): FooterBot[] => {
 		if (telemetryBots) return telemetryBots;
 		try {
-			telemetryBots = loadConfig(rootDir).bots.map(({ id, provider, model, reasoningEffort }) => ({
-				id,
-				provider,
-				model,
-				reasoningEffort,
-			}));
+			telemetryBots = loadConfig(rootDir).bots.map(
+				({ id, name, provider, model, reasoningEffort, routingP, samplingCooldownMs }) => ({
+					id,
+					name,
+					provider,
+					model,
+					reasoningEffort,
+					routingP,
+					samplingCooldownMs,
+				}),
+			);
 			return telemetryBots;
 		} catch {
 			return [];
@@ -1190,7 +1198,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		footerClient = factory(filter, {
 			onEvent: (event) => {
 				if (footerOwner !== "standalone" || footerTelemetry !== telemetry) return;
-				if (event.type === "stats") telemetry?.update(event.stats);
+				if (event.type === "stats") telemetry?.update(event.stats, event.statuses);
 				else if (event.type === "disconnected") {
 					clearStatsFooter(ctx.ui);
 					ctx.ui.notify(`Telegram stats disconnected: ${event.reason}`, "error");
@@ -1227,7 +1235,8 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			data,
 			changed: (event, feed) => {
 				requestHostRender?.();
-				if (footerOwner === "feed" && active === feed && event.type === "stats") footerTelemetry?.update(feed.stats);
+				if (footerOwner === "feed" && active === feed && event.type === "stats")
+					footerTelemetry?.update(feed.stats, feed.statuses);
 				if (event.type === "disconnected" && active === feed) {
 					closeCompose(ctx.ui);
 					clearStatsFooter(ctx.ui);
@@ -1502,30 +1511,13 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				clearStatsFooter(ctx.ui);
 				if (active?.client.isConnected && active.filter === filter) {
 					mountStatsFooter(filter, "feed", ctx);
-					footerTelemetry?.update(active.stats);
+					footerTelemetry?.update(active.stats, active.statuses);
 				} else {
 					mountStandaloneStats(filter, ctx);
 				}
 			} else if (sub === "status") {
 				const filter = resolveFilter(botArg);
 				if (filter === undefined) return;
-				if (active && active.filter === filter && Object.keys(active.stats).length > 0) {
-					const statusBots = getTelemetryBots();
-					ctx.ui.notify(
-						Object.entries(active.stats)
-							.map(([id, stats]) =>
-								statsText(
-									id,
-									stats,
-									statusBots.find((bot) => bot.id === id),
-									ctx,
-								),
-							)
-							.join("\n\n"),
-						"info",
-					);
-					return;
-				}
 				const statusBots = getTelemetryBots();
 				await new Promise<void>((resolve) => {
 					let client: TimelinePort;
@@ -1548,6 +1540,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 											id,
 											stats,
 											statusBots.find((bot) => bot.id === id),
+											event.statuses[id],
 											ctx,
 										),
 									)
@@ -1585,7 +1578,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 						if (restoreFooter?.owner === "feed") mountStatsFooter(restartFeed.filter, "feed", ctx);
 						const connected = await restartFeed.reconnect();
 						if (connected) {
-							if (restoreFooter?.owner === "feed") footerTelemetry?.update(restartFeed.stats);
+							if (restoreFooter?.owner === "feed") footerTelemetry?.update(restartFeed.stats, restartFeed.statuses);
 							else if (restoreFooter?.owner === "standalone") mountStandaloneStats(restoreFooter.filter, ctx);
 						} else {
 							clearStatsFooter(ctx.ui);

@@ -13,10 +13,23 @@ export interface DebugReportInput {
 	now?: number;
 	logs?: readonly LogRecord[];
 	daemon?: { pid: number | null; alive: boolean; socket: boolean };
+	modelReasoning?: readonly DebugModelReasoning[];
+}
+
+export interface DebugModelReasoning {
+	bot_id: string;
+	scope: "main" | "compaction" | "vision";
+	provider: string;
+	model: string;
+	requested: string;
+	effective: string;
+	supported: string[];
+	valid: boolean;
 }
 
 export interface DebugFinding {
 	code:
+		| "unsupported_reasoning_effort"
 		| "cursor_backlog"
 		| "pending_reply_obligation"
 		| "route_without_run"
@@ -28,6 +41,10 @@ export interface DebugFinding {
 	count?: number;
 	category?: string;
 	outcome?: string;
+	scope?: DebugModelReasoning["scope"];
+	requested?: string;
+	effective?: string;
+	supported?: string[];
 }
 
 interface SafeEvent {
@@ -156,6 +173,17 @@ export function buildDebugReport(db: Database, input: DebugReportInput) {
 	});
 
 	const findings: DebugFinding[] = [];
+	for (const diagnostic of input.modelReasoning ?? []) {
+		if (diagnostic.valid) continue;
+		findings.push({
+			code: "unsupported_reasoning_effort",
+			bot_id: diagnostic.bot_id,
+			scope: diagnostic.scope,
+			requested: diagnostic.requested,
+			effective: diagnostic.effective,
+			supported: diagnostic.supported,
+		});
+	}
 	for (const bot of bots) {
 		if (bot.context.backlog > 0)
 			findings.push({ code: "cursor_backlog", bot_id: bot.bot_id, count: bot.context.backlog });
@@ -207,6 +235,8 @@ export function buildDebugReport(db: Database, input: DebugReportInput) {
 		window_ms: input.sinceMs,
 		daemon: input.daemon ?? null,
 		limits: { claims_per_bot: MAX_CLAIMS, runs_per_bot: MAX_RUNS, events_per_bot: MAX_EVENTS, logs_per_bot: MAX_LOGS },
+		model_reasoning_available: input.modelReasoning !== undefined,
+		model_reasoning: input.modelReasoning ?? null,
 		bots,
 		findings: findings.slice(0, 100),
 	};

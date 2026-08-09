@@ -8,6 +8,7 @@ import {
 	type MsgItem,
 	type SendMessageFailure,
 	type SendMessageResult,
+	type RuntimeControlSnapshot,
 	type ServerMessage,
 	type TimelineCursor,
 	type TimelineItem,
@@ -66,7 +67,7 @@ export function readMediaImage(message: MsgItem): MediaImage | null {
 export type TimelineEvent =
 	| { type: "append"; items: TimelineItem[] }
 	| { type: "prepend"; items: TimelineItem[] }
-	| { type: "stats"; stats: Record<string, BotStats> }
+	| { type: "stats"; stats: Record<string, BotStats>; statuses: Record<string, RuntimeControlSnapshot> }
 	| { type: "vision"; fileUniqueId: string; text: string }
 	| { type: "media"; fileUniqueId: string; mediaPath: string }
 	| { type: "stream"; stream: AgentStreamFrame }
@@ -123,6 +124,7 @@ export class TimelineClient implements TimelinePort {
 	private readonly seen = new Set<string>();
 	private readonly decoder = new FrameDecoder();
 	private baselineStats: Record<string, BotStats> = {};
+	private baselineStatuses: Record<string, RuntimeControlSnapshot> = {};
 	private baselineLastId = 0;
 	private pendingUsage = new Map<number, UsageRun>();
 	private readonly pendingSends = new Map<string, PendingSend>();
@@ -280,6 +282,7 @@ export class TimelineClient implements TimelinePort {
 			this.emitFresh("append", message.items);
 			if (message.stats) {
 				this.baselineStats = message.stats.bots;
+				this.baselineStatuses = message.stats.statuses;
 				this.baselineLastId = message.stats.lastId;
 				for (const id of this.pendingUsage.keys()) if (id <= this.baselineLastId) this.pendingUsage.delete(id);
 				this.emitStats();
@@ -439,6 +442,6 @@ export class TimelineClient implements TimelinePort {
 			}
 			stats[botId] = merged;
 		}
-		this.hooks.onEvent({ type: "stats", stats });
+		this.hooks.onEvent({ type: "stats", stats, statuses: this.baselineStatuses });
 	}
 }

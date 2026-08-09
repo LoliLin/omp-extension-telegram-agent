@@ -18,6 +18,7 @@ import type {
 	AgentStreamFrame,
 	SendMessageRequest,
 	SendMessageResult,
+	RuntimeControlSnapshot,
 } from "../ipc.ts";
 import { encodeFrame, FrameDecoder, FrameOverflowError } from "../ipc.ts";
 import type { MessageRow } from "../agent/serialize.ts";
@@ -40,6 +41,7 @@ interface OutQueue {
 }
 
 export type ManualSendHandler = (request: SendMessageRequest) => Promise<SendMessageResult>;
+export type RuntimeSnapshotProvider = (botId: string) => RuntimeControlSnapshot | undefined;
 
 export class IpcServer {
 	private db: Database;
@@ -61,6 +63,7 @@ export class IpcServer {
 		botNames: Map<string, string>,
 		botUserIds: Map<string, number>,
 		private readonly manualSend: ManualSendHandler | null = null,
+		private readonly runtimeSnapshot: RuntimeSnapshotProvider | null = null,
 	) {
 		this.db = db;
 		this.sockPath = sockPath;
@@ -404,11 +407,13 @@ export class IpcServer {
 	/** Full-history cumulative stats per bot (REQ-UI-0003 R2/R3: daemon-side aggregation). */
 	private loadStats(filter: string | null): StatsSnapshot {
 		const bots = filter ? [filter] : [...this.botNames.keys()];
-		const out: StatsSnapshot = { lastId: 0, bots: {} };
+		const out: StatsSnapshot = { lastId: 0, bots: {}, statuses: {} };
 		const maxId = this.db.query("SELECT COALESCE(MAX(id), 0) m FROM llm_runs").get() as { m: number };
 		out.lastId = maxId.m;
 		for (const botId of bots) {
 			out.bots[botId] = loadBotStats(this.db, botId);
+			const status = this.runtimeSnapshot?.(botId);
+			if (status) out.statuses[botId] = status;
 		}
 		return out;
 	}

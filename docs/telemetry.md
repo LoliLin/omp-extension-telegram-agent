@@ -1,12 +1,12 @@
-# Usage telemetry 口径
+# 统一 usage/status telemetry 口径
 
 > 本文是 Pi footer、Pi `/tg status` 与 Telegram `/status` 的 usage 字段、计算公式和展示一致性的唯一权威来源。日志诊断见 `docs/engineering/debugging-guide.md`；provider cache 协议见 `docs/cache.md`。
 
 ## 目的与范围
 
-三个界面 MUST 从同一份 SQLite `llm_runs` 读模型和同一组派生函数得到数值。界面可以因空间不同采用缩写、换行或富文本，但不能改变字段含义、统计范围或公式。
+三个界面 MUST 从同一份 SQLite `llm_runs`、daemon runtime snapshot 和同一组派生函数得到数值。界面可以因空间不同采用缩写、换行或富文本，但不能改变字段含义、统计范围或公式。
 
-本文只定义 provider usage telemetry。Telegram runtime state、routing/cooldown 与最近 compact outcome 仍由 control/runtime 层拥有，不属于 usage 聚合。
+本文同时定义 provider usage 聚合与详细 runtime 状态的合并投影；Telegram runtime state、routing/cooldown 与最近 compact outcome 仍由 control/runtime 层拥有，不能反向藏进 usage 聚合。
 
 ## 唯一状态读模型
 
@@ -54,14 +54,14 @@ daemon 的 runtime snapshot 是 provider/model、**实际生效 reasoning effort
 | provider/model/effective reasoning | 右侧 | 标题/明细 | 每 bot 富消息小节 |
 | latest usage/latency/cost | — | 是 | 是 |
 | lifetime runs/since/prompt/reasoning/avg | — | 是 | 是 |
-| runtime state/routing/compact | footer extension status另管 | — | 是 |
+| runtime state/routing/compact | footer extension status另管 | 是 | 是 |
 
 Pi footer 继续委托 Pi 原生 `FooterComponent` 渲染；项目只提供只读 telemetry session view。`/tg status` 与 Telegram `/status` 是空间更充足的明细投影，不应为了与 footer 字符串完全相同而复制 Pi renderer，但二者的字段 key、顺序和数值必须来自同一个共享投影。
 
 ## 格式与边界
 
 - Telegram `/status` 的整数和费用整数部分使用英文逗号千位分隔；百分比固定一位小数。
-- Pi footer 保留 Pi 原生 `k/M` 紧凑格式；Pi `/tg status` 可使用紧凑格式，但数值与公式必须相同。
+- Pi footer 保留 Pi 原生 `k/M` 紧凑格式；Pi `/tg status` 与 Telegram `/status` 的详细整数统一使用英文逗号千位分隔。
 - Telegram 富消息仍受 3500 字上限；只能按完整 bot 小节省略，不能在 Markdown 中间截断。
 - 格式化和查看 telemetry 不调用 provider，不改变 session、context epoch 或 cache-visible payload。
 

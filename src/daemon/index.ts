@@ -34,15 +34,22 @@ const config = loadConfig(rootDir);
 // (REQ-OPS-0001 R4). Released on shutdown; stale pid files are taken over.
 const pidFd = acquirePidLock(config.dataDir);
 const visualModel = config.vision?.enabled ? parsePiModelReference(config.auxiliaryVisualModel)! : null;
-const compactionModels = config.bots.map(
-	(bot) => parsePiModelReference(bot.compactionModel ?? config.auxiliaryVisualModel)!,
-);
+const chatModels = config.bots.map((bot) => ({
+	provider: bot.provider,
+	model: bot.model,
+	thinkingLevel: bot.reasoningEffort,
+	purpose: `bot:${bot.id}`,
+}));
+const compactionModels = config.bots.map((bot) => ({
+	...parsePiModelReference(bot.compactionModel ?? config.auxiliaryVisualModel)!,
+	purpose: `compaction:${bot.id}`,
+}));
 const { sharedModelRuntime, sharedVisionExecutor } = await (async () => {
 	try {
 		const runtime = await createSharedModelRuntime([
-			...config.bots,
+			...chatModels,
 			...compactionModels,
-			...(visualModel ? [visualModel] : []),
+			...(visualModel ? [{ ...visualModel, purpose: "vision" }] : []),
 		]);
 		const executor = visualModel ? createPiVisionExecutor(runtime, visualModel.canonical) : null;
 		if (executor) assertPiVisionExecutorReady(executor);
@@ -151,8 +158,13 @@ const manualSend = new ManualSendService(db, Number(`-100${config.groupPeerId}`)
 		.get(chatId, messageId) as MessageRow | null;
 	if (row) ipc.broadcast(ipc.msgToItem(row));
 });
-ipc = new IpcServer(db, join(config.dataDir, "daemon.sock"), botNames, botUserIds, (request) =>
-	manualSend.send(request),
+ipc = new IpcServer(
+	db,
+	join(config.dataDir, "daemon.sock"),
+	botNames,
+	botUserIds,
+	(request) => manualSend.send(request),
+	(botId) => runtimes.get(botId)?.controlSnapshot(),
 );
 const mediaCache = new MediaCacheQueue(db, botApis, {
 	cacheDir: mediaDir,

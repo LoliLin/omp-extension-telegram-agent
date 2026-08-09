@@ -1,11 +1,16 @@
 import type { Database } from "bun:sqlite";
 import { log } from "../observability/log.ts";
 import type { BotConfig, TelegramAdmin } from "../config.ts";
-import type { ManualCompactResult, RuntimeControlSnapshot } from "../agent/runtime.ts";
+import type { ManualCompactResult } from "../agent/runtime.ts";
 import { updateBotConfigField } from "../onboarding/config-core.ts";
 import { loadBotStats } from "../db/usage.ts";
-import type { BotStats } from "../ipc.ts";
-import { summarizeBotUsage } from "../observability/usage.ts";
+import type { RuntimeControlSnapshot } from "../ipc.ts";
+import {
+	botStatusFields,
+	buildBotStatusView,
+	renderBotStatusPlain,
+	type BotStatusView,
+} from "../observability/status.ts";
 import { extractUpdateMessage } from "./normalize.ts";
 
 export const CONTROL_COMMAND_CLAIM_EVENT = "telegram_control_claim";
@@ -14,11 +19,6 @@ export const CONTROL_REPLY_EVENT = "telegram_control_reply";
 
 const MAX_REPLY_CHARS = 3500;
 const MAX_LABEL_CHARS = 64;
-const STATUS_INTEGER_FORMAT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const STATUS_COST_FORMAT = new Intl.NumberFormat("en-US", {
-	minimumFractionDigits: 4,
-	maximumFractionDigits: 4,
-});
 
 export interface ControlBotIdentity {
 	id: string;
@@ -270,10 +270,10 @@ export class TelegramControlCommandService {
 		const richSections: string[] = [];
 		for (const bot of this.bots) {
 			const snapshot = this.runtimes.get(bot.id)?.controlSnapshot();
-			const stats = loadBotStats(this.db, bot.id);
+			const view = buildBotStatusView(bot, loadBotStats(this.db, bot.id), snapshot);
 			if (lines.length > 0) lines.push("");
-			lines.push(...statusPlainSection(bot, snapshot, stats));
-			richSections.push(statusRichSection(bot, snapshot, stats));
+			lines.push(renderBotStatusPlain(view));
+			richSections.push(statusRichSection(view));
 		}
 		return {
 			text: boundedReply(lines.join("\n")),
@@ -431,100 +431,14 @@ function escapeRichMarkdown(value: string): string {
 	return bounded(value).replace(/[\\`*_[\]{}()#+\-.!|>]/g, "\\$&");
 }
 
-function formatStatusInteger(value: number): string {
-	return STATUS_INTEGER_FORMAT.format(value);
+function escapeRichStatusValue(value: string): string {
+	return value.replace(/[\\`*_[\]]/g, "\\$&");
 }
 
-function formatStatusCost(value: number): string {
-	return STATUS_COST_FORMAT.format(value);
-}
-
-function formatStatusPercent(value: number | null): string {
-	return value == null ? "—" : `${value.toFixed(1)}%`;
-}
-
-function formatStatusDuration(value: number | null | undefined): string {
-	if (value == null) return "—";
-	if (value < 1000) return `${formatStatusInteger(value)} ms`;
-	if (value < 10_000) return `${(value / 1000).toFixed(2)} s`;
-	return `${(value / 1000).toFixed(1)} s`;
-}
-
-function formatStatusTime(value: number | null | undefined): string {
-	return value == null ? "—" : new Date(value).toISOString();
-}
-
-function formatStatusContext(context: ReturnType<typeof summarizeBotUsage>["context"]): string {
-	const tokens = context.tokens == null ? "—" : formatStatusInteger(context.tokens);
-	const window = context.contextWindow > 0 ? formatStatusInteger(context.contextWindow) : "—";
-	return `${tokens} / ${window} (${formatStatusPercent(context.percent)})`;
-}
-
-function statusIcon(state: RuntimeControlSnapshot["state"] | "unavailable"): string {
-	if (state === "idle") return "🟢";
-	if (state === "cooldown") return "🟡";
-	if (state === "stopping" || state === "unavailable") return "🔴";
-	return "🔵";
-}
-
-function statusLabel(state: RuntimeControlSnapshot["state"] | "unavailable"): string {
-	if (state === "idle") return "空闲";
-	if (state === "busy") return "生成中";
-	if (state === "cooldown") return "冷却中";
-	if (state === "compacting") return "压缩中";
-	if (state === "stopping") return "停止中";
-	return "不可用";
-}
-
-function statusPlainSection(bot: BotConfig, snapshot: RuntimeControlSnapshot | undefined, stats: BotStats): string[] {
-	const summary = summarizeBotUsage(stats, snapshot?.contextWindow ?? 0);
-	const last = stats.last;
-	const lines = [
-		`${bounded(bot.id)} · ${bounded(bot.name)} · ${snapshot?.state ?? "unavailable"}`,
-		`provider=${bounded(bot.provider)} model=${bounded(snapshot?.model ?? bot.model)} reasoning=${bot.reasoningEffort} epoch=${snapshot ? formatStatusInteger(snapshot.epoch) : "—"}`,
-		`context_current=${formatStatusContext(summary.context)}`,
-	];
-	if (last) {
-		lines.push(
-			`latest_at=${formatStatusTime(last.ts)} latency=${formatStatusDuration(last.latencyMs)} cost=$${formatStatusCost(last.cost)}`,
-			`latest_usage=↑miss:${formatStatusInteger(last.cacheMiss)} ↓output:${formatStatusInteger(last.outputTokens)} R:${formatStatusInteger(last.cacheRead)} W:${formatStatusInteger(last.cacheWrite ?? 0)} reasoning:${formatStatusInteger(last.reasoningTokens ?? 0)}`,
-		);
-	} else {
-		lines.push("latest=—");
-	}
-	lines.push(
-		`lifetime_runs=${formatStatusInteger(stats.runs)} since=${formatStatusTime(stats.firstRunTs)} avg_latency=${formatStatusDuration(summary.averageLatencyMs)}`,
-		`lifetime_usage=prompt:${formatStatusInteger(stats.contextTokens)} ↑miss:${formatStatusInteger(stats.cacheMiss)} ↓output:${formatStatusInteger(stats.outputTokens)} R:${formatStatusInteger(stats.cacheRead)} W:${formatStatusInteger(summary.cacheWrite)} reasoning:${formatStatusInteger(summary.reasoningTokens)}`,
-		`cache_hit_rate=${formatStatusPercent(summary.cacheHitPercent)} lifetime_cost=$${formatStatusCost(stats.cost)}`,
-		`routing_p=${bot.routingP} cooldown_ms=${formatStatusInteger(bot.samplingCooldownMs)}`,
-		`last_compact=${snapshot?.lastCompact ? `${snapshot.lastCompact.outcome} at=${formatStatusTime(snapshot.lastCompact.at)}` : "—"}`,
-	);
-	return lines;
-}
-
-function statusRichSection(bot: BotConfig, snapshot: RuntimeControlSnapshot | undefined, stats: BotStats): string {
-	const state = snapshot?.state ?? "unavailable";
-	const summary = summarizeBotUsage(stats, snapshot?.contextWindow ?? 0);
-	const last = stats.last;
-	const compact = snapshot?.lastCompact
-		? `${escapeRichMarkdown(snapshot.lastCompact.outcome)} · ${new Date(snapshot.lastCompact.at).toISOString()}`
-		: "暂无";
+function statusRichSection(view: BotStatusView): string {
 	return [
-		`## ${escapeRichMarkdown(bot.name)} · ${escapeRichMarkdown(bot.id)}`,
-		`- **状态**：${statusIcon(state)} ${statusLabel(state)}`,
-		`- **模型**：${escapeRichMarkdown(`${bot.provider}/${snapshot?.model ?? bot.model}`)} · reasoning ${bot.reasoningEffort} · epoch ${snapshot ? formatStatusInteger(snapshot.epoch) : "—"}`,
-		`- **当前上下文**：${formatStatusContext(summary.context)}`,
-		...(last
-			? [
-					`- **最近请求**：${formatStatusTime(last.ts)} · ${formatStatusDuration(last.latencyMs)} · $${formatStatusCost(last.cost)}`,
-					`- **最近用量**：↑miss ${formatStatusInteger(last.cacheMiss)} · ↓output ${formatStatusInteger(last.outputTokens)} · R ${formatStatusInteger(last.cacheRead)} · W ${formatStatusInteger(last.cacheWrite ?? 0)} · reasoning ${formatStatusInteger(last.reasoningTokens ?? 0)}`,
-				]
-			: ["- **最近请求**：暂无"]),
-		`- **保留期**：${formatStatusInteger(stats.runs)} runs · since ${formatStatusTime(stats.firstRunTs)} · avg ${formatStatusDuration(summary.averageLatencyMs)}`,
-		`- **累计用量**：prompt ${formatStatusInteger(stats.contextTokens)} · ↑miss ${formatStatusInteger(stats.cacheMiss)} · ↓output ${formatStatusInteger(stats.outputTokens)} · R ${formatStatusInteger(stats.cacheRead)} · W ${formatStatusInteger(summary.cacheWrite)} · reasoning ${formatStatusInteger(summary.reasoningTokens)}`,
-		`- **缓存与费用**：CH ${formatStatusPercent(summary.cacheHitPercent)} · $${formatStatusCost(stats.cost)}`,
-		`- **路由**：routing ${bot.routingP} · cooldown ${formatStatusInteger(bot.samplingCooldownMs)} ms`,
-		`- **最近压缩**：${compact}`,
+		`## ${escapeRichMarkdown(view.name)} · ${escapeRichMarkdown(view.id)}`,
+		...botStatusFields(view).map((field) => `- **${field.label}**：${escapeRichStatusValue(field.value)}`),
 	].join("\n");
 }
 

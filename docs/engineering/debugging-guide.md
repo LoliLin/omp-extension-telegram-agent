@@ -19,7 +19,7 @@ bun run debug -- --bot A --since 2h
 bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整当前provider上下文
 ```
 
-命令只读取deployment配置、本机Pi模型目录、readonly SQLite/Pi session与最后64 KiB结构化日志，不访问网络、不写DB、不输出credential。输出JSON包含daemon存活/socket状态、每bot cursor/high-water/reply obligations、最近claims/runs/safe events/logs、`findings`与`provider_contexts`。模型能力诊断只输出provider/model与requested/effective/supported reasoning；模型目录不可用时业务报告仍然生成并标记diagnostic unavailable。
+命令只读取deployment配置、本机Pi模型目录、readonly SQLite/Pi session与最后64 KiB结构化日志，不访问网络、不写DB、不输出credential。输出JSON包含daemon存活/socket状态、每bot cursor/high-water/reply obligations、最近claims/runs/safe events/logs、`findings`与`provider_contexts`。模型能力诊断只输出provider/model与requested/effective/supported reasoning；`model_reasoning_available`明确标记本次是否成功读取模型目录，失败时业务报告仍然生成且`model_reasoning`为`null`。
 
 `provider_contexts`默认列出完整的模型输入结构：provider/model/api/cache元数据、system长度/hash、完整tool description/schema，以及每条消息的role、content types/长度/hash、tool name/call id/error；消息与system正文省略。这样可以机械回答“search schema是否注册”“TinyFish toolResult是否与call id配对”“follow-up前结果是否仍在active branch”。`--show-provider-content`必须同时指定单个`--bot`，才把完整system prompt和当前compaction-aware消息投影写到stdout；其中可能含persona、群正文、tool args/result与历史thinking，不得贴issue、重定向到长期文件或纳入自动日志。它是当前session的pre-adapter重建，不伪称历史最后一次HTTP request；历史精确边界仍以`llm_runs`哈希为准。
 

@@ -1,8 +1,14 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { BotConfig } from "../config.ts";
+import {
+	clampThinkingLevel,
+	getSupportedThinkingLevels,
+	type Api,
+	type Model,
+	type ModelThinkingLevel,
+} from "@earendil-works/pi-ai";
 
 export interface ConfigurableModelRuntime {
-	getModel(providerId: string, modelId: string): unknown | undefined;
+	getModel(providerId: string, modelId: string): Model<Api> | undefined;
 	hasConfiguredAuth(providerId: string): boolean;
 	getProviderAuthStatus?(providerId: string): {
 		configured: boolean;
@@ -14,36 +20,87 @@ export type PiModelConfigurationCategory =
 	| "runtime_unavailable"
 	| "unknown_model"
 	| "unauthenticated_provider"
+	| "unsupported_reasoning_effort"
 	| "image_input_unsupported";
+
+export interface PiModelSelection {
+	provider: string;
+	model: string;
+	thinkingLevel?: ModelThinkingLevel;
+	purpose?: string;
+}
+
+export interface ModelReasoningCapabilities {
+	provider: string;
+	model: string;
+	requested: ModelThinkingLevel;
+	effective: ModelThinkingLevel;
+	supported: ModelThinkingLevel[];
+	valid: boolean;
+}
 
 export class PiModelConfigurationError extends Error {
 	constructor(
 		readonly category: PiModelConfigurationCategory,
 		readonly provider: string,
 		readonly model: string,
+		readonly reasoning?: ModelReasoningCapabilities,
+		readonly purpose?: string,
 	) {
-		super(`Pi model unavailable (${category}): ${provider}/${model}. Use Pi /login and /model, then restart.`);
+		const target = `${provider}/${model}${purpose ? ` (${purpose})` : ""}`;
+		super(
+			reasoning
+				? `Pi model configuration invalid (${category}): ${target} requested ${reasoning.requested}; supported: ${reasoning.supported.join(", ")}. Use Pi /model, then restart.`
+				: `Pi model unavailable (${category}): ${target}. Use Pi /login and /model, then restart.`,
+		);
 		this.name = "PiModelConfigurationError";
 	}
 }
 
+/** Read Pi's model-specific reasoning contract without sending a provider request. */
+export function inspectModelReasoning(model: Model<Api>, requested: ModelThinkingLevel): ModelReasoningCapabilities {
+	const supported = getSupportedThinkingLevels(model);
+	const effective = clampThinkingLevel(model, requested);
+	return {
+		provider: model.provider,
+		model: model.id,
+		requested,
+		effective,
+		supported,
+		valid: supported.includes(requested),
+	};
+}
+
 /** Select a Pi-owned model/auth pair without reading or injecting credential material. */
 export async function configureBotModelRuntime<T extends ConfigurableModelRuntime>(
-	bot: Pick<BotConfig, "provider" | "model">,
+	bot: PiModelSelection,
 	runtime: T,
 ): Promise<T> {
-	if (!runtime.getModel(bot.provider, bot.model)) {
-		throw new PiModelConfigurationError("unknown_model", bot.provider, bot.model);
+	const model = runtime.getModel(bot.provider, bot.model);
+	if (!model) {
+		throw new PiModelConfigurationError("unknown_model", bot.provider, bot.model, undefined, bot.purpose);
+	}
+	if (bot.thinkingLevel != null) {
+		const reasoning = inspectModelReasoning(model, bot.thinkingLevel);
+		if (!reasoning.valid) {
+			throw new PiModelConfigurationError(
+				"unsupported_reasoning_effort",
+				bot.provider,
+				bot.model,
+				reasoning,
+				bot.purpose,
+			);
+		}
 	}
 	if (!runtime.hasConfiguredAuth(bot.provider)) {
-		throw new PiModelConfigurationError("unauthenticated_provider", bot.provider, bot.model);
+		throw new PiModelConfigurationError("unauthenticated_provider", bot.provider, bot.model, undefined, bot.purpose);
 	}
 	return runtime;
 }
 
 /** Create exactly one Pi-owned runtime and preflight every configured bot before Telegram starts. */
 export async function createSharedModelRuntime(
-	bots: readonly Pick<BotConfig, "provider" | "model">[],
+	bots: readonly PiModelSelection[],
 	create: () => Promise<ModelRuntime> = () => ModelRuntime.create(),
 ): Promise<ModelRuntime> {
 	let runtime: ModelRuntime;
