@@ -83,6 +83,8 @@ Each bot has an isolated Telegram poller, agent session, model selection, state,
 
 The public example pins an explicit cost-first profile: Luna, reasoning off, short cache retention, and Luna low for compaction. The wizard pins the provider/model that it already preflighted through Pi, so a later Pi default change cannot silently change this deployment. Existing hand-written configuration may still omit those two fields for compatibility and inherit Pi's merged defaults, but omitted `reasoning_effort` means `off` rather than inheriting Pi's thinking level. A per-bot override may select another catalog entry; switching provider requires both provider and model. Authentication always comes from Pi, never this configuration or `.env`.
 
+`reasoning_effort` must be both a valid Pi-wide enum and a level supported by the selected model. Pi's SDK silently clamps unsupported values to a nearby level; to prevent cost, behavior, and status from disagreeing, Telegram agent refuses to start before any Telegram/provider call and reports the requested and supported values. The same check covers main bots, `compaction_model`, and an enabled vision model. Use Pi `/model` to inspect selectable levels; for example, `deepseek-v4-flash` accepts only `off`, `high`, and `max`.
+
 These controls are bounded by default:
 
 - `max_suffix_tokens: 12000` and `max_message_tokens: 4096` cap new provider-visible Telegram context;

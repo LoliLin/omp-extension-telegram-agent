@@ -8,6 +8,15 @@
 
 本文只定义 provider usage telemetry。Telegram runtime state、routing/cooldown 与最近 compact outcome 仍由 control/runtime 层拥有，不属于 usage 聚合。
 
+## 唯一状态读模型
+
+daemon 的 runtime snapshot 是 provider/model、**实际生效 reasoning effort**、context window、epoch、runtime state、routing/cooldown 与 compact outcome 的权威来源；SQLite `BotStats` 是 latest/lifetime usage 的权威来源。两者只能在共享 `BotStatusView` builder 中合并一次，再由共享字段投影生成详细状态。
+
+- Pi `/tg status` 与 Telegram `/status` 的 plain/rich 版本 MUST 迭代同一组有序字段，不得各自维护字段清单。新增、删除或重命名详细字段只能改共享投影一次。
+- Pi footer 受原生 `FooterComponent` 空间和接口约束，只显示详细状态的核心子集；它 MUST 使用同一 runtime snapshot 与 usage summary，不得从 `telegram.config.ts` 猜测实际模型状态。
+- daemon snapshot 通过 additive IPC 随 stats baseline 发送；`/tg status` 每次建立短连接读取新 snapshot，不能复用可能过期的 feed runtime state。
+- reasoning 展示的是 Pi session 的 effective value。requested/supported/effective 只在配置校验与 debug 中同时出现；运行中的状态不得把 requested value 伪装成 effective value。
+
 ## 权威数据与两种时间范围
 
 `llm_runs` 每行是一条成功返回 usage 的 provider response。保留期由配置控制，默认 90 天；文案中的“累计”或“lifetime”只表示当前 SQLite 保留行，不表示永久历史。
@@ -42,12 +51,12 @@
 | --- | --- | --- | --- |
 | `↑ / ↓ / R / W / CH / $` lifetime | 紧凑单行 | 完整数值 | 完整数值 |
 | 当前 context / window / percent | 紧凑单行 | latest 明细 | 每 bot 富消息小节 |
-| provider/model/reasoning | 右侧 | 标题/明细 | 每 bot 富消息小节 |
+| provider/model/effective reasoning | 右侧 | 标题/明细 | 每 bot 富消息小节 |
 | latest usage/latency/cost | — | 是 | 是 |
 | lifetime runs/since/prompt/reasoning/avg | — | 是 | 是 |
 | runtime state/routing/compact | footer extension status另管 | — | 是 |
 
-Pi footer 继续委托 Pi 原生 `FooterComponent` 渲染；项目只提供只读 telemetry session view。`/tg status` 与 Telegram `/status` 是空间更充足的明细投影，不应为了与 footer 字符串完全相同而复制 Pi renderer。
+Pi footer 继续委托 Pi 原生 `FooterComponent` 渲染；项目只提供只读 telemetry session view。`/tg status` 与 Telegram `/status` 是空间更充足的明细投影，不应为了与 footer 字符串完全相同而复制 Pi renderer，但二者的字段 key、顺序和数值必须来自同一个共享投影。
 
 ## 格式与边界
 
@@ -58,6 +67,6 @@ Pi footer 继续委托 Pi 原生 `FooterComponent` 渲染；项目只提供只�
 
 ## 验证与更新触发条件
 
-测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、当前 context 使用 latest/window 而非 lifetime sum，以及 Telegram rich/plain 两种投影一致。
+测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、当前 context 使用 latest/window 而非 lifetime sum、详细状态三种投影拥有完全相同的字段 key/顺序，以及 footer 核心字段读取同一 snapshot。
 
 修改 `llm_runs` 字段、Pi footer telemetry adapter、IPC `UsageRun` / `BotStats`、`/tg status` 或 Telegram `/status` 时必须同步本文。该模块的 Cache impact 为 **NONE**：它只读取既有 telemetry 并生成 UI/control side-channel。
