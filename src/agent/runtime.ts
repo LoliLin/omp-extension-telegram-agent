@@ -11,7 +11,6 @@ import {
 	SessionManager,
 	SettingsManager,
 	VERSION as PI_VERSION,
-	serializeConversation,
 	type AgentSession,
 	type AgentSessionEvent,
 	type CompactionResult,
@@ -97,6 +96,7 @@ import {
 	makeCachePayloadObserverExtension,
 	makeTelegramCompactionExtension,
 	makeTelegramContextExtension,
+	serializeCompactionMessages,
 	TELEGRAM_CONTEXT_TYPE,
 	TELEGRAM_CONTEXT_VERSION,
 	TELEGRAM_EXTENSION_ORDER,
@@ -766,14 +766,14 @@ export class BotRuntime {
 	private async generateCompactionSummary(
 		prep: SessionBeforeCompactEvent["preparation"],
 	): Promise<{ summary: string; usage: Awaited<ReturnType<ModelRuntime["completeSimple"]>>["usage"] } | null> {
-		const conversation = serializeConversation(prep.messagesToSummarize as never);
+		const conversation = serializeCompactionMessages(prep.messagesToSummarize);
 		const userText =
 			`<conversation>\n${conversation}\n</conversation>\n\n` +
 			(prep.previousSummary
 				? `<previous-summary>\n${prep.previousSummary}\n</previous-summary>\n\n把上面的旧摘要与新内容合并成一份更新的摘要。`
 				: "请输出摘要。");
 		const result = await this.modelRuntime.completeSimple(
-			this.compactionModel as never,
+			this.compactionModel,
 			{
 				systemPrompt: COMPACTION_SUMMARY_PROMPT,
 				messages: [{ role: "user", content: userText, timestamp: Date.now() }],

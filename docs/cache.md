@@ -14,7 +14,9 @@
 
 ## CACHE_SCHEMA_VERSION
 
-当前：**11**。
+当前：**12**。
+
+v12 修正 custom Telegram message 的 compaction 输入：严格按 Pi 官方流程先调用 `convertToLlm()`，再把 provider messages 交给 `serializeConversation()`。旧实现用 cast 绕过类型并直接序列化 `AgentMessage[]`，可能让 Telegram context 在摘要输入中消失。升级会为每个 bot 创建新 epoch，旧 session 文件保留。
 
 v11 给固定 catalog 与最近上下文 sticker 候选增加 `static` / `animated` / `video` 格式，并明确 `send.sticker` 支持三种格式。格式来自 Telegram `is_animated` / `is_video`，以 MIME metadata 持久化；catalog fingerprint 包含它。升级会为每个 bot 创建新 epoch，旧 session 文件保留。
 
@@ -51,6 +53,7 @@ cache-visible protocol 包括：
 - v9：固定 sticker catalog 以 identity-only 形式固化进 system prompt，删除每轮 top-K suffix 与 catalog vision 回填，protocol 去双 bot 硬编码，tool description 打磨（详见上文）。
 - v10：恢复当前可见上下文中最近 8 个、该 bot 可发送的用户 sticker，作为本轮消息后的最终动态 suffix；更新 send tool description。
 - v11：固定 catalog、最近候选与 send tool description 显式标注 static / animated / video sticker。
+- v12：compaction 先用 Pi `convertToLlm` 投影 custom Telegram messages，再序列化 summary 输入。
 
 ## Provider payload 结构
 
@@ -107,6 +110,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确�
 ## Compaction 与 context epoch
 
 - Pi 达到配置阈值时，`tg-compaction` 用状态导向 prompt 生成不超过 800 字的摘要，并保留配置的 recent tail。
+- summary 输入使用 Pi 的 `serializeConversation(convertToLlm(messages))`，因此 Telegram custom message 与 Pi 原生消息遵循同一 provider projection。
 - 空摘要、provider failure 或 abort 会 cancel；cursor、visible refs 与 epoch 均不伪造变化。
 - 成功结果的 structured details 保存当前 `consumedSeq` 与 retained `visibleMessageIds`。runtime 用这些 details 替换 visibility、推进 epoch；`consumedSeq` 永不回退。
 - visibility与epoch提交后，provider外observer按所有当前配置bot的visible refs、未消费event与reply obligation，对本地媒体cache做最多256项回收。它只清可再生文件与`local_path`，失败不改变compaction结果；startup backfill复用同一引用边界，避免重新下载已回收历史。
@@ -127,7 +131,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确�
 
 | 项目 | 值 |
 | --- | --- |
-| schema | `11` |
+| schema | `12` |
 | zh system | `0dadcaf37061` |
 | en system | `fabd0ba82eab` |
 | legacy message serializer | `68a17d6e5c05` |

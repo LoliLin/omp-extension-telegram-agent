@@ -28,13 +28,14 @@ import {
 } from "../src/media/sticker-catalog.ts";
 import {
 	NO_SEND_MARKER,
+	serializeCompactionMessages,
 	TELEGRAM_CONTEXT_TYPE,
 	TELEGRAM_CONTEXT_VERSION,
 	TELEGRAM_EXTENSION_ORDER,
 } from "../src/agent/extensions/index.ts";
 
 const GOLDEN = {
-	schemaVersion: 11,
+	schemaVersion: 12,
 	systemZhTemplate: "0dadcaf37061",
 	systemEnTemplate: "fabd0ba82eab",
 	serialize: "68a17d6e5c05",
@@ -216,6 +217,19 @@ test("complete provider tool protocol + order stable (REQ-TEST-0001 R2)", () => 
 
 test("compaction summary prompt grammar stable (REQ-TEST-0001 R2)", () => {
 	expect(sha256Short(COMPACTION_SUMMARY_PROMPT)).toBe(GOLDEN.compactionPrompt);
+});
+
+test("compaction serializes custom Telegram messages through Pi", () => {
+	const conversation = serializeCompactionMessages([
+		{
+			role: "custom",
+			customType: TELEGRAM_CONTEXT_TYPE,
+			content: "telegram context survives compaction",
+			display: false,
+			timestamp: 0,
+		},
+	]);
+	expect(conversation).toContain("telegram context survives compaction");
 });
 
 test("sticker catalog prompt block grammar stable (identity + format, per-bot)", () => {
