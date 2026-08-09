@@ -15,6 +15,8 @@
 需要：[Bun](https://bun.sh/)、一个 Telegram supergroup、至少一个 [BotFather](https://t.me/BotFather) token（bot 已加入群并关闭 privacy mode，否则看不到普通群消息）。
 
 ```bash
+git clone https://github.com/mizorewww/pi-extension-telegram-agent.git
+cd pi-extension-telegram-agent
 bun install
 bun run pi
 ```

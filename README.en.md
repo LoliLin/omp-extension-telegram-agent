@@ -15,6 +15,8 @@ Let a few AI bots, each with its own persona, live permanently in your Telegram 
 You need: [Bun](https://bun.sh/), a Telegram supergroup, and at least one [BotFather](https://t.me/BotFather) token (the bot must be in the group with privacy mode disabled, or it cannot see ordinary messages).
 
 ```bash
+git clone https://github.com/mizorewww/pi-extension-telegram-agent.git
+cd pi-extension-telegram-agent
 bun install
 bun run pi
 ```
