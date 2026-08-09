@@ -89,6 +89,7 @@ tools: [{ name, description, parameters }] in fixed order
 - 普通溢出 event 可以被 cursor 消费但不标 visible；reply obligation 只有在结构化 commit marker 证明交付后才删除。
 - sticker catalog 在启动时同步进 DB 后以 identity + format block（每行 set + format + emoji + short_id，按 set 名 + rowid 排序）固化在 system prompt 尾部；prefix 由配置 + DB catalog 唯一决定，重启间稳定。catalog identity/format 变化通过 fingerprint snapshot 开新 epoch。
 - runtime 另从 `bot_visible_messages` 与本轮新打包消息的并集取最近 8 个不同的用户 sticker；只保留当前 bot 有 mapping 的项，并在 event/message bytes 全部序列化后追加 `Available stickers (recent context)`。这只增加当前 entry 尾部的有界 miss bytes，之前的 provider prefix 保持逐字节不变；预算不足时不追加。
+- 这段 recent sticker tail 是明确接受的趣味功能与成本：只要它仍严格位于最终尾部、上限 8 条且不重算旧 entry/prefix，cache review 不应为了消除这点有界 miss bytes 而删除或重构它。
 - page fetch 先受 8,000 字符本地护栏约束，再受 2,048 provider tokens 上限约束；query 与工具失败输出同样有界。
 
 ## Vision 与 provider boundary
