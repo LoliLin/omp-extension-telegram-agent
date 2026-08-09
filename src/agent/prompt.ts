@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 10; // v10: recent visible user stickers restored as a bounded dynamic suffix
+export const CACHE_SCHEMA_VERSION = 11; // v11: sticker format is explicit in catalog/candidates and send guidance
 
 // Fixed shared protocol is deliberately the first byte of every bot's system prompt so bots in
 // the same provider/cache cohort share the longest possible exact prefix.

@@ -3,7 +3,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createConnection, createServer } from "node:net";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Tui from "@earendil-works/pi-tui";
@@ -23,9 +23,12 @@ import {
 } from "../src/ipc.ts";
 import { ensureLocalMedia, reconcileMediaCachePaths, type MediaDownloadApi } from "../src/media/local-cache.ts";
 import { MediaCacheQueue } from "../src/media/media-cache.ts";
+import { ensureStickerCatalog } from "../src/media/sticker-catalog.ts";
 import { ensureVision, type VisionExecutor } from "../src/media/vision.ts";
 import { setLogSink } from "../src/observability/log.ts";
 import { readMediaImage, TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
+import { BotApi } from "../src/telegram/api.ts";
+import { normalizeMessage } from "../src/telegram/normalize.ts";
 
 const temporaryDirectories = new Set<string>();
 const logLines: string[] = [];
@@ -90,6 +93,66 @@ async function withTimeout<T>(promise: Promise<T>, milliseconds: number, label: 
 }
 
 describe("cross-bot media acquisition", () => {
+	test("preserves static, animated, and video sticker formats and sends their original file ids", async () => {
+		const db = new Database(":memory:");
+		db.exec(readFileSync("src/db/schema.sql", "utf8"));
+		const catalogApi = {
+			call: async () => ({
+				name: "MixedSet",
+				title: "Mixed",
+				stickers: [
+					{ file_id: "static-file", file_unique_id: "static-unique", emoji: "🖼️" },
+					{ file_id: "animated-file", file_unique_id: "animated-unique", emoji: "✨", is_animated: true },
+					{ file_id: "video-file", file_unique_id: "video-unique", emoji: "🎞️", is_video: true },
+				],
+			}),
+		};
+		try {
+			await ensureStickerCatalog(db, catalogApi as never, "A", ["MixedSet"]);
+			expect(db.query("SELECT file_unique_id, mime FROM media ORDER BY rowid").all()).toEqual([
+				{ file_unique_id: "static-unique", mime: "image/webp" },
+				{ file_unique_id: "animated-unique", mime: "application/x-tgsticker" },
+				{ file_unique_id: "video-unique", mime: "video/webm" },
+			]);
+
+			const sent: Array<{ method: string; params: Record<string, unknown> }> = [];
+			const sendApi = new BotApi("unused");
+			sendApi.call = async <T>(method: string, params: Record<string, unknown> = {}) => {
+				sent.push({ method, params });
+				return {} as T;
+			};
+			const rows = db
+				.query(
+					`SELECT mapping.file_id
+					   FROM media
+					   JOIN media_file_ids mapping USING (file_unique_id)
+					  WHERE mapping.bot_id = 'A'
+					  ORDER BY media.rowid`,
+				)
+				.all() as { file_id: string }[];
+			for (const row of rows) await sendApi.sendSticker(-1001, row.file_id);
+			expect(sent).toEqual([
+				{ method: "sendSticker", params: { chat_id: -1001, sticker: "static-file" } },
+				{ method: "sendSticker", params: { chat_id: -1001, sticker: "animated-file" } },
+				{ method: "sendSticker", params: { chat_id: -1001, sticker: "video-file" } },
+			]);
+		} finally {
+			db.close();
+		}
+	});
+
+	test("normalizes animated and video stickers outside configured catalogs", () => {
+		const telegramMessage = (sticker: Record<string, unknown>) =>
+			normalizeMessage({
+				chat: { id: -1001 },
+				message_id: 1,
+				date: 1,
+				sticker: { file_id: "file", file_unique_id: "unique", ...sticker },
+			});
+		expect(telegramMessage({ is_animated: true }).media?.mime).toBe("application/x-tgsticker");
+		expect(telegramMessage({ is_video: true }).media?.mime).toBe("video/webm");
+	});
+
 	test("coalesces concurrent vision for two bots and reuses the persisted description", async () => {
 		const directory = temporaryDirectory("tg-vision-singleflight-");
 		const db = openDb(join(directory, "agent.db"));

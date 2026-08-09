@@ -1,9 +1,9 @@
 // Fixed sticker catalog per bot (REQ-STICKER-0001).
 // Each bot can configure Telegram sticker set names; at startup the sets are fetched, media
 // identity + per-bot file_id persisted, and short_ids assigned from rowids. The catalog is
-// serialized identity-only (set + emoji + short_id, no vision text) into the stable system
+// serialized as identity + format (set + format + emoji + short_id, no vision text) into the stable system
 // prompt, so the prefix is fully determined by config + DB catalog and stays stable across
-// restarts. Recent visible user stickers are a separate bounded dynamic tail (cache schema v10).
+// restarts. Recent visible user stickers are a separate bounded dynamic tail (cache schema v11).
 // Photo/foreground vision is unrelated and lives in vision.ts.
 
 import type { Database } from "bun:sqlite";
@@ -21,6 +21,22 @@ export interface CatalogSticker {
 	emoji: string | null;
 	width?: number;
 	height?: number;
+	mime: StickerMime;
+}
+
+export type StickerMime = "image/webp" | "application/x-tgsticker" | "video/webm";
+export type StickerFormat = "static" | "animated" | "video";
+
+export function stickerFormatFromMime(mime: string | null): StickerFormat {
+	if (mime === "application/x-tgsticker") return "animated";
+	if (mime === "video/webm") return "video";
+	return "static";
+}
+
+function stickerMime(sticker: { is_animated?: boolean; is_video?: boolean }): StickerMime {
+	if (sticker.is_video) return "video/webm";
+	if (sticker.is_animated) return "application/x-tgsticker";
+	return "image/webp";
 }
 
 /** Fetch one Telegram sticker set (public sets work for any bot token). */
@@ -28,7 +44,15 @@ export async function fetchStickerSet(api: BotApi, setName: string): Promise<Cat
 	const result = await api.call<{
 		name: string;
 		title: string;
-		stickers: { file_id: string; file_unique_id: string; emoji?: string; width?: number; height?: number }[];
+		stickers: {
+			file_id: string;
+			file_unique_id: string;
+			emoji?: string;
+			width?: number;
+			height?: number;
+			is_animated?: boolean;
+			is_video?: boolean;
+		}[];
 	}>("getStickerSet", { name: setName });
 	return result.stickers.map((s) => ({
 		file_unique_id: s.file_unique_id,
@@ -36,6 +60,7 @@ export async function fetchStickerSet(api: BotApi, setName: string): Promise<Cat
 		emoji: s.emoji ?? null,
 		width: s.width,
 		height: s.height,
+		mime: stickerMime(s),
 	}));
 }
 
@@ -73,10 +98,15 @@ export async function ensureStickerCatalog(
 				break;
 			}
 			db.query(
-				`INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, width, height)
-				 VALUES (?, 'sticker', ?, ?, ?, ?)
-				 ON CONFLICT(file_unique_id) DO NOTHING`,
-			).run(s.file_unique_id, setName, s.emoji, s.width ?? null, s.height ?? null);
+				`INSERT INTO media (file_unique_id, kind, mime, sticker_set, sticker_emoji, width, height)
+				 VALUES (?, 'sticker', ?, ?, ?, ?, ?)
+				 ON CONFLICT(file_unique_id) DO UPDATE SET
+				   mime = excluded.mime,
+				   sticker_set = COALESCE(excluded.sticker_set, media.sticker_set),
+				   sticker_emoji = COALESCE(excluded.sticker_emoji, media.sticker_emoji),
+				   width = COALESCE(excluded.width, media.width),
+				   height = COALESCE(excluded.height, media.height)`,
+			).run(s.file_unique_id, s.mime, setName, s.emoji, s.width ?? null, s.height ?? null);
 			db.query("INSERT OR IGNORE INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES (?, ?, ?)").run(
 				botId,
 				s.file_id,
@@ -131,6 +161,7 @@ export async function ensureStickerCatalog(
 }
 
 interface CatalogRow {
+	mime: string | null;
 	sticker_set: string | null;
 	sticker_emoji: string | null;
 	short_id: string;
@@ -140,7 +171,7 @@ interface CatalogRow {
 function catalogRows(db: Database, botId: string, sets: readonly string[]): CatalogRow[] {
 	return db
 		.query(`
-		SELECT sticker_set, sticker_emoji, short_id
+		SELECT mime, sticker_set, sticker_emoji, short_id
 		  FROM media m
 		 WHERE kind = 'sticker' AND short_id IS NOT NULL
 		   AND sticker_set IN (SELECT value FROM json_each(?))
@@ -154,15 +185,18 @@ function catalogRows(db: Database, botId: string, sets: readonly string[]): Cata
 }
 
 /**
- * Identity-only catalog block for the stable system prompt: one line per sticker
- * (set + emoji + short_id), no vision description text. Deterministic for a given
+ * Identity + format catalog block for the stable system prompt: one line per sticker
+ * (set + format + emoji + short_id), no vision description text. Deterministic for a given
  * config + DB catalog, so the prefix stays stable across restarts. Empty string when
  * the bot has no sendable catalog stickers.
  */
 export function stickerCatalogPromptBlock(db: Database, botId: string, sets: readonly string[]): string {
 	const rows = catalogRows(db, botId, sets);
 	if (rows.length === 0) return "";
-	const lines = rows.map((row) => `- [${row.sticker_set ?? ""}] ${row.sticker_emoji ?? ""} ${row.short_id}`);
+	const lines = rows.map(
+		(row) =>
+			`- [${row.sticker_set ?? ""}] [${stickerFormatFromMime(row.mime)}] ${row.sticker_emoji ?? ""} ${row.short_id}`,
+	);
 	return `# Sticker 目录\n\n你可以用 send 的 sticker 参数发送以下 sticker（填 short_id，不得编造其他 id）：\n\n${lines.join("\n")}`;
 }
 
@@ -173,6 +207,7 @@ interface ContextStickerRow {
 	sticker_set: string | null;
 	sticker_emoji: string | null;
 	vision: string | null;
+	mime: string | null;
 }
 
 function stickerDescription(row: ContextStickerRow): string {
@@ -211,7 +246,7 @@ export function recentContextStickerCandidates(
 				UNION
 				SELECT CAST(value AS INTEGER) FROM json_each(?4)
 			)
-			SELECT media.rowid, media.file_unique_id, media.short_id,
+			SELECT media.rowid, media.file_unique_id, media.short_id, media.mime,
 			       media.sticker_set, media.sticker_emoji, media.vision
 			  FROM visible
 			  JOIN messages message
@@ -247,7 +282,9 @@ export function recentContextStickerCandidates(
 			);
 		}
 		const description = stickerDescription(row);
-		lines.push(`${shortId} = ${row.sticker_emoji ?? ""}${description ? ` ${description}` : ""}`.trim());
+		lines.push(
+			`${shortId} [${stickerFormatFromMime(row.mime)}] = ${row.sticker_emoji ?? ""}${description ? ` ${description}` : ""}`.trim(),
+		);
 		if (lines.length >= boundedLimit) break;
 	}
 	return lines.length > 0 ? `Available stickers (recent context):\n${lines.join("\n")}` : "";

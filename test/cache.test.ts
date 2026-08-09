@@ -34,12 +34,12 @@ import {
 } from "../src/agent/extensions/index.ts";
 
 const GOLDEN = {
-	schemaVersion: 10,
+	schemaVersion: 11,
 	systemZhTemplate: "0dadcaf37061",
 	systemEnTemplate: "fabd0ba82eab",
 	serialize: "68a17d6e5c05",
 	eventSerialize: "4a57de738bf9",
-	tools: "d89dbe3ebe1b",
+	tools: "b16b54cf6564",
 	compactionPrompt: "045a5241fdd7",
 	extensionOrder: "e04f7032d531",
 	contextProtocol: "a9ca6974ac5f",
@@ -218,22 +218,24 @@ test("compaction summary prompt grammar stable (REQ-TEST-0001 R2)", () => {
 	expect(sha256Short(COMPACTION_SUMMARY_PROMPT)).toBe(GOLDEN.compactionPrompt);
 });
 
-test("sticker catalog prompt block grammar stable (identity-only, per-bot)", () => {
+test("sticker catalog prompt block grammar stable (identity + format, per-bot)", () => {
 	const db = new Database(":memory:");
 	db.exec(readFileSync("src/db/schema.sql", "utf8"));
 	const ins = db.prepare(
-		`INSERT INTO media (file_unique_id, kind, sticker_set, sticker_emoji, vision, short_id) VALUES (?, 'sticker', ?, ?, ?, ?)`,
+		`INSERT INTO media (file_unique_id, kind, mime, sticker_set, sticker_emoji, vision, short_id) VALUES (?, 'sticker', ?, ?, ?, ?, ?)`,
 	);
 	ins.run(
 		"uq-cat-1",
+		"image/webp",
 		"Mikufufu",
 		"😺",
 		JSON.stringify({ model: "m", kind: "sticker", text: "得意的赞同，smug/amused", at: 1 }),
 		"s1",
 	);
-	ins.run("uq-cat-2", "Mikufufu", "🐱", null, "s2");
+	ins.run("uq-cat-2", "application/x-tgsticker", "Mikufufu", "🐱", null, "s2");
 	ins.run(
 		"uq-cat-b-only",
+		"video/webm",
 		"Mikufufu",
 		"🅱️",
 		JSON.stringify({ model: "m", kind: "sticker", text: "另一个 bot 的映射", at: 1 }),
@@ -249,12 +251,13 @@ test("sticker catalog prompt block grammar stable (identity-only, per-bot)", () 
 
 你可以用 send 的 sticker 参数发送以下 sticker（填 short_id，不得编造其他 id）：
 
-- [Mikufufu] 😺 s1
-- [Mikufufu] 🐱 s2`);
+- [Mikufufu] [static] 😺 s1
+- [Mikufufu] [animated] 🐱 s2`);
 	expect(block).not.toContain("得意的赞同");
 	// deterministic across calls and isolated from other bots' mappings
 	expect(stickerCatalogPromptBlock(db, "A", ["Mikufufu"])).toBe(block);
 	expect(stickerCatalogPromptBlock(db, "B", ["Mikufufu"])).toContain("🅱️ s3");
+	expect(stickerCatalogPromptBlock(db, "B", ["Mikufufu"])).toContain("[video]");
 	expect(stickerCatalogPromptBlock(db, "B", ["Mikufufu"])).not.toContain("s1");
 });
 
@@ -263,7 +266,7 @@ test("recent visible user stickers form a bounded final suffix", () => {
 	db.exec(readFileSync("src/db/schema.sql", "utf8"));
 	const chatId = -1004402809405;
 	const insertMedia = db.prepare(
-		"INSERT INTO media (file_unique_id, kind, sticker_emoji, vision) VALUES (?, 'sticker', ?, ?)",
+		"INSERT INTO media (file_unique_id, kind, mime, sticker_emoji, vision) VALUES (?, 'sticker', ?, ?, ?)",
 	);
 	const insertMapping = db.prepare("INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES (?, ?, ?)");
 	const insertMessage = db.prepare(
@@ -279,6 +282,7 @@ test("recent visible user stickers form a bounded final suffix", () => {
 		const fileUniqueId = `user-sticker-${index}`;
 		insertMedia.run(
 			fileUniqueId,
+			index === 10 ? "video/webm" : index === 9 ? "application/x-tgsticker" : "image/webp",
 			"😺",
 			JSON.stringify({ model: "m", kind: "sticker", text: `emotion-${index}`, at: 1 }),
 		);
@@ -295,7 +299,12 @@ test("recent visible user stickers form a bounded final suffix", () => {
 		if (index <= 5) insertVisible.run(chatId, index);
 	}
 
-	insertMedia.run("bot-sticker", "🤖", JSON.stringify({ model: "m", kind: "sticker", text: "bot", at: 1 }));
+	insertMedia.run(
+		"bot-sticker",
+		"image/webp",
+		"🤖",
+		JSON.stringify({ model: "m", kind: "sticker", text: "bot", at: 1 }),
+	);
 	insertMapping.run("A", "bot-file", "bot-sticker");
 	insertMessage.run(
 		chatId,
@@ -306,7 +315,12 @@ test("recent visible user stickers form a bounded final suffix", () => {
 		1,
 		JSON.stringify({ kind: "sticker", file_unique_id: "bot-sticker", sticker_emoji: "🤖" }),
 	);
-	insertMedia.run("other-bot-only", "🅱️", JSON.stringify({ model: "m", kind: "sticker", text: "B only", at: 1 }));
+	insertMedia.run(
+		"other-bot-only",
+		"video/webm",
+		"🅱️",
+		JSON.stringify({ model: "m", kind: "sticker", text: "B only", at: 1 }),
+	);
 	insertMapping.run("B", "b-file", "other-bot-only");
 	insertMessage.run(
 		chatId,
@@ -320,14 +334,14 @@ test("recent visible user stickers form a bounded final suffix", () => {
 
 	const block = recentContextStickerCandidates(db, "A", chatId, 1, [6, 7, 8, 9, 10, 11, 12]);
 	expect(block).toBe(`Available stickers (recent context):
-s10 = 😺 emotion-10
-s9 = 😺 emotion-9
-s8 = 😺 emotion-8
-s7 = 😺 emotion-7
-s6 = 😺 emotion-6
-s5 = 😺 emotion-5
-s4 = 😺 emotion-4
-s3 = 😺 emotion-3`);
+s10 [video] = 😺 emotion-10
+s9 [animated] = 😺 emotion-9
+s8 [static] = 😺 emotion-8
+s7 [static] = 😺 emotion-7
+s6 [static] = 😺 emotion-6
+s5 [static] = 😺 emotion-5
+s4 [static] = 😺 emotion-4
+s3 [static] = 😺 emotion-3`);
 	expect(block).not.toContain("bot");
 	expect(block).not.toContain("B only");
 	const providerText = appendStickerCandidateSuffix("serialized messages", block);

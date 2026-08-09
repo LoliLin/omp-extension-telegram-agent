@@ -12,7 +12,7 @@ mention、reply、配置名称和HMAC概率桶都由本地代码判断。普通�
 
 ## 2. Stable provider prefix 复用cache
 
-共享协议位于最前，persona随后，末尾是有界的 identity-only sticker 目录，再之后是固定顺序tool schema，让多只bot尽可能共享逐字节相同的prefix。固定目录只含有上限的 set + emoji + short_id。另一份最多8条的动态候选只取当前context真正可见、且该bot可发送的最近用户sticker，并严格追加在本轮序列化消息之后；它不改写此前prefix，suffix预算不足时整体省略。
+共享协议位于最前，persona随后，末尾是有界的 identity + format sticker 目录，再之后是固定顺序tool schema，让多只bot尽可能共享逐字节相同的prefix。固定目录只含有上限的 set + `static|animated|video` + emoji + short_id。另一份最多8条的动态候选只取当前context真正可见、且该bot可发送的最近用户sticker，并带相同格式标记严格追加在本轮序列化消息之后；它不改写此前prefix，suffix预算不足时整体省略。三种格式都通过Telegram原始file id发送。
 
 fingerprint覆盖Pi/provider/model/cache policy、protocol、persona、serializer、compaction、extensions与tools。cache-visible内容变化必须升级schema，并在restore前创建新session/epoch；旧session文件保留，但不会用不同identity恢复。UI、telemetry和operator命令不能偷偷改变provider bytes。权威规则见[Cache工程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md)。
 

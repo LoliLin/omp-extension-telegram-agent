@@ -55,7 +55,7 @@
 
 - 每 bot 一个 `createAgentSession()`，各自拥有SessionManager和DefaultResourceLoader；整个daemon只创建一个Pi `ModelRuntime`，各session绑定解析后的provider/model/reasoning/cache retention。shared runtime在pid lock后、任何Telegram调用前预检全部聊天、compaction与启用的vision模型；除模型存在与认证外，还用Pi `getSupportedThinkingLevels()`校验每个显式reasoning档位。Pi SDK会静默clamp不支持的档位，但本项目禁止这种requested/effective分叉并fail fast；认证完全由Pi auth store提供。
 - runtime在打开session前计算完整context fingerprint（Pi/provider/api/model/reasoning/cache retention/schema/shared protocol/persona/serializer/compaction/catalog snapshot/extensions/tools）。manifest fingerprint与session文件都匹配才resume；否则保留旧文件、创建新session、推进epoch并清当前visibility。
-- 固定hidden extension顺序为`tg-context → tg-compaction → tg-cache-observer → tg-assistant-persistence`。shared protocol是system prompt首段，persona随后，identity-only sticker catalog block 在末尾。
+- 固定hidden extension顺序为`tg-context → tg-compaction → tg-cache-observer → tg-assistant-persistence`。shared protocol是system prompt首段，persona随后，identity + format sticker catalog block 在末尾。
 - 触发/flush 是 BotRuntime 串行状态机：`idle → flushing → idle`。在途trigger只合并为`pendingTrigger`；shutdown最多等待30秒。每轮从`message_events`按cursor做有界索引读取，用保守token估算打包成`telegram_context_v2` custom message。Pi 的`sendCustomMessage(triggerTurn)`会在promise返回前执行完整provider/tool turn，因此本批完整打包的message id先获得turn-local内存可见性，使同轮`send.reply_to`可通过preflight；session提交失败则从structured entries恢复。只有session持久化成功或startup reconcile证明entry存在后才推进durable cursor/visibility。
 - 群消息、edit、metadata与media completion使用固定紧凑grammar追加；恢复和compaction只读structured details，不从文本正则反推identity。成功compaction只替换visibility与epoch，业务cursor永不回退。
 - tools 固定为 `send`、`search`、`run_js`，禁用 coding agent 默认文件工具。`src/agent/tools.ts` 是 provider-facing 用法唯一权威；persona/protocol 不复制参数。`send(message?,sticker?,reply_to?)` 是唯一公开通道，`message` 为自然Markdown；本地仅映射bold/italic/strike/code/public link/heading/list/blockquote/simple table等固定子集，不启用HTML/MarkdownV2 parser或远程图片。完整成功返回固定 `ok`，远端 committed/partial/unknown 的退化路径返回固定 `no_retry`，两者都用 `terminate:true` 阻止 follow-up provider call，sent ids 只留本地 details/event。
@@ -124,14 +124,15 @@
 ## Sticker 可发送性
 
 - `media.file_unique_id` / `short_id` 是共享身份；`media_file_ids(bot_id,file_id,file_unique_id)` 才是 bot-specific 可发送能力。
-- catalog block 只用当前 bot mapping 过滤后的可发送 sticker 构建；set name 不能证明可发送。固定 catalog 以 identity-only 行（每行 set + emoji + short_id，按 set 名 + rowid 排序，上限 `STICKER_CATALOG_MAX` 条）固化在 system prompt 尾部，完整进入 stable prefix。
-- runtime 不恢复旧的全库语义 top-K；它只从当前 generation 真正 visible 的消息与本轮新 visible 消息中选最近 8 个不同的用户 sticker，再按当前 bot mapping 过滤。候选块严格追加在本轮消息 suffix 最后，预算不足整体省略；历史 sticker 的 short id 按 `s<media.rowid>` 惰性补齐。
+- catalog block 只用当前 bot mapping 过滤后的可发送 sticker 构建；set name 不能证明可发送。固定 catalog 每行包含 set + `static|animated|video` + emoji + short_id，按 set 名 + rowid 排序，上限 `STICKER_CATALOG_MAX` 条，完整进入 stable prefix。Telegram `is_animated` / `is_video` 归一化为 MIME metadata 并进入 catalog fingerprint。
+- runtime 不恢复旧的全库语义 top-K；它只从当前 generation 真正 visible 的消息与本轮新 visible 消息中选最近 8 个不同的用户 sticker，再按当前 bot mapping 过滤，并标注格式。候选块严格追加在本轮消息 suffix 最后，预算不足整体省略；历史 sticker 的 short id 按 `s<media.rowid>` 惰性补齐。
+- `sendSticker` 直接使用当前 bot mapping 的 Telegram `file_id`，同一路径支持 `.WEBP` static、`.TGS` animated 与 `.WEBM` video sticker；不下载重传，也不跨 bot 混用 file id。
 - `send` tool 在任何 network call 前再次用同一 mapping 做 preflight；若已提交的 short id 缺 mapping，记录 `candidate_invariant`，不会先发文字再失败。
 - catalog 启动日志给出fetched/catalog/sendable/missing_file_id；缺mapping行不进入 catalog block。short id仍可由本地send preflight解析。
 
 ## Provider context flow
 
-- 稳定prefix：共享群聊protocol先于persona，末尾是 identity-only sticker catalog block，之后是固定顺序tool name/description/parameter schema。
+- 稳定prefix：共享群聊protocol先于persona，末尾是 identity + format sticker catalog block，之后是固定顺序tool name/description/parameter schema。
 - 动态suffix：有界immutable event batch、reply obligation、media delta与tool outputs只追加；最近上下文 sticker 候选是本轮 event projection 后的最终有界块。
 - `bot_cursors`保证业务消费单调；`bot_visible_messages`只表示当前generation真实可见的完整消息。两者不混用。
 - 成功compaction替换visible refs并开启新epoch但不改cursor；完整fingerprint不匹配则在restore前建立新session/epoch。

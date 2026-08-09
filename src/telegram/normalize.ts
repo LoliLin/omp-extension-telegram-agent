@@ -39,6 +39,12 @@ export interface MediaInfo {
 	sticker_emoji?: string;
 }
 
+function stickerMime(sticker: { is_animated?: boolean; is_video?: boolean }): string {
+	if (sticker.is_video) return "video/webm";
+	if (sticker.is_animated) return "application/x-tgsticker";
+	return "image/webp";
+}
+
 export function normalizeMessage(msg: any, editDate: number | null = null): CanonicalMessage {
 	const from = msg.from ?? null;
 	const senderChat = msg.sender_chat ?? null;
@@ -80,6 +86,7 @@ function extractMedia(msg: any): MediaInfo | null {
 			kind: "sticker",
 			file_unique_id: s.file_unique_id,
 			file_id: s.file_id,
+			mime: stickerMime(s),
 			width: s.width,
 			height: s.height,
 			sticker_set: s.set_name,

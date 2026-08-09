@@ -88,7 +88,12 @@ function recordMedia(db: Database, botId: string, m: CanonicalMessage): void {
 	db.query(
 		`INSERT INTO media (file_unique_id, kind, mime, width, height, sticker_set, sticker_emoji)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(file_unique_id) DO NOTHING`,
+		 ON CONFLICT(file_unique_id) DO UPDATE SET
+		   mime = COALESCE(excluded.mime, media.mime),
+		   width = COALESCE(excluded.width, media.width),
+		   height = COALESCE(excluded.height, media.height),
+		   sticker_set = COALESCE(excluded.sticker_set, media.sticker_set),
+		   sticker_emoji = COALESCE(excluded.sticker_emoji, media.sticker_emoji)`,
 	).run(
 		media.file_unique_id,
 		media.kind,
