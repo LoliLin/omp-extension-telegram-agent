@@ -61,7 +61,7 @@ bun run restart
 ```bash
 bun run scripts/smoke-pi.ts --bot friend
 bun run scripts/e2e-agent.ts --bot friend
-bun run scripts/e2e-compaction-manual.ts --bot friend
+bun run scripts/e2e-compaction.ts --bot friend
 ```
 
 这些操作可能产生费用或群消息。运行前先读[daemon runbook](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/runbooks/daemon.md)，记录bot、预期副作用与回滚步骤。

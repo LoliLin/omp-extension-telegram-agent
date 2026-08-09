@@ -108,7 +108,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 1. 在`.env`加入C的Telegram token；在配置追加C、独立persona与`routing_p: 0`。若选择不同Pi provider，同时显式给`provider`与`model`，并先在Pi完成对应登录。
 2. `bun run restart`，确认日志出现C的`getMe` identity及`provider/model`，且A/B/C都只有一个poller，没有409。
 3. `bun run scripts/smoke-pi.ts --bot C`，确认当前配置的Pi provider/model完成一次headless调用。
-4. `bun run scripts/e2e-agent.ts --bot C`，确认真实群出现C的run/send结果；需要compaction验收时再运行`bun run scripts/e2e-compaction-manual.ts --bot C`。
+4. `bun run scripts/e2e-agent.ts --bot C`，确认真实群出现C的run/send结果；需要compaction验收时再运行`bun run scripts/e2e-compaction.ts --bot C`。
 5. 在Pi执行`/tg attach C`、`/tg status C`、`/tg compose C`，确认C过滤、独立lifetime stats与手动发送；再切回全局feed确认A/B/C同时可见。
 6. 在Telegram分别mention与reply C，确认只有C得到explicit response opportunity。验收后删除临时C配置并`bun run restart`；历史DB/session可保留但不会被未配置bot纳入IPC stats。
 

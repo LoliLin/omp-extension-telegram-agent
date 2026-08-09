@@ -61,7 +61,7 @@ Default `bun test` avoids Telegram/provider calls; the test preload mechanically
 ```bash
 bun run scripts/smoke-pi.ts --bot friend
 bun run scripts/e2e-agent.ts --bot friend
-bun run scripts/e2e-compaction-manual.ts --bot friend
+bun run scripts/e2e-compaction.ts --bot friend
 ```
 
 These commands may incur cost or post group messages. Read the [daemon runbook](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/runbooks/daemon.md) first and record the selected bot, expected side effects, and rollback.

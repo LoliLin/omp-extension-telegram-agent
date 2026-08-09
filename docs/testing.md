@@ -43,8 +43,7 @@ bun run lint            # Biome lint + format check（bun run format 自动修�
 bun run docs:check      # 文档站构建 + 链接检查
 bun run scripts/smoke-pi.ts --bot <id>              # 当前 bot 的 Pi provider/model smoke（需 .env）
 bun run scripts/e2e-agent.ts --bot <id>              # 真实链路 e2e（需 .env，opt-in）
-bun run scripts/e2e-compaction.ts --bot <id>         # compaction e2e（需 .env，opt-in）
-bun run scripts/e2e-compaction-manual.ts --bot <id>  # 手动 compact() 验证 compaction_end 成功/失败路径（需 .env；1M window 下 threshold e2e 已无法廉价触发自动 compaction）
+bun run scripts/e2e-compaction.ts --bot <id>         # 通过公开control入口验证compaction（需 .env，opt-in）
 ```
 
 ## 失败诊断
