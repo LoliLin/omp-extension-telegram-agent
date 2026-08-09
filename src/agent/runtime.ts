@@ -1372,7 +1372,6 @@ export class BotRuntime {
 
 	private async ensureOneVision(fileUniqueId: string): Promise<void> {
 		try {
-			const chatId = Number(`-100${this.config.groupPeerId}`);
 			await ensureVision(this.db, this.api, this.bot.id, fileUniqueId, this.getVisionExecutor(), {
 				cacheDir: join(this.config.dataDir, "media"),
 				onPersist: (fileUniqueId, text) => this.visionSink?.(fileUniqueId, text),
@@ -1384,8 +1383,6 @@ export class BotRuntime {
 				},
 				scheduler: this.visionScheduler ?? undefined,
 				botApis: this.botApis,
-				chatId,
-				foreground: true,
 				videoTranscoder: this.videoTranscoder,
 			});
 		} catch {

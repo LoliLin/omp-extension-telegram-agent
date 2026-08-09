@@ -28,8 +28,6 @@ export interface TelegramVisionConfigInput {
 	enabled?: boolean;
 	foreground_media_limit?: number;
 	concurrency?: number;
-	per_chat_hourly_limit?: number;
-	daily_limit?: number;
 }
 
 export type TelegramAdminInput = number | `@${string}`;
@@ -135,8 +133,6 @@ export interface VisionConfig {
 	enabled: boolean;
 	foregroundMediaLimit: number;
 	concurrency: number;
-	perChatHourlyLimit: number;
-	dailyLimit: number;
 }
 
 export interface RetentionConfig {
@@ -433,7 +429,7 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>, conf
 			if (vision.enabled !== undefined && typeof vision.enabled !== "boolean") {
 				errors.push(`[config] vision.enabled: expected boolean, got ${JSON.stringify(vision.enabled)}`);
 			}
-			for (const key of ["foreground_media_limit", "concurrency", "per_chat_hourly_limit", "daily_limit"] as const) {
+			for (const key of ["foreground_media_limit", "concurrency"] as const) {
 				const value = vision[key];
 				if (value !== undefined && (!Number.isSafeInteger(value) || (value as number) < 0)) {
 					errors.push(`[config] vision.${key}: expected non-negative integer, got ${JSON.stringify(value)}`);
@@ -743,8 +739,6 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 			enabled: typeof visionRaw.enabled === "boolean" ? visionRaw.enabled : raw.auxiliary_visual_model !== undefined,
 			foregroundMediaLimit: visionNumber("foreground_media_limit", 2, 16),
 			concurrency: Math.max(1, visionNumber("concurrency", 2, 16)),
-			perChatHourlyLimit: visionNumber("per_chat_hourly_limit", 24, 10_000),
-			dailyLimit: visionNumber("daily_limit", 200, 1_000_000),
 		},
 		retention,
 		routerSecret: env[routerSecretEnv] || null,

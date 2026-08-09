@@ -22,7 +22,7 @@ import {
 	type MediaDownloadApi,
 } from "./local-cache.ts";
 import { appendMediaUpdateEvents } from "../db/message-events.ts";
-import { VisionBudgetExceededError, type VisionScheduler } from "./vision-scheduler.ts";
+import type { VisionScheduler } from "./vision-scheduler.ts";
 import {
 	extractVideoFrames,
 	inspectVideoTranscoder,
@@ -59,7 +59,6 @@ export type VisionOutcome =
 	| "empty_file"
 	| "download_oversize"
 	| "media_download_aborted"
-	| "budget_exceeded"
 	| VideoFrameOutcome
 	| PiProviderFailureCategory;
 
@@ -119,8 +118,6 @@ export interface EnsureVisionOptions {
 	scheduler?: VisionScheduler;
 	/** Lets a routed bot reuse media received through another configured bot without crossing file_id ownership. */
 	botApis?: ReadonlyMap<string, MediaDownloadApi>;
-	chatId?: number;
-	foreground?: boolean;
 	/** Deterministic extraction seam; production uses ffprobe + ffmpeg. */
 	extractFrames?: (input: VideoFrameInput) => Promise<VideoFrameResult>;
 	/** Startup snapshot: missing optional tools skip before Telegram download and never block chat. */
@@ -438,15 +435,9 @@ async function ensureVisionInner(
 			return null;
 		}
 		if (options.scheduler) {
-			try {
-				return await options.scheduler.schedule(options.chatId ?? 0, options.foreground ?? false, () =>
-					ensureVisionPrepared(db, api, botId, fileUniqueId, executor, options, media, video, kind, startedAt, true),
-				);
-			} catch (error) {
-				if (!(error instanceof VisionBudgetExceededError)) throw error;
-				emitTelemetry(options, emptyTelemetry(kind, "budget_exceeded", monotonicNow() - startedAt));
-				return null;
-			}
+			return options.scheduler.schedule(() =>
+				ensureVisionPrepared(db, api, botId, fileUniqueId, executor, options, media, video, kind, startedAt, true),
+			);
 		}
 	}
 	return ensureVisionPrepared(db, api, botId, fileUniqueId, executor, options, media, video, kind, startedAt, false);
@@ -526,24 +517,15 @@ async function ensureVisionPrepared(
 		images = [{ bytes: local.bytes, mimeType: local.mimeType as VisionImageInput["mimeType"] }];
 	}
 
-	let result: VisionDescriptionResult;
-	try {
-		const describe = () =>
-			executor.describe({
-				kind,
-				sourceBytes: local.bytes.byteLength,
-				images,
-				...(video && media.kind === "sticker" ? { videoSticker: true } : {}),
-			});
-		result =
-			options.scheduler && !providerSlotReserved
-				? await options.scheduler.schedule(options.chatId ?? 0, options.foreground ?? false, describe)
-				: await describe();
-	} catch (error) {
-		if (!(error instanceof VisionBudgetExceededError)) throw error;
-		emitTelemetry(options, emptyTelemetry(kind, "budget_exceeded", monotonicNow() - startedAt));
-		return null;
-	}
+	const describe = () =>
+		executor.describe({
+			kind,
+			sourceBytes: local.bytes.byteLength,
+			images,
+			...(video && media.kind === "sticker" ? { videoSticker: true } : {}),
+		});
+	const result: VisionDescriptionResult =
+		options.scheduler && !providerSlotReserved ? await options.scheduler.schedule(describe) : await describe();
 	const text = result.text?.trim() || null;
 	db.query("UPDATE media SET vision = ? WHERE file_unique_id = ?").run(
 		JSON.stringify({ model: executor.modelRef, kind, text, outcome: result.telemetry.outcome, at: Date.now() }),

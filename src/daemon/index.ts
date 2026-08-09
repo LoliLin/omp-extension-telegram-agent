@@ -72,13 +72,7 @@ const { sharedModelRuntime, sharedVisionExecutor } = await (async () => {
 		throw error;
 	}
 })();
-const visionScheduler = config.vision?.enabled
-	? new VisionScheduler({
-			concurrency: config.vision.concurrency,
-			perChatHourlyLimit: config.vision.perChatHourlyLimit,
-			dailyLimit: config.vision.dailyLimit,
-		})
-	: null;
+const visionScheduler = config.vision?.enabled ? new VisionScheduler(config.vision.concurrency) : null;
 const db = openDb(config.dbPath);
 const mediaDir = join(config.dataDir, "media");
 const mediaPathReconciliation = reconcileMediaCachePaths(db, mediaDir);

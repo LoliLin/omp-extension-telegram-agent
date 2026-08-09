@@ -423,7 +423,7 @@ describe("cross-bot media acquisition", () => {
 	test("globally gates each video pipeline before download and extraction", async () => {
 		const directory = temporaryDirectory("tg-video-global-gate-");
 		const db = openDb(join(directory, "agent.db"));
-		const scheduler = new VisionScheduler({ concurrency: 1, perChatHourlyLimit: 10, dailyLimit: 10 });
+		const scheduler = new VisionScheduler(1);
 		const started: string[] = [];
 		let active = 0;
 		let peak = 0;
@@ -478,8 +478,6 @@ describe("cross-bot media acquisition", () => {
 			const options = {
 				cacheDir: join(directory, "media"),
 				scheduler,
-				chatId: -1001,
-				foreground: true,
 				videoTranscoder: { ffmpeg: true, ffprobe: true },
 				extractFrames: async (input: { fileUniqueId: string }) => {
 					started.push(input.fileUniqueId);
@@ -517,55 +515,6 @@ describe("cross-bot media acquisition", () => {
 			expect(peak).toBe(1);
 		} finally {
 			releaseFirst();
-			db.close();
-		}
-	});
-
-	test("rejects an exhausted video budget before Telegram or FFmpeg work", async () => {
-		const directory = temporaryDirectory("tg-video-budget-preflight-");
-		const db = openDb(join(directory, "agent.db"));
-		let localWork = 0;
-		const api: MediaDownloadApi = {
-			getFile: async () => {
-				localWork++;
-				return { file_path: "videos/budget.mp4" };
-			},
-			downloadFile: async () => {
-				localWork++;
-				return new Uint8Array([0, 1, 2, 3]);
-			},
-		};
-		const executor: VisionExecutor = {
-			modelRef: "test/vision:off",
-			provider: "test",
-			model: "vision",
-			readinessFailure: null,
-			describe: async () => {
-				localWork++;
-				throw new Error("provider must not run");
-			},
-		};
-		try {
-			db.query("INSERT INTO media (file_unique_id, kind, mime) VALUES ('budget-video', 'video', 'video/mp4')").run();
-			db.query(
-				"INSERT INTO media_file_ids (bot_id, file_id, file_unique_id) VALUES ('A', 'budget-file', 'budget-video')",
-			).run();
-			const outcomes: string[] = [];
-			expect(
-				await ensureVision(db, api as never, "A", "budget-video", executor, {
-					cacheDir: join(directory, "media"),
-					scheduler: new VisionScheduler({ concurrency: 1, perChatHourlyLimit: 0, dailyLimit: 0 }),
-					videoTranscoder: { ffmpeg: true, ffprobe: true },
-					extractFrames: async () => {
-						localWork++;
-						throw new Error("extractor must not run");
-					},
-					onTelemetry: (telemetry) => outcomes.push(telemetry.outcome),
-				}),
-			).toBeNull();
-			expect(localWork).toBe(0);
-			expect(outcomes).toEqual(["budget_exceeded"]);
-		} finally {
 			db.close();
 		}
 	});

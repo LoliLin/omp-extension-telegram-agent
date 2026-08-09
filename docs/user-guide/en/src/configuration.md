@@ -37,8 +37,6 @@ export default defineConfig({
     enabled: false,
     foreground_media_limit: 2,
     concurrency: 2,
-    per_chat_hourly_limit: 24,
-    daily_limit: 200,
   },
   telemetry_retention_days: 90,
   raw_update_retention_days: 30,
@@ -89,7 +87,7 @@ These controls are bounded by default:
 
 - `max_suffix_tokens: 12000` and `max_message_tokens: 4096` cap new provider-visible Telegram context;
 - `cache_retention: "short"` controls the main chat request, while compaction always uses its configured cheap task model with provider cache retention disabled;
-- `vision.enabled` is false by default. When enabled, foreground media, deployment-wide concurrency, hourly per-chat attempts, and daily attempts each have an explicit limit. A video occupies one global slot from Telegram download through frame extraction and its provider request. Video understanding requires `ffmpeg` and `ffprobe` on the daemon host PATH; missing tools skip before download and consume no budget or tokens, produce an operator-only installation hint, and do not affect daemon readiness, chat, images, or sticker sending;
+- `vision.enabled` is false by default. When enabled, each turn handles at most `foreground_media_limit` uncached media items and all bots share one FIFO gate with `concurrency` active jobs. A video occupies one slot from Telegram download through frame extraction and its provider request. Video understanding requires `ffmpeg` and `ffprobe` on the daemon host PATH; missing tools skip before download and consume no provider tokens, produce an operator-only installation hint, and do not affect daemon readiness, chat, images, or sticker sending;
 - telemetry, raw updates, and immutable message events default to 90, 30, and 365 days. Old message events are pruned only after every known bot cursor consumed them and no direct-reply obligation references them.
 
 Changing model, reasoning, cache policy, persona, tools, serializer, or another cache-visible field produces a new context fingerprint. The next controlled restart preserves the old session file but starts a new session before restoration, so stale context is never resumed under a new identity.

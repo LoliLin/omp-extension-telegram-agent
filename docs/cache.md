@@ -99,7 +99,7 @@ tools: [{ name, description, parameters }] in fixed order
 
 Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确提供 `auxiliary_visual_model` 的兼容路径，才会执行。
 
-- foreground 每轮默认最多 2 个 media、deployment并发 2；scheduler默认每群每小时24次、每日200次。图片在provider边界占slot；视频在Telegram下载前预留同一个全局slot与attempt budget，并一直持有到本地抽帧和单次vision请求结束，避免多bot并行放大FFmpeg负载。预算已耗尽时不下载、不抽帧。
+- foreground 每轮默认最多 2 个 media、deployment并发 2。图片在provider边界占slot；视频在Telegram下载前预留同一个全局slot，并一直持有到本地抽帧和单次vision请求结束，避免多bot并行放大FFmpeg负载。scheduler只有一个FIFO并发门，不维护重启即丢失的小时/每日计数。
 - persistent media identity cache 在 bots 间复用。新的非空结果只追加 `media_update` event，不改写旧 message entry。
 - Telegram下载严格配对bot-specific `file_id`与对应Bot API；回复bot缺mapping时可复用其他已配置接收bot的source。这是provider外的确定性本地准备，不改变消息grammar或主对话每turn token。
 - video、animation、video note、video MIME document与video sticker先按identity固定种子从以50%时点为均值的截断正态分布取最多3帧，再在一次独立vision请求中提交全部帧。结果仍只追加既有`media_update` grammar；persistent/cross-bot hit不增加调用。

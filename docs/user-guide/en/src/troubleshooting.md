@@ -65,7 +65,7 @@ If new media remains label-only, inspect only the fixed `media_cache_ready/skip/
 
 ## A video has no vision description
 
-Run `bun run debug` first. `video_transcoder_unavailable` means the host lacks `ffmpeg` or `ffprobe`; `start`, `restart`, and `status` also explain that the package is used only for frame sampling and suggest installation. The warning never blocks daemon readiness or posts into the group. Video skips before Telegram download or a provider call, so it consumes no vision budget or tokens while chat, image vision, and all sticker formats continue. Install the FFmpeg distribution package and restart; this failure is not cached permanently. `video_probe_failed` or `video_frame_extraction_failed` means the local tools could not read the file; check the 20 MiB bound and format support. Logs never contain its path, stderr, or video contents.
+Run `bun run debug` first. `video_transcoder_unavailable` means the host lacks `ffmpeg` or `ffprobe`; `start`, `restart`, and `status` also explain that the package is used only for frame sampling and suggest installation. The warning never blocks daemon readiness or posts into the group. Video skips before Telegram download or a provider call, so it consumes no provider tokens while chat, image vision, and all sticker formats continue. Install the FFmpeg distribution package and restart; this failure is not cached permanently. `video_probe_failed` or `video_frame_extraction_failed` means the local tools could not read the file; check the 20 MiB bound and format support. Logs never contain its path, stderr, or video contents.
 
 ## Search or page retrieval fails
 
