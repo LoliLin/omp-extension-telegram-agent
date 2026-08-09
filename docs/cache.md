@@ -90,6 +90,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true`，或旧配置明确�
 
 - foreground 每轮默认最多 2 个 media、并发 2；deployment scheduler 默认每群每小时 24 次、每日 200 次。
 - persistent media identity cache 在 bots 间复用。新的非空结果只追加 `media_update` event，不改写旧 message entry。
+- Telegram下载严格配对bot-specific `file_id`与对应Bot API；回复bot缺mapping时可复用其他已配置接收bot的source。这是provider外的确定性本地准备，不改变消息grammar、每turn token或LLM调用数。
 - photo precache、`media_ready`、TUI card 与 `vision_update` IPC 都是 provider 外 side channel。
 - compaction 单独使用配置的廉价模型与 `cacheRetention: "none"`；vision/compaction 不继承主模型的 reasoning 默认。
 

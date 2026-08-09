@@ -187,6 +187,7 @@ export class PhotoCacheQueue {
 			cacheDir: this.options.cacheDir,
 			fileOps: this.options.fileOps,
 			signal: this.controller.signal,
+			botApis: this.apis,
 		});
 		if (this.stopped || this.controller.signal.aborted) return;
 		if (!result.ok) {

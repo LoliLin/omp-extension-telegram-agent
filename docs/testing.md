@@ -11,7 +11,7 @@
 
 ## 当前测试集
 
-`test/` 只保留长期 invariant 与安全边界的守卫，共 6 个测试文件：
+`test/` 只保留长期 invariant 与安全边界的守卫，共 7 个测试文件：
 
 - `cache.test.ts` — cache golden：锁定 cache-visible protocol 的 hash（system prompt、tool schema 与顺序、消息/compaction 序列化 grammar、extension 顺序、sticker catalog block）。任何 provider-visible 变化都会在这里报警。
 - `context-protocol.test.ts` — context fingerprint / extension 契约：恢复 session 的 cache-identity 判断与 structured context 协议。
@@ -19,6 +19,7 @@
 - `runjs.test.ts` — run_js sandbox：正常计算可用，host realm 隔离与资源限制成立。
 - `search.test.ts` — TinyFish search/fetch 契约：参数边界、SSRF prefilter（public IP 表）、untrusted boundary、telemetry 脱敏；只用本地 Bun server。
 - `db.test.ts` — SQLite migration：旧库迁移幂等且保留历史 telemetry。
+- `media.test.ts` — 跨bot Telegram media source配对、共享下载，以及Pi attach filter握手、视觉描述乱序合并与卡片位置。
 
 ## 测试选择规则
 

@@ -79,6 +79,8 @@ export interface EnsureLocalMediaOptions {
 	cacheDir?: string;
 	signal?: AbortSignal;
 	fileOps?: MediaCacheFileOps;
+	/** Every configured Bot API, keyed by the same bot_id stored beside its file_id. */
+	botApis?: ReadonlyMap<string, MediaDownloadApi>;
 }
 
 let temporarySequence = 0;
@@ -102,6 +104,29 @@ export function fileIdForBot(db: Database, botId: string, fileUniqueId: string):
 		.query("SELECT file_id FROM media_file_ids WHERE bot_id = ? AND file_unique_id = ?")
 		.get(botId, fileUniqueId) as { file_id: string } | null;
 	return row?.file_id ?? null;
+}
+
+function downloadSource(
+	db: Database,
+	preferredApi: MediaDownloadApi,
+	preferredBotId: string,
+	fileUniqueId: string,
+	botApis?: ReadonlyMap<string, MediaDownloadApi>,
+): { api: MediaDownloadApi; fileId: string } | null {
+	const mappings = db
+		.query(`
+			SELECT bot_id AS botId, file_id AS fileId
+			  FROM media_file_ids
+			 WHERE file_unique_id = ?
+			 ORDER BY CASE WHEN bot_id = ? THEN 0 ELSE 1 END, rowid DESC
+		`)
+		.all(fileUniqueId, preferredBotId) as { botId: string; fileId: string }[];
+	for (const mapping of mappings) {
+		if (mapping.botId === preferredBotId) return { api: preferredApi, fileId: mapping.fileId };
+		const api = botApis?.get(mapping.botId);
+		if (api) return { api, fileId: mapping.fileId };
+	}
+	return null;
 }
 
 export function isDisplayReadyPath(path: string | null, fileOps: MediaCacheFileOps = defaultFileOps): boolean {
@@ -217,11 +242,11 @@ async function ensureLocalMediaInner(
 		}
 	}
 
-	const fileId = fileIdForBot(db, botId, fileUniqueId);
-	if (!fileId) return { ok: false, outcome: "file_id_unavailable" };
+	const source = downloadSource(db, api, botId, fileUniqueId, options.botApis);
+	if (!source) return { ok: false, outcome: "file_id_unavailable" };
 	let remotePath: string | null = null;
 	try {
-		remotePath = (await api.getFile(fileId, signal)).file_path ?? null;
+		remotePath = (await source.api.getFile(source.fileId, signal)).file_path ?? null;
 	} catch {
 		return { ok: false, outcome: signal?.aborted ? "aborted" : "telegram_file_unavailable" };
 	}
@@ -233,7 +258,7 @@ async function ensureLocalMediaInner(
 
 	let bytes: Uint8Array;
 	try {
-		bytes = await api.downloadFile(remotePath, signal);
+		bytes = await source.api.downloadFile(remotePath, signal);
 	} catch {
 		return { ok: false, outcome: signal?.aborted ? "aborted" : "telegram_download_failed" };
 	}

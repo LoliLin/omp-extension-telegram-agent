@@ -60,6 +60,7 @@ Pi's native footer renders `↑/↓/R/W/CH/$/context/model`. Lifetime values cov
 - Assistant thinking/text/tool partials update one Pi-native card in place. Persistent LOCAL/Telegram events replace them at completion; partials are not stored in SQLite.
 - Local assistant text when a bot does not call `send` remains feed-only and never reaches the group.
 - Vision is off by default. When explicitly enabled, photo and sticker vision runs lazily within deployment budgets only when a real bot turn needs media context; opening the UI never adds a vision call.
+- A vision description belongs to the shared group message, so global and every one-bot feed render it directly below the media. A one-bot filter limits only LOCAL events and usage.
 - Inline image visibility follows Pi terminal capabilities and local media preparation. Text, media labels, and vision descriptions remain readable fallbacks.
 
 ## Web search and link reading

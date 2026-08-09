@@ -13,7 +13,12 @@ import {
 	PiModelConfigurationError,
 	type PiProviderFailureCategory,
 } from "../agent/model-runtime.ts";
-import { ensureLocalMedia, staticMediaMimeForPath, type LocalMediaFailure } from "./local-cache.ts";
+import {
+	ensureLocalMedia,
+	staticMediaMimeForPath,
+	type LocalMediaFailure,
+	type MediaDownloadApi,
+} from "./local-cache.ts";
 import { appendMediaUpdateEvents } from "../db/message-events.ts";
 import { VisionBudgetExceededError, type VisionScheduler } from "./vision-scheduler.ts";
 
@@ -88,6 +93,8 @@ export interface EnsureVisionOptions {
 	monotonicNow?: () => number;
 	/** Shared deployment-wide provider gate; cache/local work remains outside the queue. */
 	scheduler?: VisionScheduler;
+	/** Lets a routed bot reuse media received through another configured bot without crossing file_id ownership. */
+	botApis?: ReadonlyMap<string, MediaDownloadApi>;
 	chatId?: number;
 	foreground?: boolean;
 }
@@ -341,7 +348,10 @@ async function ensureVisionInner(
 		const cached = JSON.parse(media.vision) as { text?: string | null };
 		return cached.text?.trim() || null;
 	}
-	const local = await ensureLocalMedia(db, api, botId, fileUniqueId, { cacheDir: options.cacheDir });
+	const local = await ensureLocalMedia(db, api, botId, fileUniqueId, {
+		cacheDir: options.cacheDir,
+		botApis: options.botApis,
+	});
 	if (!local.ok) {
 		const outcome = localMediaVisionOutcome(local.outcome);
 		if (outcome === "unsupported_format") {

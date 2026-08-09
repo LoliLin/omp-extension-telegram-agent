@@ -180,6 +180,7 @@ export class IpcServer {
 		if (this.listeners.size === 0) return;
 		const frame = encodeFrame({ type: "append", item } satisfies ServerMessage);
 		for (const socket of this.listeners) {
+			if (!this.filters.has(socket)) continue;
 			const filter = this.filters.get(socket) ?? null;
 			if (filter && item.kind === "evt" && item.botId !== filter) continue;
 			this.writeFrame(socket, frame);
@@ -191,6 +192,7 @@ export class IpcServer {
 		if (this.listeners.size === 0) return;
 		const frame = encodeFrame({ type: "usage", run } satisfies ServerMessage);
 		for (const socket of this.listeners) {
+			if (!this.filters.has(socket)) continue;
 			const filter = this.filters.get(socket) ?? null;
 			if (filter && run.botId !== filter) continue;
 			this.writeFrame(socket, frame);
@@ -201,14 +203,18 @@ export class IpcServer {
 	broadcastVision(update: VisionUpdate): void {
 		if (this.listeners.size === 0 || !update.fileUniqueId || !update.text.trim()) return;
 		const frame = encodeFrame({ type: "vision_update", ...update } satisfies ServerMessage);
-		for (const socket of this.listeners) this.writeFrame(socket, frame);
+		for (const socket of this.listeners) {
+			if (this.filters.has(socket)) this.writeFrame(socket, frame);
+		}
 	}
 
 	/** Push one owner-only local media path to every live transcript (REQ-UI-0014). */
 	broadcastMediaReady(update: MediaReadyUpdate): void {
 		if (this.listeners.size === 0 || !update.fileUniqueId || !update.mediaPath) return;
 		const frame = encodeFrame({ type: "media_ready", ...update } satisfies ServerMessage);
-		for (const socket of this.listeners) this.writeFrame(socket, frame);
+		for (const socket of this.listeners) {
+			if (this.filters.has(socket)) this.writeFrame(socket, frame);
+		}
 	}
 
 	/** Push an ephemeral assistant snapshot only to listeners observing its bot. */
@@ -234,9 +240,17 @@ export class IpcServer {
 	}
 
 	private handleRequest(socket: SocketLike, req: ClientRequest): void {
+		if (req.type !== "hello" && !this.filters.has(socket)) {
+			this.kick(socket, "hello required");
+			return;
+		}
 		if (req.type === "hello") {
 			const filter = typeof req.filter === "string" && this.botNames.has(req.filter) ? req.filter : null;
-			if (req.filter && !filter) log.warn("ipc", "unknown_filter", { filter: req.filter });
+			if (req.filter && !filter) {
+				log.warn("ipc", "unknown_filter", { filter: req.filter });
+				this.kick(socket, "unknown bot filter");
+				return;
+			}
 			this.filters.set(socket, filter);
 			const frame = encodeFrame({
 				type: "snapshot",

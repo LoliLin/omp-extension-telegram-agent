@@ -51,6 +51,16 @@ bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整�
 
 不要用“看到模型有输出”推断公开发送，也不要用“群里没消息”推断provider没运行。
 
+### 图片理解证据梯
+
+1. canonical `messages.media`与`media_file_ids`证明哪个bot拥有可用`file_id`；`file_id`只能交给同一bot的Bot API。
+2. `media.local_path`与`media_cache_ready/skip/error`证明本地媒体准备，不证明vision provider已经运行。
+3. `agent_events.kind=vision`的固定`outcome`证明foreground识别结果；跨bot路由时应使用任一已配置且有mapping的接收bot，`file_id_unavailable`只表示所有可用source均缺失。
+4. 非空`media.vision`与对应`message_events.kind=media_update`证明描述已持久化并进入append-only provider队列；主模型选择别的话题不等于没有识图。
+5. `/tg attach`的snapshot/history直接读`media.vision`，live路径读`vision_update`；全局、A、B等filter都应显示同一群消息描述，filter只限制LOCAL/usage。
+
+不得把私人图片、OCR正文、`file_unique_id`、`file_id`或本地path复制进daemon日志；内容取证只在明确授权的本机SQLite/provider-context检查中短暂查看。
+
 ## 结构化日志契约
 
 每行是schema v1 JSON：

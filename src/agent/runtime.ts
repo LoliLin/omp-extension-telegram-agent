@@ -58,6 +58,7 @@ import {
 	type VisionExecutor,
 	type VisionUpdateSink,
 } from "../media/vision.ts";
+import type { MediaDownloadApi } from "../media/local-cache.ts";
 import {
 	ensureStickerCatalog,
 	stickerCatalogPromptBlock,
@@ -154,6 +155,7 @@ export class BotRuntime {
 	private modelRuntime: ModelRuntime;
 	private visionExecutor: VisionExecutor | null;
 	private api: BotApi;
+	private readonly botApis: ReadonlyMap<string, MediaDownloadApi>;
 	private session: AgentSession | null = null;
 	private model!: NonNullable<ReturnType<ModelRuntime["getModel"]>>; // resolved in init()
 	private compactionModel!: NonNullable<ReturnType<ModelRuntime["getModel"]>>;
@@ -227,6 +229,8 @@ export class BotRuntime {
 			monotonicNow?: () => number;
 			activityScheduler?: ActivityScheduler;
 			chatActionSender?: () => Promise<unknown>;
+			api?: BotApi;
+			botApis?: ReadonlyMap<string, MediaDownloadApi>;
 			visionExecutor?: VisionExecutor;
 			visionScheduler?: VisionScheduler;
 		} = {},
@@ -239,7 +243,8 @@ export class BotRuntime {
 		this.visionScheduler = options.visionScheduler ?? null;
 		this.visionEnabled = config.vision?.enabled ?? options.visionExecutor != null;
 		this.monotonicNow = options.monotonicNow ?? (() => performance.now());
-		this.api = new BotApi(bot.token);
+		this.api = options.api ?? new BotApi(bot.token);
+		this.botApis = options.botApis ?? new Map([[bot.id, this.api]]);
 		const chatId = Number(`-100${config.groupPeerId}`);
 		this.typingLease = new TelegramTypingLease(options.chatActionSender ?? (() => this.api.sendChatAction(chatId)), {
 			scheduler: options.activityScheduler,
@@ -1342,6 +1347,7 @@ export class BotRuntime {
 					this.recordEvent("vision", telemetry);
 				},
 				scheduler: this.visionScheduler ?? undefined,
+				botApis: this.botApis,
 				chatId,
 				foreground: true,
 			});

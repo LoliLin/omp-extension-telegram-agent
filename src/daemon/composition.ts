@@ -23,7 +23,7 @@ export async function composeDeployment<Api extends IdentityApi, Runtime>(
 	config: Pick<AppConfig, "bots">,
 	factories: {
 		createApi: (bot: BotConfig) => Api;
-		createRuntime: (bot: BotConfig, api: Api) => Promise<Runtime>;
+		createRuntime: (bot: BotConfig, api: Api, apis: ReadonlyMap<string, Api>) => Promise<Runtime>;
 		onIdentity?: (bot: BotConfig, identity: BotIdentity) => void | Promise<void>;
 	},
 ): Promise<DeploymentComposition<Api, Runtime>> {
@@ -40,7 +40,7 @@ export async function composeDeployment<Api extends IdentityApi, Runtime>(
 
 	const runtimes = new Map<string, Runtime>();
 	for (const bot of config.bots) {
-		runtimes.set(bot.id, await factories.createRuntime(bot, botApis.get(bot.id)!));
+		runtimes.set(bot.id, await factories.createRuntime(bot, botApis.get(bot.id)!, botApis));
 	}
 
 	return {

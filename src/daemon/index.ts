@@ -103,8 +103,10 @@ for (const bot of config.bots) {
 }
 const composition = await composeDeployment(db, config, {
 	createApi: (bot) => new BotApi(bot.token),
-	createRuntime: async (bot) => {
+	createRuntime: async (bot, api, botApis) => {
 		const runtime = new BotRuntime(db, bot, config, sharedModelRuntime, {
+			api,
+			botApis,
 			...(sharedVisionExecutor ? { visionExecutor: sharedVisionExecutor } : {}),
 			...(visionScheduler ? { visionScheduler } : {}),
 		});
