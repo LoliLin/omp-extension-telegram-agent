@@ -175,7 +175,7 @@ describe("unified usage telemetry", () => {
 			expect(piStatus).toContain("context_current=1,000 / 128,000 (0.8%)");
 			expect(piStatus).toContain("cache_and_cost=CH 46.7% · $0.1500");
 			expect(footerLines[0]).toBe("~/project (main) • ops");
-			expect(footerLines[1]).toStartWith("↑750 ↓170 R700 W50 CH46.7% $0.150 0.8%/128k (auto)");
+			expect(footerLines[1]).toStartWith("↑750 ↓170 R700 W50 CH46.7% $0.1500 0.8%/128k (auto)");
 			expect(footerLines[1]).toEndWith("(test) chat-model • high");
 			expect(visibleWidth(footerLines[1]!)).toBe(100);
 			expect(footerLines[2]).toBe("TELEGRAM · CHOOSE BOT ON SEND");
@@ -189,6 +189,88 @@ describe("unified usage telemetry", () => {
 			const empty = summarizeBotUsage(loadBotStats(db, "B"), 128_000);
 			expect(empty.context).toEqual({ tokens: null, contextWindow: 128_000, percent: null });
 			expect(empty.cacheHitPercent).toBeNull();
+		} finally {
+			db.close();
+		}
+	});
+
+	test("sums immutable per-run costs across model switches in status and footer", () => {
+		const db = openDb(":memory:");
+		try {
+			insertRun(db, {
+				ts: 1_786_251_069_000,
+				model: "deepseek-v4-flash",
+				context: 1_000,
+				read: 700,
+				write: 0,
+				miss: 300,
+				output: 120,
+				reasoning: 30,
+				latency: 1_250,
+				cost: 0.720_977_83,
+				compaction: false,
+			});
+			insertRun(db, {
+				ts: 1_786_251_070_000,
+				model: "glm-5.2",
+				context: 8_076,
+				read: 0,
+				write: 0,
+				miss: 8_076,
+				output: 66,
+				reasoning: 0,
+				latency: 7_500,
+				cost: 0.033_866_2,
+				compaction: false,
+			});
+
+			const stats = loadBotStats(db, "A");
+			const runtime = {
+				state: "idle",
+				epoch: 4,
+				provider: "ollama-cloud",
+				model: "glm-5.2",
+				reasoningEffort: "high",
+				contextWindow: 1_000_000,
+				routingP: 1,
+				samplingCooldownMs: 2_000,
+				lastCompact: null,
+			} satisfies RuntimeControlSnapshot;
+			const bot = {
+				id: "A",
+				name: "Bot A",
+				provider: "ollama-cloud",
+				model: "glm-5.2",
+				reasoningEffort: "high",
+				routingP: 1,
+				samplingCooldownMs: 2_000,
+			} as const;
+			const host = {
+				modelRegistry: {
+					getAvailable: () => [{ provider: "ollama-cloud", id: "glm-5.2", contextWindow: 1_000_000, reasoning: true }],
+				},
+				model: undefined,
+				thinkingLevel: "off" as const,
+			};
+			const status = statsText("A", stats, bot, runtime, host);
+			const footer = telegramFooterLines(
+				100,
+				{ fg: (_color, text) => text },
+				{
+					cwd: "/tmp/project",
+					home: "/tmp",
+					branch: null,
+					sessionName: undefined,
+					usage: telegramFooterUsage("A", { A: stats }, { A: runtime }, [bot], host),
+					availableProviderCount: 1,
+					statuses: new Map(),
+				},
+			);
+
+			expect(stats.cost).toBeCloseTo(0.754_844_03, 10);
+			expect(stats.last?.model).toBe("glm-5.2");
+			expect(status).toContain("cache_and_cost=CH 7.7% · $0.754844");
+			expect(footer[1]).toContain("$0.754844");
 		} finally {
 			db.close();
 		}

@@ -79,7 +79,7 @@ export default defineConfig({
 
 ## Pi 模型与 tools override
 
-公开示例固定了一组成本优先profile：Luna、reasoning off、short cache retention，并用Luna low做compaction。向导会把已经通过Pi预检的provider/model固定进新配置，因此以后改变Pi默认值不会静默改变这个deployment。旧手写配置仍可省略这两个字段兼容继承Pi合并后的默认值；但省略`reasoning_effort`表示`off`，不再继承Pi的thinking level。单bot可以覆盖到另一个catalog entry；切换provider时必须同时填写provider和model。认证始终来自Pi，不来自本配置或`.env`。
+公开示例固定了一组成本优先profile：Luna、reasoning off、short cache retention，并用Luna low做compaction。向导会把已经通过Pi预检的provider/model固定进新配置，因此以后改变Pi默认值不会静默改变这个deployment。旧手写配置仍可省略这两个字段兼容继承Pi合并后的默认值；但省略`reasoning_effort`表示`off`，不再继承Pi的thinking level。daemon会通过Pi原生resource loader读取用户级已安装provider extension，因此插件提供的模型、能力与费用元数据和交互式Pi一致；项目extension不会进入bot session。单bot可以覆盖到另一个catalog entry；切换provider时必须同时填写provider和model。认证始终来自Pi，不来自本配置或`.env`。
 
 `reasoning_effort`不仅必须是Pi全局枚举，还必须是所选模型实际支持的档位。Pi SDK本身会把不支持的值静默夹到最近档位；Telegram agent为避免费用、行为与状态显示不一致，会在任何Telegram/provider调用前拒绝启动，并列出requested与supported值。main bot、`compaction_model`及启用的vision模型执行同一检查。请在Pi `/model`查看可选档位；例如`deepseek-v4-flash`只接受`off`、`high`、`max`。
 

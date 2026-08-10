@@ -21,7 +21,9 @@ daemon 的 runtime snapshot 是 provider/model、**实际生效 reasoning effort
 `llm_runs` 每行是一条成功返回 usage 的 provider response。保留期由配置控制，默认 90 天；文案中的“累计”或“lifetime”只表示当前 SQLite 保留行，不表示永久历史。
 
 - **最近请求（latest）**：该 bot 最新一条 `compaction = 0` 的主对话 response。它提供当前上下文、epoch、miss/read/write、output、reasoning、latency 与单次费用。compaction 的辅助模型调用不能冒充当前主对话上下文。
-- **保留期累计（lifetime）**：该 bot 当前保留的全部 `llm_runs`，包括主对话与 compaction provider response。它提供 runs、起始时间、prompt/output/cache/reasoning、费用与平均 latency。
+- **保留期累计（lifetime）**：该 bot 当前保留的全部 `llm_runs`，包括主对话与 compaction provider response，也包括切换 provider/model 前的历史行。它提供 runs、起始时间、prompt/output/cache/reasoning、费用与平均 latency。
+
+每行 `cost` 在 response 到达时由 Pi 按该行实际 `provider/model` 的当时 catalog 费率计算并固化。累计费用只做 `SUM(cost)`：切换模型后，新 run 使用新模型费率，DeepSeek 等旧 run 保留原费用；catalog 或价格以后变化也不得用当前费率回算历史。订阅型 provider 若只提供等价按量估价，界面显示的是估算成本，不伪装成实际账单。
 
 新增 response 必须同时更新 SQLite 与 live IPC totals；snapshot/push 通过 `llm_runs.id` 去重。compaction usage 参与累计，但不替换 latest 主对话请求。
 
@@ -38,7 +40,7 @@ daemon 的 runtime snapshot 是 provider/model、**实际生效 reasoning effort
 | 当前上下文 | `context` | latest 主对话 `context_tokens / model.contextWindow` | 同时显示 tokens、window 与一位小数百分比；不是 lifetime prompt 总和 |
 | Reasoning | `reasoning` | `reasoning_tokens` | latest 取单行；lifetime 求和 |
 | Latency | `latency` / `avg` | `latency_ms` / `SUM(latency_ms) ÷ COUNT(latency_ms)` | 缺失样本显示 `—` |
-| Cost | `$` | `cost` | latest 取单行；lifetime 求和 |
+| Cost | `$` | `cost` | latest 取单行；lifetime 跨 provider/model 求和 |
 
 `context_tokens` 是发送给 provider 的 prompt tokens，即 `↑ + R + W`；`output_tokens` 单列。因此“当前上下文 16,000 / 128,000”与“累计 prompt 1,600,000”可以同时成立，二者不可互换。
 
@@ -61,13 +63,13 @@ attached feed 的 footer 与 Pi 原生 `FooterComponent` 同为三层：第一�
 
 ## 格式与边界
 
-- Telegram `/status` 的整数和费用整数部分使用英文逗号千位分隔；百分比固定一位小数。
+- Telegram `/status`、Pi `/tg status` 与 attached footer 的费用使用同一 formatter：至少 4 位、至多 6 位小数，费用整数部分使用英文逗号千位分隔；百分比固定一位小数。
 - Pi `/tg status` 与 Telegram `/status` 的详细整数统一使用英文逗号千位分隔。
 - Telegram 富消息仍受 3500 字上限；只能按完整 bot 小节省略，不能在 Markdown 中间截断。
 - 格式化和查看 telemetry 不调用 provider，不改变 session、context epoch 或 cache-visible payload。
 
 ## 验证与更新触发条件
 
-测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、当前 context 使用 latest/window 而非 lifetime sum、attached footer 保持 Pi 的三层信息顺序与 model 右对齐，以及两个详细状态投影拥有完全相同的字段 key/顺序。
+测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、模型切换前后的 immutable per-run cost 跨 provider/model 累加、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、当前 context 使用 latest/window 而非 lifetime sum、三个界面共享费用精度、attached footer 保持 Pi 的三层信息顺序与 model 右对齐，以及两个详细状态投影拥有完全相同的字段 key/顺序。
 
 修改 `llm_runs` 字段、IPC `UsageRun` / `BotStats`、`/tg status` 或 Telegram `/status` 时必须同步本文。该模块的 Cache impact 为 **NONE**：它只读取既有 telemetry 并生成 UI/control side-channel。

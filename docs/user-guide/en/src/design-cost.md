@@ -50,7 +50,7 @@ Opening Pi, scrolling history, or viewing usage therefore does not create a chat
 
 ## Evaluate your deployment
 
-1. Use `/tg status [bot]` or Telegram `/status` under the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md) to record runs, current context/window, prompt miss/read/write, output, reasoning, latency, and cost; “lifetime” means the configured SQLite retention window.
+1. Use `/tg status [bot]` or Telegram `/status` under the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md) to record runs, current context/window, prompt miss/read/write, output, reasoning, latency, and cost; “lifetime” means the configured SQLite retention window. Each run freezes cost under its actual provider/model rate at response time, so totals after a model switch retain old-model cost and add new-model cost; subscription providers may expose only an equivalent pay-as-you-go estimate.
 2. Compare similar activity periods; do not mix providers, personas, or group sizes in one conclusion.
 3. Base compaction-threshold changes on `bun run debug` and `llm_runs` telemetry context data; do not tune by intuition.
 4. Before changing prompts, tools, or serialization, follow the cache process in the [development guide](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/engineering/development-guide.md).

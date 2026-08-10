@@ -27,7 +27,7 @@ import type {
 	TimelineItem,
 } from "../../src/ipc.ts";
 import { runNativeConfigWizard, type PiModelPreflight } from "../../src/onboarding/config-wizard.ts";
-import { buildBotStatusView, renderBotStatusPlain } from "../../src/observability/status.ts";
+import { buildBotStatusView, formatUsdCost, renderBotStatusPlain } from "../../src/observability/status.ts";
 import { summarizeBotUsage } from "../../src/observability/usage.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
@@ -644,7 +644,7 @@ export function telegramFooterLines(width: number, theme: Pick<Theme, "fg">, vie
 		if ((usage.cacheRead > 0 || usage.cacheWrite > 0) && usage.cacheHitPercent != null) {
 			parts.push(`CH${usage.cacheHitPercent.toFixed(1)}%`);
 		}
-		if (usage.cost) parts.push(`$${usage.cost.toFixed(3)}`);
+		if (usage.cost) parts.push(`$${formatUsdCost(usage.cost)}`);
 
 		const context = `${usage.contextPercent == null ? "?" : `${usage.contextPercent.toFixed(1)}%`}/${footerTokens(
 			usage.contextWindow,

@@ -1,4 +1,9 @@
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import {
+	createAgentSessionServices,
+	getAgentDir,
+	type ModelRuntime,
+	SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import {
 	clampThinkingLevel,
 	getSupportedThinkingLevels,
@@ -98,14 +103,46 @@ export async function configureBotModelRuntime<T extends ConfigurableModelRuntim
 	return runtime;
 }
 
+/**
+ * Build the daemon's shared model runtime through Pi's resource loader so user-installed
+ * provider extensions participate in the same catalog/auth/cost contract as interactive Pi.
+ * Project extensions stay excluded: bot sessions own a fixed cache-visible extension set.
+ */
+export async function createInstalledPiModelRuntime(
+	options: { cwd?: string; agentDir?: string } = {},
+): Promise<ModelRuntime> {
+	const cwd = options.cwd ?? process.cwd();
+	const agentDir = options.agentDir ?? getAgentDir();
+	const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
+	const services = await createAgentSessionServices({
+		cwd,
+		agentDir,
+		settingsManager,
+		resourceLoaderOptions: {
+			noSkills: true,
+			noPromptTemplates: true,
+			noThemes: true,
+			noContextFiles: true,
+		},
+	});
+	return services.modelRuntime;
+}
+
 /** Create exactly one Pi-owned runtime and preflight every configured bot before Telegram starts. */
 export async function createSharedModelRuntime(
 	bots: readonly PiModelSelection[],
-	create: () => Promise<ModelRuntime> = () => ModelRuntime.create(),
+	create: () => Promise<ModelRuntime> = () => createInstalledPiModelRuntime(),
 ): Promise<ModelRuntime> {
 	let runtime: ModelRuntime;
 	try {
 		runtime = await create();
+		const registered = new Set(runtime.getRegisteredProviderIds());
+		const selectedExtensionProviders = [...new Set(bots.map((bot) => bot.provider))].filter((provider) =>
+			registered.has(provider),
+		);
+		if (selectedExtensionProviders.length > 0) {
+			await runtime.refresh({ allowNetwork: true, providers: selectedExtensionProviders });
+		}
 	} catch {
 		throw new PiModelConfigurationError("runtime_unavailable", "<startup>", "<startup>");
 	}

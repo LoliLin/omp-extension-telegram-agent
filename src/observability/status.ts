@@ -4,8 +4,13 @@ import { summarizeBotUsage, type BotUsageSummary } from "./usage.ts";
 const INTEGER_FORMAT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const COST_FORMAT = new Intl.NumberFormat("en-US", {
 	minimumFractionDigits: 4,
-	maximumFractionDigits: 4,
+	maximumFractionDigits: 6,
 });
+
+/** Stable USD estimate formatting shared by Telegram status, Pi status, and the attached footer. */
+export function formatUsdCost(value: number): string {
+	return COST_FORMAT.format(value);
+}
 
 export interface BotStatusIdentity {
 	id: string;
@@ -86,7 +91,7 @@ export function botStatusFields(view: BotStatusView): BotStatusField[] {
 		context_current: { label: "当前上下文", value: formatContext(view.usage.context) },
 		latest_request: {
 			label: "最近请求",
-			value: last ? `${time(last.ts)} · ${duration(last.latencyMs)} · $${cost(last.cost)}` : "—",
+			value: last ? `${time(last.ts)} · ${duration(last.latencyMs)} · $${formatUsdCost(last.cost)}` : "—",
 		},
 		latest_usage: {
 			label: "最近用量",
@@ -104,7 +109,7 @@ export function botStatusFields(view: BotStatusView): BotStatusField[] {
 		},
 		cache_and_cost: {
 			label: "缓存与费用",
-			value: `CH ${percent(view.usage.cacheHitPercent)} · $${cost(view.stats.cost)}`,
+			value: `CH ${percent(view.usage.cacheHitPercent)} · $${formatUsdCost(view.stats.cost)}`,
 		},
 		routing: {
 			label: "路由",
@@ -126,10 +131,6 @@ export function renderBotStatusPlain(view: BotStatusView): string {
 
 function integer(value: number): string {
 	return INTEGER_FORMAT.format(value);
-}
-
-function cost(value: number): string {
-	return COST_FORMAT.format(value);
 }
 
 function percent(value: number | null): string {
