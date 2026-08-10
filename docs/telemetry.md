@@ -27,13 +27,15 @@ daemon 的 runtime snapshot 是 provider/model、**实际生效 reasoning effort
 
 新增 response 必须同时更新 SQLite 与 live IPC totals；snapshot/push 通过 `llm_runs.id` 去重。compaction usage 参与累计，但不替换 latest 主对话请求。
 
+`cache_read`、`cache_write` 与 `cache_miss` 永远保留 provider/Pi 返回的原始值。若 provider 没有暴露 cache usage，主对话 run 可另存 nullable `cache_read_estimated`：它只表示两次相邻 raw chat payload 的严格前缀可复用量，不回写或伪装成 provider 原始 usage。
+
 ## 字段与公式
 
 | 展示 | 符号 | 权威值 / 公式 | 说明 |
 | --- | --- | --- | --- |
-| Prompt miss | `↑` | `cache_miss` | provider 报告的非 cache prompt input |
+| Prompt miss | `↑` | 有估算时 `context_tokens - cache_read_estimated - cache_write`，否则 `cache_miss` | provider 原值或本地结构估算；估算显示 `≈` |
 | Output | `↓` | `output_tokens` | provider output；不计入当前 prompt context |
-| Cache read | `R` | `cache_read` | 从 provider cache 读取的 prompt tokens |
+| Cache read | `R` | `COALESCE(cache_read_estimated, cache_read)` | provider cache read；本地结构估算显示 `≈` |
 | Cache write | `W` | `cache_write` | 本次写入 provider cache、但未命中的 prompt tokens |
 | Cache hit | `CH` | `R / (↑ + R + W) × 100%` | 显示一位小数；只有 `R > 0` 或 `W > 0` 时有 cache 样本，否则显示 `—` |
 | Prompt total | `prompt` | `↑ + R + W` | lifetime 中等于 `SUM(context_tokens)` |
@@ -43,6 +45,10 @@ daemon 的 runtime snapshot 是 provider/model、**实际生效 reasoning effort
 | Cost | `$` | `cost` | latest 取单行；lifetime 跨 provider/model 求和 |
 
 `context_tokens` 是发送给 provider 的 prompt tokens，即 `↑ + R + W`；`output_tokens` 单列。因此“当前上下文 16,000 / 128,000”与“累计 prompt 1,600,000”可以同时成立，二者不可互换。
+
+本地 fallback 仅在以下条件全部成立时启用：当前 provider 原始 `cache_read = 0` 且 `cache_write = 0`、cache retention 不是 `none`；上一条主对话 run 与当前 run 的 bot/provider/api/model/epoch/session/cache retention 相同；两次 raw payload 的 system 与 tools HMAC 相同，上一条完整 message HMAC 列表是当前列表的逐项严格前缀；且当前 `context_tokens` 不小于上一条。此时 `cache_read_estimated = previous.context_tokens`。首次请求、任一旧 message 被改写、模型或 session/epoch 切换、compaction、无缓存策略以及 provider 已报告 read/write 时都不估算。旧库 migration 对保留行使用完全相同的相邻双 payload 规则回填。
+
+`≈` 表示“按 raw payload 结构推导的理论可复用前缀”，不是 provider 实际命中或账单证明。费用仍使用 response 到达时固化的原始 provider usage/catalog 估价，绝不按本地估算重算。这样既能在 Ollama-compatible API 不返回 cache token 细项时显示趋势，也不会污染原始取证数据。
 
 若没有 latest 主对话请求，当前上下文显示 `— / <window>`；若模型目录也没有有效 `contextWindow`，window 与百分比均显示 `—`。上下文上限 MUST 来自 Pi `ModelRuntime` / model registry 的已解析模型，不在 Telegram 配置中复制第二份常量。
 
@@ -70,6 +76,6 @@ attached feed 的 footer 与 Pi 原生 `FooterComponent` 保持相同信息顺�
 
 ## 验证与更新触发条件
 
-测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、模型切换前后的 immutable per-run cost 跨 provider/model 累加、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、当前 context 使用 latest/window 而非 lifetime sum、三个界面共享费用精度、attached footer 保持 Pi 的信息顺序与 model 右对齐、compose guidance 留在单行 feed header，以及两个详细状态投影拥有完全相同的字段 key/顺序。
+测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、模型切换前后的 immutable per-run cost 跨 provider/model 累加、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、严格双 payload 前缀才产生本地 cache estimate、原始 cache/cost 不被估算改写、估算值在三个界面均显示 `≈`、当前 context 使用 latest/window 而非 lifetime sum、三个界面共享费用精度、attached footer 保持 Pi 的信息顺序与 model 右对齐、compose guidance 留在单行 feed header，以及两个详细状态投影拥有完全相同的字段 key/顺序。
 
 修改 `llm_runs` 字段、IPC `UsageRun` / `BotStats`、`/tg status` 或 Telegram `/status` 时必须同步本文。该模块的 Cache impact 为 **NONE**：它只读取既有 telemetry 并生成 UI/control side-channel。

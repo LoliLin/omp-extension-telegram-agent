@@ -11,6 +11,36 @@ export interface ProviderPayloadObservation {
 	firstDivergentByteOffset: number | null;
 }
 
+export interface PreviousProviderPayloadFingerprint {
+	systemHash: string;
+	toolsHash: string;
+	messageHashes: readonly string[];
+	contextTokens: number;
+}
+
+/** Potential provider reuse when the previous raw prompt is an exact prefix of the current one. */
+export function estimateCacheReadFromPrefix(
+	current: ProviderPayloadObservation,
+	previous: PreviousProviderPayloadFingerprint,
+	currentContextTokens: number,
+): number | null {
+	if (
+		!Number.isSafeInteger(previous.contextTokens) ||
+		previous.contextTokens <= 0 ||
+		!Number.isSafeInteger(currentContextTokens) ||
+		currentContextTokens < previous.contextTokens ||
+		current.systemHash !== previous.systemHash ||
+		current.toolsHash !== previous.toolsHash ||
+		previous.messageHashes.length > current.messageHashes.length
+	) {
+		return null;
+	}
+	for (let index = 0; index < previous.messageHashes.length; index++) {
+		if (previous.messageHashes[index] !== current.messageHashes[index]) return null;
+	}
+	return previous.contextTokens;
+}
+
 const PAYLOAD_SNAPSHOT = Symbol("payload-snapshot");
 
 interface PayloadSnapshot {

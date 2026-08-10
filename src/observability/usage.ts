@@ -10,6 +10,7 @@ export interface BotUsageSummary {
 	cacheWrite: number;
 	reasoningTokens: number;
 	cacheHitPercent: number | null;
+	cacheEstimated: boolean;
 	averageLatencyMs: number | null;
 	context: UsageContextSummary;
 }
@@ -31,6 +32,7 @@ export function summarizeBotUsage(stats: BotStats, contextWindow: number): BotUs
 	const hasCacheSample = stats.cacheRead > 0 || cacheWrite > 0;
 	return {
 		cacheWrite,
+		cacheEstimated: (stats.estimatedCacheRuns ?? 0) > 0,
 		reasoningTokens: stats.reasoningTokens ?? 0,
 		cacheHitPercent: hasCacheSample && cacheDenominator > 0 ? (stats.cacheRead / cacheDenominator) * 100 : null,
 		averageLatencyMs:

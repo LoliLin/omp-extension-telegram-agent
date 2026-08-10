@@ -547,6 +547,7 @@ export interface TelegramFooterUsage {
 	cacheRead: number;
 	cacheWrite: number;
 	cacheHitPercent: number | null;
+	cacheEstimated: boolean;
 	cost: number;
 	contextPercent: number | null;
 	contextWindow: number;
@@ -576,6 +577,7 @@ export function telegramFooterUsage(
 		cacheRead: 0,
 		cacheWrite: 0,
 		cacheMiss: 0,
+		estimatedCacheRuns: 0,
 		outputTokens: 0,
 		cost: 0,
 		epoch: 0,
@@ -588,6 +590,7 @@ export function telegramFooterUsage(
 		totals.cacheRead += stats.cacheRead;
 		totals.cacheWrite = (totals.cacheWrite ?? 0) + (stats.cacheWrite ?? 0);
 		totals.cacheMiss += stats.cacheMiss;
+		totals.estimatedCacheRuns = (totals.estimatedCacheRuns ?? 0) + (stats.estimatedCacheRuns ?? 0);
 		totals.outputTokens += stats.outputTokens;
 		totals.cost += stats.cost;
 		if (
@@ -612,6 +615,7 @@ export function telegramFooterUsage(
 		cacheRead: totals.cacheRead,
 		cacheWrite: usage.cacheWrite,
 		cacheHitPercent: usage.cacheHitPercent,
+		cacheEstimated: usage.cacheEstimated,
 		cost: totals.cost,
 		contextPercent: usage.context.percent,
 		contextWindow: usage.context.contextWindow,
@@ -659,12 +663,13 @@ export function telegramFooterLines(width: number, theme: Pick<Theme, "fg">, vie
 	if (view.usage) {
 		const usage = view.usage;
 		const parts: string[] = [];
-		if (usage.inputTokens) parts.push(`↑${footerTokens(usage.inputTokens)}`);
+		const cacheApprox = usage.cacheEstimated ? "≈" : "";
+		if (usage.inputTokens) parts.push(`↑${cacheApprox}${footerTokens(usage.inputTokens)}`);
 		if (usage.outputTokens) parts.push(`↓${footerTokens(usage.outputTokens)}`);
-		if (usage.cacheRead) parts.push(`R${footerTokens(usage.cacheRead)}`);
+		if (usage.cacheRead) parts.push(`R${cacheApprox}${footerTokens(usage.cacheRead)}`);
 		if (usage.cacheWrite) parts.push(`W${footerTokens(usage.cacheWrite)}`);
 		if ((usage.cacheRead > 0 || usage.cacheWrite > 0) && usage.cacheHitPercent != null) {
-			parts.push(`CH${usage.cacheHitPercent.toFixed(1)}%`);
+			parts.push(`CH${cacheApprox}${usage.cacheHitPercent.toFixed(1)}%`);
 		}
 		if (usage.cost) parts.push(`$${formatUsdCost(usage.cost)}`);
 

@@ -418,6 +418,7 @@ export class TimelineClient implements TimelinePort {
 			const merged: BotStats = {
 				...baseline,
 				cacheWrite: baseline.cacheWrite ?? 0,
+				estimatedCacheRuns: baseline.estimatedCacheRuns ?? 0,
 				reasoningTokens: baseline.reasoningTokens ?? 0,
 				totalLatencyMs: baseline.totalLatencyMs ?? 0,
 				latencySamples: baseline.latencySamples ?? 0,
@@ -428,6 +429,7 @@ export class TimelineClient implements TimelinePort {
 				merged.contextTokens += run.contextTokens;
 				merged.cacheRead += run.cacheRead;
 				merged.cacheWrite! += run.cacheWrite ?? 0;
+				if (run.cacheEstimated) merged.estimatedCacheRuns!++;
 				merged.cacheMiss += run.cacheMiss;
 				merged.outputTokens += run.outputTokens;
 				merged.reasoningTokens! += run.reasoningTokens ?? 0;

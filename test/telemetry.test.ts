@@ -47,14 +47,15 @@ function insertRun(
 		latency: number | null;
 		cost: number;
 		compaction: boolean;
+		estimatedRead?: number | null;
 	},
 ): number {
 	const result = db
 		.query(
 			`INSERT INTO llm_runs
 			 (bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
-			  output_tokens, reasoning_tokens, latency_ms, cost, compaction)
-			 VALUES ('A', ?, ?, 3, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			  output_tokens, reasoning_tokens, latency_ms, cost, compaction, cache_read_estimated)
+			 VALUES ('A', ?, ?, 3, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.run(
 			input.ts,
@@ -68,6 +69,7 @@ function insertRun(
 			input.latency,
 			input.cost,
 			input.compaction ? 1 : 0,
+			input.estimatedRead ?? null,
 		);
 	return Number(result.lastInsertRowid);
 }
@@ -249,6 +251,7 @@ describe("unified usage telemetry", () => {
 				latency: 7_500,
 				cost: 0.033_866_2,
 				compaction: false,
+				estimatedRead: 7_600,
 			});
 
 			const stats = loadBotStats(db, "A");
@@ -296,7 +299,18 @@ describe("unified usage telemetry", () => {
 
 			expect(stats.cost).toBeCloseTo(0.754_844_03, 10);
 			expect(stats.last?.model).toBe("glm-5.2");
-			expect(status).toContain("cache_and_cost=CH 7.7% · $0.754844");
+			expect(stats.last?.cacheEstimated).toBe(true);
+			expect(stats.estimatedCacheRuns).toBe(1);
+			expect(
+				db
+					.query("SELECT cache_read, cache_read_estimated, cache_miss, cost FROM llm_runs ORDER BY id DESC LIMIT 1")
+					.get(),
+			).toEqual({ cache_read: 0, cache_read_estimated: 7_600, cache_miss: 8_076, cost: 0.033_866_2 });
+			expect(status).toContain("latest_usage=↑miss ≈476 · ↓output 66 · R ≈7,600");
+			expect(status).toContain("cache_and_cost=CH ≈91.4% · $0.754844");
+			expect(footer[1]).toContain("↑≈776");
+			expect(footer[1]).toContain("R≈8.3k");
+			expect(footer[1]).toContain("CH≈91.4%");
 			expect(footer[1]).toContain("$0.754844");
 		} finally {
 			db.close();

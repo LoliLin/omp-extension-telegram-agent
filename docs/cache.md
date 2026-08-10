@@ -123,6 +123,8 @@ Vision 默认关闭；只有显式 `vision.enabled: true` 才会执行。`auxili
 
 每次 provider response 还记录 provider/api/model/session hash/cache retention、epoch、context/input/cache read/cache write/output/reasoning/latency/cost、trigger、public send、vision/tool rounds，以及 input event/token estimate/rows scanned。保留期默认 90 天，因此 UI 的 lifetime 表示**当前 SQLite 保留窗口**，不是永久累计。
 
+若 provider/Pi 返回的 cache read/write 都为 0，telemetry 可对同 cohort 的相邻两次 raw chat payload 做本地严格前缀估算：system/tools 必须相同，前一次完整 message hash 列表必须逐项等于后一次前缀，且 bot/provider/api/model/epoch/session/cache retention 均不变。估算单独写入 `cache_read_estimated`，原始 usage/cost 不改写，UI 用 `≈` 标出；它证明理论可复用结构，不证明 provider 实际命中。该 observer-side 计算不改变 provider payload、cache identity 或 `CACHE_SCHEMA_VERSION`，也不增加 LLM call/token；完整口径见 `docs/telemetry.md`。
+
 2026-08-07 的 50-run DeepSeek 数据按当前统一公式 `R / (↑ + R + W)`（该样本 `W=0`）测得 90.0% cache hit。该数字仅是历史 deployment 样本，不代表当前 schema 版本、其他模型或未来负载；完整字段口径见 `docs/telemetry.md`。
 
 ## Golden

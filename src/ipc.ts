@@ -68,6 +68,8 @@ export interface UsageRun {
 	/** Additive in REQ-UI-0009; absent from old daemons. */
 	cacheWrite?: number;
 	cacheMiss: number;
+	/** True when cacheRead/cacheMiss are a local structural prefix estimate. */
+	cacheEstimated?: boolean;
 	outputTokens: number;
 	/** Additive detail fields; absent from old daemons. */
 	reasoningTokens?: number;
@@ -85,6 +87,8 @@ export interface BotStats {
 	/** Lifetime cache-write total; absent from old daemons. */
 	cacheWrite?: number;
 	cacheMiss: number;
+	/** Number of retained runs using local structural cache estimates. */
+	estimatedCacheRuns?: number;
 	outputTokens: number;
 	/** Lifetime detail totals; absent from old daemons. */
 	reasoningTokens?: number;

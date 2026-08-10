@@ -19,6 +19,7 @@ import {
 	NO_SEND_MARKER,
 	TELEGRAM_EXTENSION_ORDER,
 	applyAssistantPersistencePolicy,
+	estimateCacheReadFromPrefix,
 	observeProviderPayload,
 	projectTelegramContext,
 } from "../src/agent/extensions/index.ts";
@@ -190,6 +191,82 @@ describe("Pi context protocol", () => {
 		expect(changed.firstDivergentMessageIndex).toBe(0);
 		expect(changed.firstDivergentByteOffset).toBeGreaterThan(0);
 		expect(JSON.stringify(changed)).not.toContain("changed");
+	});
+
+	test("estimates cache reuse only for an exact observed payload prefix", () => {
+		const first = observeProviderPayload(
+			{
+				model: "m",
+				tools: [{ name: "send", parameters: { type: "object" } }],
+				messages: [
+					{ role: "system", content: "protocol" },
+					{ role: "user", content: "hello" },
+				],
+			},
+			"local-hmac-key",
+		);
+		const appended = observeProviderPayload(
+			{
+				model: "m",
+				tools: [{ name: "send", parameters: { type: "object" } }],
+				messages: [
+					{ role: "system", content: "protocol" },
+					{ role: "user", content: "hello" },
+					{ role: "assistant", content: "hi" },
+				],
+			},
+			"local-hmac-key",
+			first,
+		);
+		const rewritten = observeProviderPayload(
+			{
+				model: "m",
+				tools: [{ name: "send", parameters: { type: "object" } }],
+				messages: [
+					{ role: "system", content: "protocol" },
+					{ role: "user", content: "changed" },
+				],
+			},
+			"local-hmac-key",
+			appended,
+		);
+
+		expect(
+			estimateCacheReadFromPrefix(
+				appended,
+				{
+					systemHash: first.systemHash,
+					toolsHash: first.toolsHash,
+					messageHashes: first.messageHashes,
+					contextTokens: 70_820,
+				},
+				71_354,
+			),
+		).toBe(70_820);
+		expect(
+			estimateCacheReadFromPrefix(
+				rewritten,
+				{
+					systemHash: appended.systemHash,
+					toolsHash: appended.toolsHash,
+					messageHashes: appended.messageHashes,
+					contextTokens: 71_354,
+				},
+				72_000,
+			),
+		).toBeNull();
+		expect(
+			estimateCacheReadFromPrefix(
+				appended,
+				{
+					systemHash: first.systemHash,
+					toolsHash: first.toolsHash,
+					messageHashes: first.messageHashes,
+					contextTokens: 80_000,
+				},
+				71_354,
+			),
+		).toBeNull();
 	});
 
 	test("structured Telegram entries project without parsing their display text", () => {

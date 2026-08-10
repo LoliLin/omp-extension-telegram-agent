@@ -50,7 +50,7 @@ Pi native feed、assistant partial、feed status widget、`/tg status`和Telegra
 
 ## 如何评估自己的 deployment
 
-1. 用`/tg status [bot]`或Telegram `/status`按[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)记录runs、当前context/window、prompt miss/read/write、output、reasoning、latency与cost；“lifetime”只表示配置的SQLite保留窗口。每个run按当时实际provider/model费率固化cost，切换模型后的累计值会保留旧模型费用并加上新模型费用；订阅provider的值可能只是等价按量估算。
+1. 用`/tg status [bot]`或Telegram `/status`按[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)记录runs、当前context/window、prompt miss/read/write、output、reasoning、latency与cost；“lifetime”只表示配置的SQLite保留窗口。`≈` 表示 provider 未返回 cache token 细项时的本地严格前缀估算，不证明 provider 实际命中。每个run仍按原始 provider usage 与当时实际provider/model费率固化cost，本地估算不回算费用；切换模型后的累计值会保留旧模型费用并加上新模型费用，订阅provider的值可能只是等价按量估算。
 2. 比较同类活跃期，不把不同provider/persona/群规模混为一组。
 3. 调整compaction阈值时用`bun run debug`与`llm_runs`遥测的context数据做依据；不要凭感觉改。
 4. 任何prompt/tool/serialization改动先按[开发指南的cache流程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/engineering/development-guide.md)验证golden和epoch。

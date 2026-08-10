@@ -41,6 +41,7 @@ function migrate(db: Database): void {
 		db.exec("ALTER TABLE llm_runs ADD COLUMN cache_write INTEGER NOT NULL DEFAULT 0");
 	}
 	const runMigrations: ReadonlyArray<readonly [string, string]> = [
+		["cache_read_estimated", "INTEGER"],
 		["provider", "TEXT"],
 		["api", "TEXT"],
 		["session_id_hash", "TEXT"],
@@ -57,10 +58,60 @@ function migrate(db: Database): void {
 		["input_tokens_estimated", "INTEGER NOT NULL DEFAULT 0"],
 		["rows_scanned", "INTEGER NOT NULL DEFAULT 0"],
 	];
+	let addedCacheEstimate = false;
 	for (const [column, sqlType] of runMigrations) {
-		if (!runCols.includes(column)) db.exec(`ALTER TABLE llm_runs ADD COLUMN ${column} ${sqlType}`);
+		if (!runCols.includes(column)) {
+			db.exec(`ALTER TABLE llm_runs ADD COLUMN ${column} ${sqlType}`);
+			if (column === "cache_read_estimated") addedCacheEstimate = true;
+		}
 	}
+	if (addedCacheEstimate) backfillCacheReadEstimates(db);
 	backfillMessageEvents(db);
+}
+
+/** One-time structural estimate for retained runs whose provider omitted cache usage. */
+function backfillCacheReadEstimates(db: Database): void {
+	db.exec(`
+		WITH ordered AS (
+			SELECT id, context_tokens, cache_read, cache_write, cache_retention,
+			       system_hash, tools_hash, messages_hash,
+			       LAG(context_tokens) OVER cohort AS previous_context_tokens,
+			       LAG(system_hash) OVER cohort AS previous_system_hash,
+			       LAG(tools_hash) OVER cohort AS previous_tools_hash,
+			       LAG(messages_hash) OVER cohort AS previous_messages_hash
+			  FROM llm_runs
+			 WHERE compaction = 0
+			   AND provider IS NOT NULL
+			   AND api IS NOT NULL
+			   AND session_id_hash IS NOT NULL
+			   AND json_valid(messages_hash)
+			 WINDOW cohort AS (
+				PARTITION BY bot_id, provider, api, model, epoch, session_id_hash, cache_retention
+				ORDER BY id
+			 )
+		), candidates AS (
+			SELECT id, previous_context_tokens
+			  FROM ordered
+			 WHERE cache_read = 0
+			   AND cache_write = 0
+			   AND cache_retention <> 'none'
+			   AND previous_context_tokens > 0
+			   AND context_tokens >= previous_context_tokens
+			   AND system_hash = previous_system_hash
+			   AND tools_hash = previous_tools_hash
+			   AND json_array_length(previous_messages_hash) <= json_array_length(messages_hash)
+			   AND NOT EXISTS (
+				SELECT 1
+				  FROM json_each(previous_messages_hash) AS previous_message
+				 WHERE json_extract(messages_hash, '$[' || previous_message.key || ']') IS NOT previous_message.value
+			   )
+		)
+		UPDATE llm_runs
+		   SET cache_read_estimated = (
+			SELECT previous_context_tokens FROM candidates WHERE candidates.id = llm_runs.id
+		   )
+		 WHERE id IN (SELECT id FROM candidates)
+	`);
 }
 
 const MESSAGE_EVENT_BACKFILL_KEY = "message_events_backfill_max_seq";

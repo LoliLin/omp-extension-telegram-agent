@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS llm_runs (
 	context_tokens INTEGER,
 	cache_read INTEGER,
 	cache_write INTEGER NOT NULL DEFAULT 0,
+	cache_read_estimated INTEGER, -- local strict-prefix estimate; cache_read remains provider-raw
 	cache_miss INTEGER,
 	output_tokens INTEGER,
 	reasoning_tokens INTEGER,

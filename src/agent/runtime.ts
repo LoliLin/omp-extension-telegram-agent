@@ -92,6 +92,7 @@ import {
 } from "../db/message-events.ts";
 import { availableSuffixBudget, estimateProviderTokensUpperBound, packMessageEvents } from "./token-packer.ts";
 import {
+	estimateCacheReadFromPrefix,
 	makeAssistantPersistencePolicyExtension,
 	makeCachePayloadObserverExtension,
 	makeTelegramCompactionExtension,
@@ -149,6 +150,16 @@ interface SendFailure {
 function rawTelegramMessageId(raw: Record<string, unknown>): number | null {
 	const id = raw.message_id;
 	return typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function parseStoredMessageHashes(value: string | null): string[] | null {
+	if (!value) return null;
+	try {
+		const parsed = JSON.parse(value);
+		return Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string") ? parsed : null;
+	} catch {
+		return null;
+	}
 }
 
 export class BotRuntime {
@@ -1440,17 +1451,69 @@ export class BotRuntime {
 		const observation = this.pendingPayloadObservations.shift();
 		const metrics = this.pendingInputMetrics;
 		const sessionIdHash = this.session ? sha256(`${this.telemetryHmacKey}:${this.session.sessionId}`) : null;
+		const previous =
+			usage.cacheRead === 0 &&
+			usage.cacheWrite === 0 &&
+			this.bot.cacheRetention !== "none" &&
+			observation &&
+			sessionIdHash
+				? (this.db
+						.query(`
+					SELECT context_tokens contextTokens, system_hash systemHash,
+					       tools_hash toolsHash, messages_hash messagesHash
+					  FROM llm_runs
+					 WHERE bot_id = ? AND compaction = 0 AND provider = ? AND api = ?
+					   AND model = ? AND epoch = ? AND session_id_hash = ? AND cache_retention = ?
+					 ORDER BY id DESC LIMIT 1
+				`)
+						.get(
+							this.bot.id,
+							this.bot.provider,
+							this.model.api,
+							this.bot.model,
+							this.epoch,
+							sessionIdHash,
+							this.bot.cacheRetention,
+						) as {
+						contextTokens: number | null;
+						systemHash: string | null;
+						toolsHash: string | null;
+						messagesHash: string | null;
+					} | null)
+				: null;
+		const previousMessageHashes = parseStoredMessageHashes(previous?.messagesHash ?? null);
+		const cacheReadEstimated =
+			observation &&
+			previous &&
+			typeof previous.contextTokens === "number" &&
+			previous.systemHash &&
+			previous.toolsHash &&
+			previousMessageHashes
+				? estimateCacheReadFromPrefix(
+						observation,
+						{
+							systemHash: previous.systemHash,
+							toolsHash: previous.toolsHash,
+							messageHashes: previousMessageHashes,
+							contextTokens: previous.contextTokens,
+						},
+						contextTokens,
+					)
+				: null;
+		const effectiveCacheRead = cacheReadEstimated ?? usage.cacheRead;
+		const effectiveCacheMiss = cacheReadEstimated == null ? usage.input : contextTokens - cacheReadEstimated;
 		const res = this.db
 			.query(
 				`INSERT INTO llm_runs (
-					bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
+					bot_id, ts, model, epoch, context_tokens, cache_read, cache_write,
+					cache_read_estimated, cache_miss,
 					output_tokens, reasoning_tokens, latency_ms, cost, compaction,
 					system_hash, tools_hash, messages_hash, provider, api, session_id_hash,
 					cache_retention, full_payload_hash, first_divergent_segment,
 					first_divergent_message_index, first_divergent_byte_offset, trigger_message_id,
 					public_send_count, vision_calls, tool_followup_rounds, input_events,
 					input_tokens_estimated, rows_scanned
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				this.bot.id,
@@ -1460,6 +1523,7 @@ export class BotRuntime {
 				contextTokens,
 				usage.cacheRead,
 				usage.cacheWrite,
+				cacheReadEstimated,
 				usage.input,
 				usage.output,
 				reasoningTokens,
@@ -1492,9 +1556,10 @@ export class BotRuntime {
 			model: this.bot.model,
 			epoch: this.epoch,
 			contextTokens,
-			cacheRead: usage.cacheRead,
+			cacheRead: effectiveCacheRead,
 			cacheWrite: usage.cacheWrite,
-			cacheMiss: usage.input,
+			cacheMiss: effectiveCacheMiss,
+			cacheEstimated: cacheReadEstimated != null,
 			outputTokens: usage.output,
 			reasoningTokens,
 			latencyMs,

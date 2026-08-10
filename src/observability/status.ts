@@ -82,6 +82,8 @@ export function buildBotStatusView(
 
 export function botStatusFields(view: BotStatusView): BotStatusField[] {
 	const last = view.stats.last;
+	const latestApprox = last?.cacheEstimated ? "≈" : "";
+	const lifetimeApprox = view.usage.cacheEstimated ? "≈" : "";
 	const fields: Record<BotStatusFieldKey, Omit<BotStatusField, "key">> = {
 		state: { label: "状态", value: `${statusIcon(view.state)} ${statusLabel(view.state)}` },
 		model: {
@@ -96,7 +98,7 @@ export function botStatusFields(view: BotStatusView): BotStatusField[] {
 		latest_usage: {
 			label: "最近用量",
 			value: last
-				? `↑miss ${integer(last.cacheMiss)} · ↓output ${integer(last.outputTokens)} · R ${integer(last.cacheRead)} · W ${integer(last.cacheWrite ?? 0)} · reasoning ${integer(last.reasoningTokens ?? 0)}`
+				? `↑miss ${latestApprox}${integer(last.cacheMiss)} · ↓output ${integer(last.outputTokens)} · R ${latestApprox}${integer(last.cacheRead)} · W ${integer(last.cacheWrite ?? 0)} · reasoning ${integer(last.reasoningTokens ?? 0)}`
 				: "—",
 		},
 		lifetime: {
@@ -105,11 +107,11 @@ export function botStatusFields(view: BotStatusView): BotStatusField[] {
 		},
 		lifetime_usage: {
 			label: "累计用量",
-			value: `prompt ${integer(view.stats.contextTokens)} · ↑miss ${integer(view.stats.cacheMiss)} · ↓output ${integer(view.stats.outputTokens)} · R ${integer(view.stats.cacheRead)} · W ${integer(view.usage.cacheWrite)} · reasoning ${integer(view.usage.reasoningTokens)}`,
+			value: `prompt ${integer(view.stats.contextTokens)} · ↑miss ${lifetimeApprox}${integer(view.stats.cacheMiss)} · ↓output ${integer(view.stats.outputTokens)} · R ${lifetimeApprox}${integer(view.stats.cacheRead)} · W ${integer(view.usage.cacheWrite)} · reasoning ${integer(view.usage.reasoningTokens)}`,
 		},
 		cache_and_cost: {
 			label: "缓存与费用",
-			value: `CH ${percent(view.usage.cacheHitPercent)} · $${formatUsdCost(view.stats.cost)}`,
+			value: `CH ${lifetimeApprox}${percent(view.usage.cacheHitPercent)} · $${formatUsdCost(view.stats.cost)}`,
 		},
 		routing: {
 			label: "路由",
