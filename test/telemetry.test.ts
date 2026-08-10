@@ -6,7 +6,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { statsText, telegramFooterLines, telegramFooterUsage } from "../.pi/extensions/tg-extension.ts";
+import {
+	statsText,
+	telegramFeedHeaderLine,
+	telegramFooterLines,
+	telegramFooterUsage,
+} from "../.pi/extensions/tg-extension.ts";
 import { IpcServer } from "../src/daemon/ipc-server.ts";
 import { openDb } from "../src/db/db.ts";
 import { loadBotStats } from "../src/db/usage.ts";
@@ -82,6 +87,28 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
 }
 
 describe("unified usage telemetry", () => {
+	test("keeps compose guidance in the one-line attached-feed header", () => {
+		const styles: Array<[string, string]> = [];
+		const theme = {
+			fg: (color: string, text: string) => {
+				styles.push([color, text]);
+				return text;
+			},
+			bold: (text: string) => {
+				styles.push(["bold", text]);
+				return text;
+			},
+		};
+		const indicator = { text: "choose bot on send", color: "accent" } as const;
+
+		expect(telegramFeedHeaderLine(100, theme, "all bots", indicator)).toBe(
+			" Telegram · all bots · attached · choose bot on send · /tg more · /tg detach",
+		);
+		expect(visibleWidth(telegramFeedHeaderLine(32, theme, "all bots", indicator))).toBeLessThanOrEqual(32);
+		expect(styles).toContainEqual(["success", "attached"]);
+		expect(styles).toContainEqual(["bold", "choose bot on send"]);
+	});
+
 	test("separates latest conversation context from retention totals", () => {
 		const db = openDb(":memory:");
 		try {
@@ -160,7 +187,7 @@ describe("unified usage telemetry", () => {
 					sessionName: "ops",
 					usage: footerUsage,
 					availableProviderCount: 2,
-					statuses: new Map([["telegram-compose", "TELEGRAM · CHOOSE BOT ON SEND"]]),
+					statuses: new Map(),
 				},
 			);
 
@@ -178,7 +205,7 @@ describe("unified usage telemetry", () => {
 			expect(footerLines[1]).toStartWith("↑750 ↓170 R700 W50 CH46.7% $0.1500 0.8%/128k (auto)");
 			expect(footerLines[1]).toEndWith("(test) chat-model • high");
 			expect(visibleWidth(footerLines[1]!)).toBe(100);
-			expect(footerLines[2]).toBe("TELEGRAM · CHOOSE BOT ON SEND");
+			expect(footerLines).toHaveLength(2);
 			expect(
 				piStatus
 					.split("\n")

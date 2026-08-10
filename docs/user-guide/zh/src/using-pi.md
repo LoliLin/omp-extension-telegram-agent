@@ -17,7 +17,7 @@ bun run pi
 /tg detach             # 断开 live socket，保留已显示 transcript
 ```
 
-Telegram feed 是一个 TUI-only Pi custom entry。滚动、resize、选择、主题和图片布局由 Pi 原生组件负责；插件在 editor 上方显示一行 feed scope，并在 attached 期间用 Pi 官方 footer API 按原生三层排版显示路径、Telegram usage/model 与 compose status，隐藏 operator usage 行。消息不会因为展示而进入当前 Pi agent 的 provider context。
+Telegram feed 是一个 TUI-only Pi custom entry。滚动、resize、选择、主题和图片布局由 Pi 原生组件负责；editor 上方的一行统一显示 feed scope、连接与 compose 状态，attached 期间则用 Pi 官方 footer API 显示路径和 Telegram usage/model，隐藏 operator usage 行。消息不会因为展示而进入当前 Pi agent 的 provider context。
 
 在 `/tg ` 后使用 Tab 或原生选择菜单。bot 参数由当前已验证配置动态补全。
 
@@ -33,7 +33,7 @@ Telegram feed 是一个 TUI-only Pi custom entry。滚动、resize、选择、�
 /tg compose             # 恢复当前 feed scope
 ```
 
-Pi extension status 会显示 `SEND AS ...` 或 `CHOOSE BOT ON SEND`。取消选择会恢复逐字节相同的原文且不发送。compose 只拦截 interactive editor；RPC 或 extension 输入仍交给 Pi。附件不会被偷偷降级成只发 caption。
+feed header 会在 `attached` 后显示 `send as ...` 或 `choose bot on send`，选择与发送时原位更新。取消选择会恢复逐字节相同的原文且不发送。compose 只拦截 interactive editor；RPC 或 extension 输入仍交给 Pi。附件不会被偷偷降级成只发 caption。
 
 明确失败会恢复 editor 原文。如果 ACK 丢失或连接在发送中断开，结果是 unknown：
 
@@ -51,7 +51,7 @@ Pi extension status 会显示 `SEND AS ...` 或 `CHOOSE BOT ON SEND`。取消选
 /tg status friend      # lifetime + latest 明细
 ```
 
-Pi `/tg status` 与 Telegram `/status` 共用[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)：lifetime 来自 SQLite `llm_runs` 保留期并包含 compact 调用，current context 只取最近主对话 run 并显示 `used/window/percent`，不是历史 prompt 总和。attached footer 与 Pi 原生一样分为路径、usage/model、compose status 三层；`/tg detach`后恢复Pi默认footer。
+Pi `/tg status` 与 Telegram `/status` 共用[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)：lifetime 来自 SQLite `llm_runs` 保留期并包含 compact 调用，current context 只取最近主对话 run 并显示 `used/window/percent`，不是历史 prompt 总和。attached footer 保持 Pi 原生的路径与 usage/model 信息顺序，compose guidance 留在 feed header；`/tg detach`后恢复Pi默认footer。
 
 ## 本地事件、stream 与媒体
 

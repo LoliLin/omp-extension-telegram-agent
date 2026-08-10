@@ -17,7 +17,7 @@
 | P0 | compaction hook 把 `prep.messagesToSummarize` 直接 `as never` 交给 Pi `serializeConversation()` | Pi serializer 接收 provider `Message[]`；Telegram custom messages 可能被遗漏，类型错误被 cast 隐藏 | 按 Pi 文档先 `convertToLlm()`，再 `serializeConversation()`；bump cache schema |
 | P1 | `VisionScheduler` 的 foreground/background 双队列只有 foreground 生产调用；小时/日计数仅在进程内存存在 | 优先级分支是死机制；重启即清零的配额既不准确，也会无声跳过用户媒体 | 改成单 FIFO 并发门；删除小时/日配额、budget error 和对应配置/telemetry |
 | P1 | 视频帧位置通过 file id、hash、伪随机数和截断正态分布生成 | 对最多 3 帧的任务没有可观察收益，增加实现与统计测试 | 使用固定代表位置；仍保留帧数、文件、超时、输出和全局并发硬上限 |
-| P1 | Pi footer 通过 `as never` 伪造一份不完整 `AgentSession` 再传给 `FooterComponent` | 依赖组件内部读取形状，是升级脆弱的真实 hack | 删除 `/tg panel` 和 fake session adapter；attached feed 用官方 `setFooter` 接收远端 telemetry，并按原生三层布局绘制；保留两个 `/status` 明细 |
+| P1 | Pi footer 通过 `as never` 伪造一份不完整 `AgentSession` 再传给 `FooterComponent` | 依赖组件内部读取形状，是升级脆弱的真实 hack | 删除 `/tg panel` 和 fake session adapter；attached feed 用官方 `setFooter` 接收远端 telemetry，并按原生信息顺序绘制；保留两个 `/status` 明细 |
 | P1 | 配置仍接受旧模型拼写，并让省略的 `tools.search` / `vision.enabled` 根据历史行为隐式开启 | 存在第二套隐含语义，配置表面值不能完整解释行为 | 删除兼容别名和隐式启用；normalized 类型改为真实必填形状 |
 | P2 | 两个 compaction e2e 脚本重复，其中一个绕过公开控制方法读取 private session；telemetry/媒体测试含大量一次性展示断言 | 增大修改面与维护成本，没有守住长期 invariant | 合并 e2e 到公开入口；删除已完成调查记录和随功能一起消失的展示测试，保留安全/缓存/幂等回归 |
 
@@ -51,7 +51,7 @@
 | compaction 生命周期 | `session_before_compact` / `session_compact` | 已复用；只保留 Telegram 专用 summary instruction |
 | transcript 序列化 | `serializeConversation` | 已复用；修正输入类型 |
 | TUI layout、Markdown、图片转换、assistant/tool card | 已公开提供 | 已复用；工具调用改用`ToolExecutionComponent` |
-| footer customization | `ctx.ui.setFooter` 可公开替换 footer并提供branch/status；`FooterComponent` 要求真实session；没有公开入口向它注入远端usage | 不复用`FooterComponent`、不伪造session；attached期间通过`setFooter`按原生三层布局展示Telegram usage，detach恢复默认 |
+| footer customization | `ctx.ui.setFooter` 可公开替换 footer并提供branch/status；`FooterComponent` 要求真实session；没有公开入口向它注入远端usage | 不复用`FooterComponent`、不伪造session；attached期间通过`setFooter`按原生信息顺序展示Telegram usage，detach恢复默认 |
 | model reference parser | `parseModelPattern` 有导出，但标为 internal/testing，且是依赖 model catalog 的模糊匹配器 | 保留严格的小型 `provider/model:thinking` parser |
 | provider cache retention | 底层 stream option 有，`createAgentSession` option 无 | 保留单点 wrapper，不扩散私有访问 |
 | Telegram transport、routing、SQLite outbox、search、sandboxed JS | Pi 无对应领域实现 | 保留项目实现 |
@@ -89,7 +89,7 @@
 - 消息标题用`botId ? ... : username ? ...`，导致own bot消息有username也必然隐藏。新标题始终优先呈现display name + `@username`，bot id降为右侧metadata。
 - 全部身份曾只分成固定human/bot两色。现在用稳定identity hash选择Pi theme已有语义/语法色；没有硬编码RGB、独立palette配置或持久颜色表。
 - feed entry内部重复的scope/帮助header已删除；scope与两个常用动作只留在editor上方的一行官方widget。卡片只保留身份、消息定位信息和正文/媒体，避免同一信息占两层。
-- fake `AgentSession` footer 已删除；attached feed 用官方 `ctx.ui.setFooter`，按 Pi 原生路径行、usage/model 行、extension-status 行排版 Telegram telemetry。它不读取 Pi session usage，detach 后恢复默认 footer。
+- fake `AgentSession` footer 已删除；attached feed 用官方 `ctx.ui.setFooter`，按 Pi 原生路径行、usage/model 行和可选extension-status行排版 Telegram telemetry；compose guidance归属editor上方的feed header。它不读取 Pi session usage，detach 后恢复默认 footer。
 
 以上均为本地UI side channel，Cache impact为**NONE**；不改system、tool schema、消息grammar或provider payload。
 
@@ -100,7 +100,7 @@
 1. compaction 改用 `convertToLlm`，建立 cache schema v12，并加一条 custom-message 回归。
 2. 简化 vision 并发门和视频取帧；删除无持久语义的配额配置。
 3. 删除旧配置兼容语义，并让 normalized 类型消除下游 fallback。
-4. 删除 fake Pi footer 与 `/tg panel`，用官方 `setFooter` 和 Pi 同构三层布局保留 attached feed 统计、隐藏 operator usage，并保留 `/tg status` 明细。
+4. 删除 fake Pi footer 与 `/tg panel`，用官方 `setFooter` 和 Pi 同构信息顺序保留 attached feed 统计、隐藏 operator usage，并保留 `/tg status` 明细。
 5. 对齐Pi原生工具卡并重排Telegram卡片身份层级。
 6. 合并 compaction e2e、删除完成态调查记录，并按长期 invariant 收缩测试。
 7. 运行完整验证漏斗；全部通过后才部署并检查生产 daemon。

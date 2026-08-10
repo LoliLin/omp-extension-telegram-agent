@@ -17,7 +17,7 @@ Successful first setup attaches the global feed automatically. Later, choose the
 /tg detach             # Disconnect live IPC but retain the transcript
 ```
 
-The Telegram feed is one TUI-only Pi custom entry. Pi owns scrolling, resizing, selection, themes, and image layout. While attached, the extension uses Pi's official footer API and Pi's native three-row layout for the path, Telegram usage/model, and compose status, while hiding the unrelated operator-usage row. Displaying messages does not put them into the current Pi agent's provider context.
+The Telegram feed is one TUI-only Pi custom entry. Pi owns scrolling, resizing, selection, themes, and image layout. One line above the editor groups the feed scope, connection state, and compose guidance. While attached, the extension uses Pi's official footer API for the path and Telegram usage/model rows, while hiding the unrelated operator-usage row. Displaying messages does not put them into the current Pi agent's provider context.
 
 Use Tab or Pi's selection menu after `/tg `. Bot arguments come from the currently validated config.
 
@@ -33,7 +33,7 @@ After attach, the Pi editor sends to Telegram by default. A filtered feed uses t
 /tg compose             # Restore the current feed scope
 ```
 
-Pi's extension status shows either `SEND AS ...` or `CHOOSE BOT ON SEND`. Canceling the selector restores the exact editor text and sends nothing. Compose intercepts only interactive editor input; RPC and extension sources continue to Pi. Attachments are blocked instead of silently sending only their caption.
+The attached-feed header shows either `send as ...` or `choose bot on send` immediately after `attached`; choosing and sending update there in place. Canceling the selector restores the exact editor text and sends nothing. Compose intercepts only interactive editor input; RPC and extension sources continue to Pi. Attachments are blocked instead of silently sending only their caption.
 
 An explicit failure restores the editor text. If the acknowledgement is lost or the connection drops during send, the outcome is unknown:
 
@@ -51,7 +51,7 @@ This boundary prevents a remote success plus local acknowledgement failure from 
 /tg status friend      # Lifetime + latest details
 ```
 
-Pi `/tg status` and Telegram `/status` share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md): lifetime covers retained SQLite `llm_runs`, including compaction calls, while current context is `used/window/percent` from the latest main-conversation run rather than a historical prompt sum. The attached footer follows Pi's native path, usage/model, and compose-status rows; `/tg detach` restores Pi's default footer.
+Pi `/tg status` and Telegram `/status` share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md): lifetime covers retained SQLite `llm_runs`, including compaction calls, while current context is `used/window/percent` from the latest main-conversation run rather than a historical prompt sum. The attached footer follows Pi's native path and usage/model rows, while compose guidance stays in the feed header; `/tg detach` restores Pi's default footer.
 
 ## Local events, streams, and media
 

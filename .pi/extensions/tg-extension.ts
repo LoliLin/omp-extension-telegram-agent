@@ -446,8 +446,30 @@ export interface TelegramExtensionOptions {
 	piModelPreflight?: PiModelPreflight;
 }
 
+export interface TelegramComposeIndicator {
+	text: string;
+	color: Extract<ThemeColor, "accent" | "warning" | "error">;
+}
+
 export function supportsPiVersion(value: string): boolean {
 	return value.localeCompare(MIN_PI_VERSION, "en", { numeric: true }) >= 0;
+}
+
+/** One-line attached-feed chrome with compose guidance kept beside its Telegram scope. */
+export function telegramFeedHeaderLine(
+	width: number,
+	theme: Pick<Theme, "fg" | "bold">,
+	scope: string,
+	composeIndicator: TelegramComposeIndicator | null,
+): string {
+	if (width <= 0) return "";
+	const indicator = composeIndicator
+		? `${theme.fg("dim", " · ")}${theme.bold(theme.fg(composeIndicator.color, sanitize(composeIndicator.text)))}`
+		: "";
+	const text =
+		`${theme.bold(theme.fg("accent", "Telegram"))}${theme.fg("dim", ` · ${sanitize(scope)} · `)}` +
+		`${theme.fg("success", "attached")}${indicator}${theme.fg("dim", " · /tg more · /tg detach")}`;
+	return Tui.truncateToWidth(` ${text}`, width, theme.fg("dim", "..."));
 }
 
 function fmtClock(ts: number): string {
@@ -1237,6 +1259,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	let statusBots: StatusBot[] | undefined;
 	let requestHostRender: (() => void) | null = null;
 	let toolHost: ToolPresentationHost | undefined;
+	let composeIndicator: TelegramComposeIndicator | null = null;
 	const getCompletionBots = (): TgBotChoice[] => {
 		if (completionBots) return completionBots;
 		try {
@@ -1271,49 +1294,56 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		const identities = getCompletionBots();
 		return active?.filter ? identities.filter((identity) => identity.id === active?.filter) : identities;
 	};
-	const showComposeStatus = (
+	const setComposeIndicator = (value: TelegramComposeIndicator | null) => {
+		if (composeIndicator?.text === value?.text && composeIndicator?.color === value?.color) return;
+		composeIndicator = value;
+		requestHostRender?.();
+	};
+	const showComposeIndicator = (
 		ui: ExtensionContext["ui"],
 		busy?: { kind: "choosing" } | { kind: "sending"; identity: ComposeIdentity },
 	) => {
+		ui.setStatus("telegram-compose", undefined);
 		if (!compose) {
-			ui.setStatus("telegram-compose", undefined);
+			setComposeIndicator(null);
 			return;
 		}
 		if (busy?.kind === "choosing") {
-			ui.setStatus("telegram-compose", "TELEGRAM · CHOOSING BOT");
+			setComposeIndicator({ text: "choosing bot", color: "warning" });
 			return;
 		}
 		if (busy?.kind === "sending") {
-			ui.setStatus("telegram-compose", `TELEGRAM · SENDING AS ${composeLabel(busy.identity)}`);
+			setComposeIndicator({ text: `sending as ${composeLabel(busy.identity)}`, color: "warning" });
 			return;
 		}
 		if (compose.kind === "bot") {
-			ui.setStatus("telegram-compose", `TELEGRAM · SEND AS ${composeLabel(compose.identity)}`);
+			setComposeIndicator({ text: `send as ${composeLabel(compose.identity)}`, color: "accent" });
 			return;
 		}
 		const identities = scopeIdentities();
 		if (identities.length === 1) {
-			ui.setStatus("telegram-compose", `TELEGRAM · SEND AS ${composeLabel(identities[0]!)}`);
+			setComposeIndicator({ text: `send as ${composeLabel(identities[0]!)}`, color: "accent" });
 		} else if (identities.length > 1) {
-			ui.setStatus("telegram-compose", "TELEGRAM · CHOOSE BOT ON SEND");
+			setComposeIndicator({ text: "choose bot on send", color: "accent" });
 		} else {
-			ui.setStatus("telegram-compose", "TELEGRAM · SEND UNAVAILABLE");
+			setComposeIndicator({ text: "send unavailable", color: "error" });
 		}
 	};
 	const closeCompose = (ui: ExtensionContext["ui"] | null = lastUi) => {
 		composeGeneration++;
 		compose = null;
+		setComposeIndicator(null);
 		if (ui) ui.setStatus("telegram-compose", undefined);
 	};
 	const openScopeCompose = (ui: ExtensionContext["ui"]) => {
 		composeGeneration++;
 		compose = { kind: "scope" };
-		showComposeStatus(ui);
+		showComposeIndicator(ui);
 	};
 	const openBotCompose = (ui: ExtensionContext["ui"], identity: ComposeIdentity) => {
 		composeGeneration++;
 		compose = { kind: "bot", identity };
-		showComposeStatus(ui);
+		showComposeIndicator(ui);
 	};
 	const clearFeedUi = (ui: ExtensionContext["ui"] | null = lastUi) => {
 		requestHostRender = null;
@@ -1328,11 +1358,10 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			(tui, theme) => {
 				requestHostRender = () => tui.requestRender();
 				toolHost = { ui: tui, cwd: ctx.cwd };
-				return new Tui.Text(
-					`${theme.bold(theme.fg("accent", "Telegram"))}${theme.fg("dim", ` · ${scope} · attached · /tg more · /tg detach`)}`,
-					1,
-					0,
-				);
+				return {
+					render: (width) => [telegramFeedHeaderLine(width, theme, scope, composeIndicator)],
+					invalidate() {},
+				};
 			},
 			{ placement: "aboveEditor" },
 		);
@@ -1475,7 +1504,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				if (identities.length === 1) {
 					identity = identities[0]!;
 				} else {
-					showComposeStatus(ctx.ui, { kind: "choosing" });
+					showComposeIndicator(ctx.ui, { kind: "choosing" });
 					let selected: string | undefined;
 					try {
 						selected = await ctx.ui.select("Send Telegram message as", identities.map(composeLabel));
@@ -1508,7 +1537,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				ctx.ui.notify("Telegram feed changed before sending; the message was not sent", "warning");
 				return { action: "handled" };
 			}
-			showComposeStatus(ctx.ui, { kind: "sending", identity });
+			showComposeIndicator(ctx.ui, { kind: "sending", identity });
 			const result = await feed.client.sendText(identity.id, original, makeRequestId());
 			if (result.ok) {
 				ctx.ui.notify(`Telegram sent as ${composeLabel(identity)} · #${result.messageId}`, "info");
@@ -1532,7 +1561,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			if (composeGeneration === generation && compose === mode) closeCompose(ctx.ui);
 		} finally {
 			sending = false;
-			if (composeGeneration === generation && compose === mode) showComposeStatus(ctx.ui);
+			if (composeGeneration === generation && compose === mode) showComposeIndicator(ctx.ui);
 		}
 		return { action: "handled" };
 	});

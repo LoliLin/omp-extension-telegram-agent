@@ -59,7 +59,7 @@ daemon 的 runtime snapshot 是 provider/model、**实际生效 reasoning effort
 
 `/tg status` 与 Telegram `/status` 只是同一明细投影的两种外层渲染；二者的字段 key、顺序和数值必须来自同一个共享投影。
 
-attached feed 的 footer 与 Pi 原生 `FooterComponent` 同为三层：第一行是 cwd、git branch 与 session name；第二行左侧按原生顺序显示 lifetime `↑ / ↓ / R / W / CH / $` 和 latest 主对话的 `context%/window (auto)`，右侧按原生宽度规则显示 `(provider) model • reasoning`；第三行单独显示 compose 等 extension status。all-bots scope 只聚合当前配置 bot，并用最新主对话 run 所属 bot 的 context/model/reasoning。精确整数和完整 runtime 明细仍由 `/tg status` 提供。Pi 没有公开接口把远端 usage 注入原生 `FooterComponent`，因此 extension 只复刻该公开版本的布局，不伪造 `AgentSession`。detach、断线、restart/config 切换与 session shutdown 必须恢复默认 footer。
+attached feed 的 footer 与 Pi 原生 `FooterComponent` 保持相同信息顺序：第一行是 cwd、git branch 与 session name；第二行左侧按原生顺序显示 lifetime `↑ / ↓ / R / W / CH / $` 和 latest 主对话的 `context%/window (auto)`，右侧按原生宽度规则显示 `(provider) model • reasoning`；其他临时 extension status 仅在存在时追加。compose 状态与 scope/连接状态放在 editor 上方的同一行 feed header，不占 footer 行。all-bots scope 只聚合当前配置 bot，并用最新主对话 run 所属 bot 的 context/model/reasoning。精确整数和完整 runtime 明细仍由 `/tg status` 提供。Pi 没有公开接口把远端 usage 注入原生 `FooterComponent`，因此 extension 只复刻该公开版本的布局，不伪造 `AgentSession`。detach、断线、restart/config 切换与 session shutdown 必须恢复默认 footer。
 
 ## 格式与边界
 
@@ -70,6 +70,6 @@ attached feed 的 footer 与 Pi 原生 `FooterComponent` 同为三层：第一�
 
 ## 验证与更新触发条件
 
-测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、模型切换前后的 immutable per-run cost 跨 provider/model 累加、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、当前 context 使用 latest/window 而非 lifetime sum、三个界面共享费用精度、attached footer 保持 Pi 的三层信息顺序与 model 右对齐，以及两个详细状态投影拥有完全相同的字段 key/顺序。
+测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、模型切换前后的 immutable per-run cost 跨 provider/model 累加、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、当前 context 使用 latest/window 而非 lifetime sum、三个界面共享费用精度、attached footer 保持 Pi 的信息顺序与 model 右对齐、compose guidance 留在单行 feed header，以及两个详细状态投影拥有完全相同的字段 key/顺序。
 
 修改 `llm_runs` 字段、IPC `UsageRun` / `BotStats`、`/tg status` 或 Telegram `/status` 时必须同步本文。该模块的 Cache impact 为 **NONE**：它只读取既有 telemetry 并生成 UI/control side-channel。
