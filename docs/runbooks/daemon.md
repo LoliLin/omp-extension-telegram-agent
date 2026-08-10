@@ -73,7 +73,7 @@ bun run pi                          # 从项目依赖启动 Pi，自动加载 Te
 - compose 仅支持纯文本。附件会被阻止；明确失败会把原文放回 editor。若 ACK 超时或 daemon 在发送中断线，结果可能未知：先检查群聊，不要直接重发；插件不会自动重试，并会安全关闭 compose。
 - selector取消会恢复原文且不发送；选择/发送期间拒绝第二次提交。RPC/extension source不受compose影响。attach切换会建立新scope；detach、daemon断线、restart/config变更或Pi退出会关闭compose并让迟到选择失效；bot token始终只在daemon内。
 - 显式启用vision后，photo/sticker/video被有界lazy流程识别时，同一native media card或媒体placeholder会在下方原位出现`Vision · ...`；无需重新attach。视频最多抽3帧并合成一次vision调用，且所有bot的下载→抽帧→识别共用deployment的`vision.concurrency`上限。UI本身不调用模型；vision关闭、未选中、缺少FFmpeg或识别失败时仍保留图片/fallback。
-- `/tg status [bot]` 列出 runs/since/epoch、latest cache/output/reasoning/latency/cost 与 lifetime totals/平均 latency；Pi 原生 footer 继续显示当前 operator session。
+- attached feed 通过Pi原生footer status持续显示Telegram lifetime `↑/↓/R/W/CH/$`、latest context与model；footer主统计仍属于当前operator session。`/tg status [bot]`列出runs/since/epoch、latest cache/output/reasoning/latency/cost与lifetime totals/平均latency。
 - 在editor输入`/tg `后按Tab/选择使用Pi原生分级菜单；`attach/status/compose`的下一层会从配置动态列出bot id/name，`compose`另有`off`，bare `compose`也可直接执行。
 - 关闭 Pi 或 `/tg detach` 不影响 daemon。
 - `/tg restart`先关闭compose并中止旧IPC；在途manual send按unknown outcome处理且绝不自动重发。ready后保留原transcript，自动以原bot/all filter重连；失败时保留已显示内容与可执行诊断。

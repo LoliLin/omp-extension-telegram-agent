@@ -17,7 +17,7 @@ bun run pi
 /tg detach             # 断开 live socket，保留已显示 transcript
 ```
 
-Telegram feed 是一个 TUI-only Pi custom entry。滚动、resize、选择、主题、图片布局和 footer 都由 Pi 原生组件负责；插件只在 editor 上方显示一行 feed scope。消息不会因为展示而进入当前 Pi agent 的 provider context。
+Telegram feed 是一个 TUI-only Pi custom entry。滚动、resize、选择、主题、图片布局和 footer 都由 Pi 原生组件负责；插件在 editor 上方显示一行 feed scope，并通过 Pi 原生 footer status 显示紧凑 Telegram usage。消息不会因为展示而进入当前 Pi agent 的 provider context。
 
 在 `/tg ` 后使用 Tab 或原生选择菜单。bot 参数由当前已验证配置动态补全。
 
@@ -51,7 +51,7 @@ Pi extension status 会显示 `SEND AS ...` 或 `CHOOSE BOT ON SEND`。取消选
 /tg status friend      # lifetime + latest 明细
 ```
 
-Pi `/tg status` 与 Telegram `/status` 共用[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)：lifetime 来自 SQLite `llm_runs` 保留期并包含 compact 调用，current context 只取最近主对话 run 并显示 `used/window/percent`，不是历史 prompt 总和。Pi 原生 footer 始终保留当前 operator session 的状态。
+Pi `/tg status` 与 Telegram `/status` 共用[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)：lifetime 来自 SQLite `llm_runs` 保留期并包含 compact 调用，current context 只取最近主对话 run 并显示 `used/window/percent`，不是历史 prompt 总和。attached feed 会把紧凑统计追加到 Pi 原生 footer 的 extension-status 行；原有 operator session 统计不会被替换。
 
 ## 本地事件、stream 与媒体
 

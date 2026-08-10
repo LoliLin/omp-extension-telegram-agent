@@ -4,7 +4,7 @@
 
 ## 目的与范围
 
-两个界面 MUST 从同一份 SQLite `llm_runs`、daemon runtime snapshot 和同一组派生函数得到数值。界面可以因空间不同采用换行或富文本，但不能改变字段含义、统计范围或公式。Pi 原生 footer 始终显示当前 operator session，本项目不替换它。
+两个详细界面 MUST 从同一份 SQLite `llm_runs`、daemon runtime snapshot 和同一组派生函数得到数值。界面可以因空间不同采用换行或富文本，但不能改变字段含义、统计范围或公式。Pi 原生 footer 的主统计始终属于当前 operator session，本项目不替换它；attached feed 只通过官方 `ctx.ui.setStatus` 在原生 footer 的 extension-status 行追加 Telegram 紧凑统计。
 
 本文同时定义 provider usage 聚合与详细 runtime 状态的合并投影；Telegram runtime state、routing/cooldown 与最近 compact outcome 仍由 control/runtime 层拥有，不能反向藏进 usage 聚合。
 
@@ -57,6 +57,8 @@ daemon 的 runtime snapshot 是 provider/model、**实际生效 reasoning effort
 
 `/tg status` 与 Telegram `/status` 只是同一明细投影的两种外层渲染；二者的字段 key、顺序和数值必须来自同一个共享投影。
 
+attached feed 的 footer status 按 Pi 原生顺序显示 lifetime `↑ / ↓ / R / W / CH / $`、latest 主对话的 `context%/window` 与当前 model。all-bots scope 只聚合当前配置 bot，并用最新主对话 run 所属 bot 的 context/model；精确整数和完整 runtime 明细仍由 `/tg status` 提供。detach、断线、restart/config 切换与 session shutdown 必须清除此 status。
+
 ## 格式与边界
 
 - Telegram `/status` 的整数和费用整数部分使用英文逗号千位分隔；百分比固定一位小数。
@@ -66,6 +68,6 @@ daemon 的 runtime snapshot 是 provider/model、**实际生效 reasoning effort
 
 ## 验证与更新触发条件
 
-测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、当前 context 使用 latest/window 而非 lifetime sum，以及两个详细状态投影拥有完全相同的字段 key/顺序。
+测试 MUST 守卫：latest 排除 compaction、lifetime 包含 compaction、live compaction totals 不替换 latest、`CH` 分母包含 `W`、无 cache 样本显示 `—`、当前 context 使用 latest/window 而非 lifetime sum、footer 紧凑投影保持 Pi 字段顺序，以及两个详细状态投影拥有完全相同的字段 key/顺序。
 
 修改 `llm_runs` 字段、IPC `UsageRun` / `BotStats`、`/tg status` 或 Telegram `/status` 时必须同步本文。该模块的 Cache impact 为 **NONE**：它只读取既有 telemetry 并生成 UI/control side-channel。

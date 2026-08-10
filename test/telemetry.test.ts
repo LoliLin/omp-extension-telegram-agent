@@ -5,7 +5,7 @@ import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { statsText } from "../.pi/extensions/tg-extension.ts";
+import { statsText, telegramUsageStatusText } from "../.pi/extensions/tg-extension.ts";
 import { IpcServer } from "../src/daemon/ipc-server.ts";
 import { openDb } from "../src/db/db.ts";
 import { loadBotStats } from "../src/db/usage.ts";
@@ -124,33 +124,30 @@ describe("unified usage telemetry", () => {
 				samplingCooldownMs: 2_000,
 				lastCompact: null,
 			} satisfies RuntimeControlSnapshot;
-			const piStatus = statsText(
-				"A",
-				stats,
-				{
-					id: "A",
-					name: "Bot A",
-					provider: "test",
-					model: "chat-model",
-					reasoningEffort: "medium",
-					routingP: 0.25,
-					samplingCooldownMs: 2_000,
+			const bot = {
+				id: "A",
+				name: "Bot A",
+				provider: "test",
+				model: "chat-model",
+				reasoningEffort: "medium",
+				routingP: 0.25,
+				samplingCooldownMs: 2_000,
+			} as const;
+			const host = {
+				modelRegistry: {
+					getAvailable: () => [
+						{
+							provider: "test",
+							id: "chat-model",
+							contextWindow: 128_000,
+						},
+					],
 				},
-				runtime,
-				{
-					modelRegistry: {
-						getAvailable: () => [
-							{
-								provider: "test",
-								id: "chat-model",
-								contextWindow: 128_000,
-							},
-						],
-					},
-					model: undefined,
-					thinkingLevel: "off",
-				},
-			);
+				model: undefined,
+				thinkingLevel: "off" as const,
+			};
+			const piStatus = statsText("A", stats, bot, runtime, host);
+			const footerStatus = telegramUsageStatusText(null, { A: stats }, { A: runtime });
 
 			expect(stats.runs).toBe(2);
 			expect(stats.contextTokens).toBe(1_500);
@@ -162,6 +159,7 @@ describe("unified usage telemetry", () => {
 			expect(piStatus).not.toContain("reasoning medium");
 			expect(piStatus).toContain("context_current=1,000 / 128,000 (0.8%)");
 			expect(piStatus).toContain("cache_and_cost=CH 46.7% · $0.1500");
+			expect(footerStatus).toBe("TG all ↑750 ↓170 R700 W50 CH46.7% $0.150 0.8%/128k chat-model");
 			expect(
 				piStatus
 					.split("\n")

@@ -28,6 +28,7 @@ import type {
 } from "../../src/ipc.ts";
 import { runNativeConfigWizard, type PiModelPreflight } from "../../src/onboarding/config-wizard.ts";
 import { buildBotStatusView, renderBotStatusPlain } from "../../src/observability/status.ts";
+import { summarizeBotUsage } from "../../src/observability/usage.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
 	mediaFileRevision,
@@ -41,6 +42,7 @@ import {
 
 const ENTRY_TYPE = "telegram-chat";
 const FEED_WIDGET_KEY = "telegram-feed";
+const USAGE_STATUS_KEY = "telegram";
 const MIN_PI_VERSION = "0.84.1";
 const MAX_ACTIVE_STREAMS = 32;
 const MAX_ENDED_STREAMS = 64;
@@ -507,6 +509,70 @@ export function statsText(
 		samplingCooldownMs: status?.samplingCooldownMs ?? 0,
 	};
 	return renderBotStatusPlain(buildBotStatusView(identity, stats, status, model?.contextWindow ?? 0));
+}
+
+function footerTokens(count: number): string {
+	if (count < 1_000) return String(count);
+	if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
+	if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
+	if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+	return `${Math.round(count / 1_000_000)}M`;
+}
+
+/** Compact Telegram usage for Pi's native extension-status footer row. */
+export function telegramUsageStatusText(
+	filter: string | null,
+	statsByBot: Readonly<Record<string, BotStats>>,
+	statuses: Readonly<Record<string, RuntimeControlSnapshot>>,
+): string | undefined {
+	const selected = Object.entries(statsByBot).filter(([botId]) => filter == null || botId === filter);
+	if (selected.length === 0) return undefined;
+
+	const totals: BotStats = {
+		runs: 0,
+		contextTokens: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		cacheMiss: 0,
+		outputTokens: 0,
+		cost: 0,
+		epoch: 0,
+		last: null,
+	};
+	let currentBotId = filter ?? selected[0]![0];
+	for (const [botId, stats] of selected) {
+		totals.runs += stats.runs;
+		totals.contextTokens += stats.contextTokens;
+		totals.cacheRead += stats.cacheRead;
+		totals.cacheWrite = (totals.cacheWrite ?? 0) + (stats.cacheWrite ?? 0);
+		totals.cacheMiss += stats.cacheMiss;
+		totals.outputTokens += stats.outputTokens;
+		totals.cost += stats.cost;
+		if (
+			stats.last &&
+			(!totals.last ||
+				stats.last.ts > totals.last.ts ||
+				(stats.last.ts === totals.last.ts && stats.last.id > totals.last.id))
+		) {
+			totals.last = stats.last;
+			currentBotId = botId;
+		}
+	}
+	totals.epoch = totals.last?.epoch ?? statsByBot[currentBotId]?.epoch ?? 0;
+
+	const status = statuses[currentBotId];
+	const usage = summarizeBotUsage(totals, status?.contextWindow ?? 0);
+	const parts = [`TG ${filter ?? "all"}`];
+	if (totals.cacheMiss) parts.push(`↑${footerTokens(totals.cacheMiss)}`);
+	if (totals.outputTokens) parts.push(`↓${footerTokens(totals.outputTokens)}`);
+	if (totals.cacheRead) parts.push(`R${footerTokens(totals.cacheRead)}`);
+	if (usage.cacheWrite) parts.push(`W${footerTokens(usage.cacheWrite)}`);
+	if (usage.cacheHitPercent != null) parts.push(`CH${usage.cacheHitPercent.toFixed(1)}%`);
+	if (totals.cost) parts.push(`$${totals.cost.toFixed(3)}`);
+	const contextWindow = usage.context.contextWindow > 0 ? footerTokens(usage.context.contextWindow) : "?";
+	parts.push(`${usage.context.percent == null ? "?" : `${usage.context.percent.toFixed(1)}%`}/${contextWindow}`);
+	parts.push(status?.model ?? currentBotId);
+	return parts.join(" ");
 }
 
 function eventBody(event: EvtItem): string {
@@ -1124,10 +1190,15 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		compose = { kind: "bot", identity };
 		showComposeStatus(ui);
 	};
-	const clearFeedWidget = (ui: ExtensionContext["ui"] | null = lastUi) => {
+	const clearFeedUi = (ui: ExtensionContext["ui"] | null = lastUi) => {
 		requestHostRender = null;
 		toolHost = undefined;
 		ui?.setWidget(FEED_WIDGET_KEY, undefined);
+		ui?.setStatus(USAGE_STATUS_KEY, undefined);
+	};
+	const showUsageStatus = (feed: TelegramFeed, ctx: ExtensionContext) => {
+		const text = telegramUsageStatusText(feed.filter, feed.stats, feed.statuses);
+		ctx.ui.setStatus(USAGE_STATUS_KEY, text ? ctx.ui.theme.fg("dim", text) : undefined);
 	};
 	const mountFeedWidget = (filter: string | null, ctx: ExtensionContext) => {
 		const scope = filter ? `bot ${filter}` : "all bots";
@@ -1166,16 +1237,17 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	const attachFeed = (filter: string | null, ctx: ExtensionContext) => {
 		closeCompose(ctx.ui);
 		active?.detach("replaced by a new /tg attach");
-		clearFeedWidget(ctx.ui);
+		clearFeedUi(ctx.ui);
 		mountFeedWidget(filter, ctx);
 		const data = { instanceId: makeId(), filter };
 		pending = {
 			data,
 			changed: (event, feed) => {
 				requestHostRender?.();
+				if (event.type === "stats" && active === feed) showUsageStatus(feed, ctx);
 				if (event.type === "disconnected" && active === feed) {
 					closeCompose(ctx.ui);
-					clearFeedWidget(ctx.ui);
+					clearFeedUi(ctx.ui);
 					ctx.ui.notify(`Telegram feed disconnected: ${event.reason}`, "error");
 				}
 			},
@@ -1183,7 +1255,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		pi.appendEntry<FeedEntry>(ENTRY_TYPE, data);
 		if (pending) {
 			pending = null;
-			clearFeedWidget(ctx.ui);
+			clearFeedUi(ctx.ui);
 			ctx.ui.notify("Pi did not mount the Telegram transcript entry", "error");
 		} else {
 			openScopeCompose(ctx.ui);
@@ -1214,7 +1286,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 
 	pi.on("session_shutdown", () => {
 		closeCompose();
-		clearFeedWidget();
+		clearFeedUi();
 		for (const feed of feeds.values()) feed.dispose();
 		active = null;
 	});
@@ -1360,7 +1432,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 							closeCompose(ctx.ui);
 							active?.detach("configuration changed; waiting for daemon readiness");
 							active = null;
-							clearFeedWidget(ctx.ui);
+							clearFeedUi(ctx.ui);
 							ctx.ui.setStatus("telegram-config", "TELEGRAM · RESTARTING");
 							let processResult: ProcessRunResult;
 							try {
@@ -1440,7 +1512,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 					closeCompose(ctx.ui);
 					active.detach();
 					active = null;
-					clearFeedWidget(ctx.ui);
+					clearFeedUi(ctx.ui);
 				}
 			} else if (sub === "status") {
 				const filter = resolveFilter(botArg);
@@ -1484,7 +1556,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				if (sub === "restart" && ctx.mode === "tui") {
 					closeCompose(ctx.ui);
 					restartFeed?.suspendForRestart();
-					clearFeedWidget(ctx.ui);
+					clearFeedUi(ctx.ui);
 					ctx.ui.setStatus("telegram-daemon", "TELEGRAM · RESTARTING");
 					ctx.ui.notify("Restarting every configured Telegram bot...", "info");
 				}
@@ -1501,7 +1573,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 						mountFeedWidget(restartFeed.filter, ctx);
 						const connected = await restartFeed.reconnect();
 						if (!connected) {
-							clearFeedWidget(ctx.ui);
+							clearFeedUi(ctx.ui);
 							output += "\ndaemon is ready, but the previous feed could not reconnect; run /tg attach again";
 							level = "error";
 						}
