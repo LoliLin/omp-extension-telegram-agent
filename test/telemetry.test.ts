@@ -5,7 +5,8 @@ import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { statsText, telegramFooterLines, telegramUsageStatusText } from "../.pi/extensions/tg-extension.ts";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { statsText, telegramFooterLines, telegramFooterUsage } from "../.pi/extensions/tg-extension.ts";
 import { IpcServer } from "../src/daemon/ipc-server.ts";
 import { openDb } from "../src/db/db.ts";
 import { loadBotStats } from "../src/db/usage.ts";
@@ -140,6 +141,7 @@ describe("unified usage telemetry", () => {
 							provider: "test",
 							id: "chat-model",
 							contextWindow: 128_000,
+							reasoning: true,
 						},
 					],
 				},
@@ -147,17 +149,19 @@ describe("unified usage telemetry", () => {
 				thinkingLevel: "off" as const,
 			};
 			const piStatus = statsText("A", stats, bot, runtime, host);
-			const footerStatus = telegramUsageStatusText(null, { A: stats }, { A: runtime });
-			const expectedFooterStatus = "TG all ↑750 ↓170 R700 W50 CH46.7% $0.150 0.8%/128k chat-model";
+			const footerUsage = telegramFooterUsage(null, { A: stats }, { A: runtime }, [bot], host);
 			const footerLines = telegramFooterLines(
-				"/home/test/project",
-				"/home/test",
-				"main",
-				"ops",
-				new Map([
-					["telegram-compose", "TELEGRAM · CHOOSE BOT ON SEND"],
-					["telegram", expectedFooterStatus],
-				]),
+				100,
+				{ fg: (_color, text) => text },
+				{
+					cwd: "/home/test/project",
+					home: "/home/test",
+					branch: "main",
+					sessionName: "ops",
+					usage: footerUsage,
+					availableProviderCount: 2,
+					statuses: new Map([["telegram-compose", "TELEGRAM · CHOOSE BOT ON SEND"]]),
+				},
 			);
 
 			expect(stats.runs).toBe(2);
@@ -170,8 +174,11 @@ describe("unified usage telemetry", () => {
 			expect(piStatus).not.toContain("reasoning medium");
 			expect(piStatus).toContain("context_current=1,000 / 128,000 (0.8%)");
 			expect(piStatus).toContain("cache_and_cost=CH 46.7% · $0.1500");
-			expect(footerStatus).toBe(expectedFooterStatus);
-			expect(footerLines).toEqual(["~/project (main) • ops", `${expectedFooterStatus} TELEGRAM · CHOOSE BOT ON SEND`]);
+			expect(footerLines[0]).toBe("~/project (main) • ops");
+			expect(footerLines[1]).toStartWith("↑750 ↓170 R700 W50 CH46.7% $0.150 0.8%/128k (auto)");
+			expect(footerLines[1]).toEndWith("(test) chat-model • high");
+			expect(visibleWidth(footerLines[1]!)).toBe(100);
+			expect(footerLines[2]).toBe("TELEGRAM · CHOOSE BOT ON SEND");
 			expect(
 				piStatus
 					.split("\n")

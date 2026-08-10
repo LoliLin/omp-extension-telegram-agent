@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
@@ -42,7 +42,6 @@ import {
 
 const ENTRY_TYPE = "telegram-chat";
 const FEED_WIDGET_KEY = "telegram-feed";
-const USAGE_STATUS_KEY = "telegram";
 const MIN_PI_VERSION = "0.84.1";
 const MAX_ACTIVE_STREAMS = 32;
 const MAX_ENDED_STREAMS = 64;
@@ -74,7 +73,7 @@ type FeedEntry = { instanceId: string; filter: string | null };
 type ComposeIdentity = Pick<BotConfig, "id" | "name">;
 type ComposeMode = { kind: "scope" } | { kind: "bot"; identity: ComposeIdentity };
 type ToolPresentationHost = { ui: Tui.TUI; cwd: string };
-type StatusModel = Pick<NonNullable<ExtensionContext["model"]>, "id" | "provider" | "contextWindow">;
+type StatusModel = Pick<NonNullable<ExtensionContext["model"]>, "id" | "provider" | "contextWindow" | "reasoning">;
 type StatusBot = Pick<
 	BotConfig,
 	"id" | "name" | "provider" | "model" | "reasoningEffort" | "routingP" | "samplingCooldownMs"
@@ -488,6 +487,7 @@ function resolveStatusModel(
 		id: modelId ?? "unknown",
 		provider: provider ?? "unknown",
 		contextWindow: status?.contextWindow ?? 0,
+		reasoning: (status?.reasoningEffort ?? bot?.reasoningEffort ?? "off") !== "off",
 	};
 }
 
@@ -519,13 +519,33 @@ function footerTokens(count: number): string {
 	return `${Math.round(count / 1_000_000)}M`;
 }
 
-/** Compact Telegram usage for Pi's native extension-status footer row. */
-export function telegramUsageStatusText(
+export interface TelegramFooterUsage {
+	inputTokens: number;
+	outputTokens: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cacheHitPercent: number | null;
+	cost: number;
+	contextPercent: number | null;
+	contextWindow: number;
+	provider: string;
+	model: string;
+	reasoning: boolean;
+	reasoningEffort: RuntimeControlSnapshot["reasoningEffort"];
+}
+
+/** Telegram telemetry projected into the fields shown by Pi's native footer. */
+export function telegramFooterUsage(
 	filter: string | null,
 	statsByBot: Readonly<Record<string, BotStats>>,
 	statuses: Readonly<Record<string, RuntimeControlSnapshot>>,
-): string | undefined {
-	const selected = Object.entries(statsByBot).filter(([botId]) => filter == null || botId === filter);
+	bots: readonly StatusBot[],
+	host: StatusHost,
+): TelegramFooterUsage | undefined {
+	const configured = new Map(bots.map((bot) => [bot.id, bot]));
+	const selected = Object.entries(statsByBot).filter(
+		([botId]) => configured.has(botId) && (filter == null || botId === filter),
+	);
 	if (selected.length === 0) return undefined;
 
 	const totals: BotStats = {
@@ -561,36 +581,123 @@ export function telegramUsageStatusText(
 	totals.epoch = totals.last?.epoch ?? statsByBot[currentBotId]?.epoch ?? 0;
 
 	const status = statuses[currentBotId];
-	const usage = summarizeBotUsage(totals, status?.contextWindow ?? 0);
-	const parts = [`TG ${filter ?? "all"}`];
-	if (totals.cacheMiss) parts.push(`↑${footerTokens(totals.cacheMiss)}`);
-	if (totals.outputTokens) parts.push(`↓${footerTokens(totals.outputTokens)}`);
-	if (totals.cacheRead) parts.push(`R${footerTokens(totals.cacheRead)}`);
-	if (usage.cacheWrite) parts.push(`W${footerTokens(usage.cacheWrite)}`);
-	if (usage.cacheHitPercent != null) parts.push(`CH${usage.cacheHitPercent.toFixed(1)}%`);
-	if (totals.cost) parts.push(`$${totals.cost.toFixed(3)}`);
-	const contextWindow = usage.context.contextWindow > 0 ? footerTokens(usage.context.contextWindow) : "?";
-	parts.push(`${usage.context.percent == null ? "?" : `${usage.context.percent.toFixed(1)}%`}/${contextWindow}`);
-	parts.push(status?.model ?? currentBotId);
-	return parts.join(" ");
+	const bot = configured.get(currentBotId);
+	const model = resolveStatusModel(bot, status, host);
+	const usage = summarizeBotUsage(totals, model?.contextWindow ?? status?.contextWindow ?? 0);
+	return {
+		inputTokens: totals.cacheMiss,
+		outputTokens: totals.outputTokens,
+		cacheRead: totals.cacheRead,
+		cacheWrite: usage.cacheWrite,
+		cacheHitPercent: usage.cacheHitPercent,
+		cost: totals.cost,
+		contextPercent: usage.context.percent,
+		contextWindow: usage.context.contextWindow,
+		provider: model?.provider ?? status?.provider ?? bot?.provider ?? "unknown",
+		model: model?.id ?? status?.model ?? bot?.model ?? currentBotId,
+		reasoning: model?.reasoning ?? false,
+		reasoningEffort: status?.reasoningEffort ?? bot?.reasoningEffort ?? "off",
+	};
 }
 
-export function telegramFooterLines(
-	cwd: string,
-	home: string | undefined,
-	branch: string | null,
-	sessionName: string | undefined,
-	statuses: ReadonlyMap<string, string>,
-): string[] {
-	const displayCwd =
-		home && cwd === home ? "~" : home && cwd.startsWith(`${home}/`) ? `~${cwd.slice(home.length)}` : cwd;
-	let path = branch ? `${displayCwd} (${branch})` : displayCwd;
-	if (sessionName) path += ` • ${sessionName}`;
-	const status = [...statuses.entries()]
+export interface TelegramFooterView {
+	cwd: string;
+	home: string | undefined;
+	branch: string | null;
+	sessionName: string | undefined;
+	usage: TelegramFooterUsage | undefined;
+	availableProviderCount: number;
+	statuses: ReadonlyMap<string, string>;
+}
+
+function footerCwd(cwd: string, home: string | undefined): string {
+	if (!home) return cwd;
+	const relativeToHome = relative(resolve(home), resolve(cwd));
+	const insideHome =
+		relativeToHome === "" ||
+		(relativeToHome !== ".." && !relativeToHome.startsWith(`..${sep}`) && !isAbsolute(relativeToHome));
+	if (!insideHome) return cwd;
+	return relativeToHome === "" ? "~" : `~${sep}${relativeToHome}`;
+}
+
+function footerStatusText(text: string): string {
+	return text
+		.replace(/[\r\n\t]/g, " ")
+		.replace(/ +/g, " ")
+		.trim();
+}
+
+/** Pi-native footer layout backed by Telegram rather than operator-session usage. */
+export function telegramFooterLines(width: number, theme: Pick<Theme, "fg">, view: TelegramFooterView): string[] {
+	let path = footerCwd(view.cwd, view.home);
+	if (view.branch) path += ` (${view.branch})`;
+	if (view.sessionName) path += ` • ${view.sessionName}`;
+	const lines = [Tui.truncateToWidth(theme.fg("dim", path), width, theme.fg("dim", "..."))];
+
+	if (view.usage) {
+		const usage = view.usage;
+		const parts: string[] = [];
+		if (usage.inputTokens) parts.push(`↑${footerTokens(usage.inputTokens)}`);
+		if (usage.outputTokens) parts.push(`↓${footerTokens(usage.outputTokens)}`);
+		if (usage.cacheRead) parts.push(`R${footerTokens(usage.cacheRead)}`);
+		if (usage.cacheWrite) parts.push(`W${footerTokens(usage.cacheWrite)}`);
+		if ((usage.cacheRead > 0 || usage.cacheWrite > 0) && usage.cacheHitPercent != null) {
+			parts.push(`CH${usage.cacheHitPercent.toFixed(1)}%`);
+		}
+		if (usage.cost) parts.push(`$${usage.cost.toFixed(3)}`);
+
+		const context = `${usage.contextPercent == null ? "?" : `${usage.contextPercent.toFixed(1)}%`}/${footerTokens(
+			usage.contextWindow,
+		)} (auto)`;
+		parts.push(
+			usage.contextPercent != null && usage.contextPercent > 90
+				? theme.fg("error", context)
+				: usage.contextPercent != null && usage.contextPercent > 70
+					? theme.fg("warning", context)
+					: context,
+		);
+
+		let statsLeft = parts.join(" ");
+		let statsLeftWidth = Tui.visibleWidth(statsLeft);
+		if (statsLeftWidth > width) {
+			statsLeft = Tui.truncateToWidth(statsLeft, width, "...");
+			statsLeftWidth = Tui.visibleWidth(statsLeft);
+		}
+
+		let model = usage.model;
+		if (usage.reasoning) {
+			model =
+				usage.reasoningEffort === "off" ? `${usage.model} • thinking off` : `${usage.model} • ${usage.reasoningEffort}`;
+		}
+		let right = model;
+		if (view.availableProviderCount > 1) {
+			right = `(${usage.provider}) ${model}`;
+			if (statsLeftWidth + 2 + Tui.visibleWidth(right) > width) right = model;
+		}
+
+		const rightWidth = Tui.visibleWidth(right);
+		let statsLine: string;
+		if (statsLeftWidth + 2 + rightWidth <= width) {
+			statsLine = statsLeft + " ".repeat(width - statsLeftWidth - rightWidth) + right;
+		} else {
+			const availableForRight = width - statsLeftWidth - 2;
+			if (availableForRight > 0) {
+				const truncatedRight = Tui.truncateToWidth(right, availableForRight, "");
+				statsLine =
+					statsLeft +
+					" ".repeat(Math.max(0, width - statsLeftWidth - Tui.visibleWidth(truncatedRight))) +
+					truncatedRight;
+			} else statsLine = statsLeft;
+		}
+		lines.push(theme.fg("dim", statsLeft) + theme.fg("dim", statsLine.slice(statsLeft.length)));
+	}
+
+	const status = [...view.statuses.entries()]
 		.sort(([left], [right]) => left.localeCompare(right))
-		.map(([, text]) => text)
+		.map(([, text]) => footerStatusText(text))
 		.join(" ");
-	return status ? [path, status] : [path];
+	if (status) lines.push(Tui.truncateToWidth(status, width, theme.fg("dim", "...")));
+	return lines;
 }
 
 function eventBody(event: EvtItem): string {
@@ -1212,12 +1319,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		requestHostRender = null;
 		toolHost = undefined;
 		ui?.setWidget(FEED_WIDGET_KEY, undefined);
-		ui?.setStatus(USAGE_STATUS_KEY, undefined);
 		ui?.setFooter(undefined);
-	};
-	const showUsageStatus = (feed: TelegramFeed, ctx: ExtensionContext) => {
-		const text = telegramUsageStatusText(feed.filter, feed.stats, feed.statuses);
-		ctx.ui.setStatus(USAGE_STATUS_KEY, text ? ctx.ui.theme.fg("dim", text) : undefined);
 	};
 	const mountFeedUi = (filter: string | null, ctx: ExtensionContext) => {
 		const scope = filter ? `bot ${filter}` : "all bots";
@@ -1238,17 +1340,16 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			const dispose = footerData.onBranchChange(() => tui.requestRender());
 			return {
 				render(width) {
-					const [path, status] = telegramFooterLines(
-						ctx.sessionManager.getCwd(),
-						process.env.HOME,
-						footerData.getGitBranch(),
-						ctx.sessionManager.getSessionName(),
-						footerData.getExtensionStatuses(),
-					);
-					return [
-						Tui.truncateToWidth(theme.fg("dim", path), width, theme.fg("dim", "...")),
-						...(status ? [Tui.truncateToWidth(status, width, theme.fg("dim", "..."))] : []),
-					];
+					const feed = active?.filter === filter ? active : null;
+					return telegramFooterLines(width, theme, {
+						cwd: ctx.sessionManager.getCwd(),
+						home: process.env.HOME || process.env.USERPROFILE,
+						branch: footerData.getGitBranch(),
+						sessionName: ctx.sessionManager.getSessionName(),
+						usage: feed ? telegramFooterUsage(filter, feed.stats, feed.statuses, getStatusBots(), ctx) : undefined,
+						availableProviderCount: footerData.getAvailableProviderCount(),
+						statuses: footerData.getExtensionStatuses(),
+					});
 				},
 				invalidate() {},
 				dispose,
@@ -1283,7 +1384,6 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			data,
 			changed: (event, feed) => {
 				requestHostRender?.();
-				if (event.type === "stats" && active === feed) showUsageStatus(feed, ctx);
 				if (event.type === "disconnected" && active === feed) {
 					closeCompose(ctx.ui);
 					clearFeedUi(ctx.ui);
@@ -1488,6 +1588,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 					});
 					if (result.outcome === "ready") {
 						completionBots = undefined;
+						statusBots = undefined;
 						attachFeed(null, ctx);
 					}
 				} finally {

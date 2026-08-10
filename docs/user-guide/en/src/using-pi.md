@@ -17,7 +17,7 @@ Successful first setup attaches the global feed automatically. Later, choose the
 /tg detach             # Disconnect live IPC but retain the transcript
 ```
 
-The Telegram feed is one TUI-only Pi custom entry. Pi owns scrolling, resizing, selection, themes, and image layout. While attached, the extension uses Pi's official footer API to show the path and compact Telegram usage while hiding the unrelated operator-usage row. Displaying messages does not put them into the current Pi agent's provider context.
+The Telegram feed is one TUI-only Pi custom entry. Pi owns scrolling, resizing, selection, themes, and image layout. While attached, the extension uses Pi's official footer API and Pi's native three-row layout for the path, Telegram usage/model, and compose status, while hiding the unrelated operator-usage row. Displaying messages does not put them into the current Pi agent's provider context.
 
 Use Tab or Pi's selection menu after `/tg `. Bot arguments come from the currently validated config.
 
@@ -51,7 +51,7 @@ This boundary prevents a remote success plus local acknowledgement failure from 
 /tg status friend      # Lifetime + latest details
 ```
 
-Pi `/tg status` and Telegram `/status` share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md): lifetime covers retained SQLite `llm_runs`, including compaction calls, while current context is `used/window/percent` from the latest main-conversation run rather than a historical prompt sum. The attached footer contains only path/branch/session name and Telegram/compose status; `/tg detach` restores Pi's default footer.
+Pi `/tg status` and Telegram `/status` share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md): lifetime covers retained SQLite `llm_runs`, including compaction calls, while current context is `used/window/percent` from the latest main-conversation run rather than a historical prompt sum. The attached footer follows Pi's native path, usage/model, and compose-status rows; `/tg detach` restores Pi's default footer.
 
 ## Local events, streams, and media
 
