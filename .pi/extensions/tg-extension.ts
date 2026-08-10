@@ -575,6 +575,24 @@ export function telegramUsageStatusText(
 	return parts.join(" ");
 }
 
+export function telegramFooterLines(
+	cwd: string,
+	home: string | undefined,
+	branch: string | null,
+	sessionName: string | undefined,
+	statuses: ReadonlyMap<string, string>,
+): string[] {
+	const displayCwd =
+		home && cwd === home ? "~" : home && cwd.startsWith(`${home}/`) ? `~${cwd.slice(home.length)}` : cwd;
+	let path = branch ? `${displayCwd} (${branch})` : displayCwd;
+	if (sessionName) path += ` • ${sessionName}`;
+	const status = [...statuses.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([, text]) => text)
+		.join(" ");
+	return status ? [path, status] : [path];
+}
+
 function eventBody(event: EvtItem): string {
 	try {
 		const payload = JSON.parse(event.payload) as Record<string, unknown>;
@@ -1195,12 +1213,13 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		toolHost = undefined;
 		ui?.setWidget(FEED_WIDGET_KEY, undefined);
 		ui?.setStatus(USAGE_STATUS_KEY, undefined);
+		ui?.setFooter(undefined);
 	};
 	const showUsageStatus = (feed: TelegramFeed, ctx: ExtensionContext) => {
 		const text = telegramUsageStatusText(feed.filter, feed.stats, feed.statuses);
 		ctx.ui.setStatus(USAGE_STATUS_KEY, text ? ctx.ui.theme.fg("dim", text) : undefined);
 	};
-	const mountFeedWidget = (filter: string | null, ctx: ExtensionContext) => {
+	const mountFeedUi = (filter: string | null, ctx: ExtensionContext) => {
 		const scope = filter ? `bot ${filter}` : "all bots";
 		ctx.ui.setWidget(
 			FEED_WIDGET_KEY,
@@ -1215,6 +1234,26 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			},
 			{ placement: "aboveEditor" },
 		);
+		ctx.ui.setFooter((tui, theme, footerData) => {
+			const dispose = footerData.onBranchChange(() => tui.requestRender());
+			return {
+				render(width) {
+					const [path, status] = telegramFooterLines(
+						ctx.sessionManager.getCwd(),
+						process.env.HOME,
+						footerData.getGitBranch(),
+						ctx.sessionManager.getSessionName(),
+						footerData.getExtensionStatuses(),
+					);
+					return [
+						Tui.truncateToWidth(theme.fg("dim", path), width, theme.fg("dim", "...")),
+						...(status ? [Tui.truncateToWidth(status, width, theme.fg("dim", "..."))] : []),
+					];
+				},
+				invalidate() {},
+				dispose,
+			};
+		});
 	};
 	const resolveBot = (arg: string | undefined, ui: ExtensionContext["ui"]): BotConfig | undefined => {
 		if (!arg) {
@@ -1238,7 +1277,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		closeCompose(ctx.ui);
 		active?.detach("replaced by a new /tg attach");
 		clearFeedUi(ctx.ui);
-		mountFeedWidget(filter, ctx);
+		mountFeedUi(filter, ctx);
 		const data = { instanceId: makeId(), filter };
 		pending = {
 			data,
@@ -1570,7 +1609,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				let level: "info" | "error" = result.status === 0 ? "info" : "error";
 				if (sub === "restart" && result.status === 0 && output.includes("daemon ready")) {
 					if (restartFeed) {
-						mountFeedWidget(restartFeed.filter, ctx);
+						mountFeedUi(restartFeed.filter, ctx);
 						const connected = await restartFeed.reconnect();
 						if (!connected) {
 							clearFeedUi(ctx.ui);

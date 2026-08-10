@@ -17,7 +17,7 @@
 | P0 | compaction hook 把 `prep.messagesToSummarize` 直接 `as never` 交给 Pi `serializeConversation()` | Pi serializer 接收 provider `Message[]`；Telegram custom messages 可能被遗漏，类型错误被 cast 隐藏 | 按 Pi 文档先 `convertToLlm()`，再 `serializeConversation()`；bump cache schema |
 | P1 | `VisionScheduler` 的 foreground/background 双队列只有 foreground 生产调用；小时/日计数仅在进程内存存在 | 优先级分支是死机制；重启即清零的配额既不准确，也会无声跳过用户媒体 | 改成单 FIFO 并发门；删除小时/日配额、budget error 和对应配置/telemetry |
 | P1 | 视频帧位置通过 file id、hash、伪随机数和截断正态分布生成 | 对最多 3 帧的任务没有可观察收益，增加实现与统计测试 | 使用固定代表位置；仍保留帧数、文件、超时、输出和全局并发硬上限 |
-| P1 | Pi footer 通过 `as never` 伪造一份不完整 `AgentSession` 再传给 `FooterComponent` | 依赖组件内部读取形状，是升级脆弱的真实 hack | 删除 `/tg panel` 和 fake session adapter；attached feed 改用官方 `ctx.ui.setStatus` 提供紧凑统计，并保留 `/tg status` 与 Telegram `/status` 明细 |
+| P1 | Pi footer 通过 `as never` 伪造一份不完整 `AgentSession` 再传给 `FooterComponent` | 依赖组件内部读取形状，是升级脆弱的真实 hack | 删除 `/tg panel` 和 fake session adapter；attached feed 用官方 `setFooter` 仅保留路径/status，并由 `setStatus` 提供紧凑统计；保留两个 `/status` 明细 |
 | P1 | 配置仍接受旧模型拼写，并让省略的 `tools.search` / `vision.enabled` 根据历史行为隐式开启 | 存在第二套隐含语义，配置表面值不能完整解释行为 | 删除兼容别名和隐式启用；normalized 类型改为真实必填形状 |
 | P2 | 两个 compaction e2e 脚本重复，其中一个绕过公开控制方法读取 private session；telemetry/媒体测试含大量一次性展示断言 | 增大修改面与维护成本，没有守住长期 invariant | 合并 e2e 到公开入口；删除已完成调查记录和随功能一起消失的展示测试，保留安全/缓存/幂等回归 |
 
@@ -51,7 +51,7 @@
 | compaction 生命周期 | `session_before_compact` / `session_compact` | 已复用；只保留 Telegram 专用 summary instruction |
 | transcript 序列化 | `serializeConversation` | 已复用；修正输入类型 |
 | TUI layout、Markdown、图片转换、assistant/tool card | 已公开提供 | 已复用；工具调用改用`ToolExecutionComponent` |
-| footer customization | `ctx.ui.setFooter` 会替换 footer，`FooterComponent` 要求真实 session；`ctx.ui.setStatus` 可在原生 footer 追加持久 status | 不再伪造 session或替换 footer；删除 panel，attached feed 用 `setStatus` 显示紧凑 usage |
+| footer customization | `ctx.ui.setFooter` 可公开替换 footer并提供branch/status；`FooterComponent` 要求真实session；`ctx.ui.setStatus`提供持久status | 不复用`FooterComponent`、不伪造session；attached期间用最小两行footer隐藏operator usage，detach恢复默认 |
 | model reference parser | `parseModelPattern` 有导出，但标为 internal/testing，且是依赖 model catalog 的模糊匹配器 | 保留严格的小型 `provider/model:thinking` parser |
 | provider cache retention | 底层 stream option 有，`createAgentSession` option 无 | 保留单点 wrapper，不扩散私有访问 |
 | Telegram transport、routing、SQLite outbox、search、sandboxed JS | Pi 无对应领域实现 | 保留项目实现 |
@@ -80,7 +80,7 @@
 
 - `BotRuntime` 和 extension 文件偏大，但职责仍分别围绕一个 session owner 和一个 Pi extension。现在拆层只会增加共享类型、转发方法和 ownership 模糊，暂不为行数重构。
 - daemon supervision 与 manual-send 状态机看似复杂，但分别保护单进程 owner 和未知提交幂等，不能按“防御代码”删除。
-- telemetry 的共享读模型服务 Telegram `/status`、Pi `/tg status` 和 attached feed 的紧凑 footer status；删除的是 fake session 适配层，不删除成本可观测性。
+- telemetry 的共享读模型服务 Telegram `/status`、Pi `/tg status` 和 attached feed 的紧凑 footer status；attached footer 不读取 operator session usage，删除 fake session 适配层而不删除成本可观测性。
 - Biome 的弃用提示是独立机械维护项，不影响运行或 cache；在行为清理后单独迁移，不能夹入功能提交。
 
 ## TUI 补充审查
@@ -89,7 +89,7 @@
 - 消息标题用`botId ? ... : username ? ...`，导致own bot消息有username也必然隐藏。新标题始终优先呈现display name + `@username`，bot id降为右侧metadata。
 - 全部身份曾只分成固定human/bot两色。现在用稳定identity hash选择Pi theme已有语义/语法色；没有硬编码RGB、独立palette配置或持久颜色表。
 - feed entry内部重复的scope/帮助header已删除；scope与两个常用动作只留在editor上方的一行官方widget。卡片只保留身份、消息定位信息和正文/媒体，避免同一信息占两层。
-- fake `AgentSession` footer 已删除；attached feed 的成本统计经官方 `ctx.ui.setStatus` 进入 Pi 原生 footer extension-status 行，不接管 footer component。
+- fake `AgentSession` footer 已删除；attached feed 用官方 `ctx.ui.setFooter` 只画 cwd/branch/session name 与 extension statuses，并经 `ctx.ui.setStatus` 更新成本统计。它不读取 Pi session usage，detach 后恢复默认 footer。
 
 以上均为本地UI side channel，Cache impact为**NONE**；不改system、tool schema、消息grammar或provider payload。
 
@@ -100,7 +100,7 @@
 1. compaction 改用 `convertToLlm`，建立 cache schema v12，并加一条 custom-message 回归。
 2. 简化 vision 并发门和视频取帧；删除无持久语义的配额配置。
 3. 删除旧配置兼容语义，并让 normalized 类型消除下游 fallback。
-4. 删除 fake Pi footer 与 `/tg panel`，用官方 footer status 保留 attached feed 紧凑统计，并保留 `/tg status` 明细。
+4. 删除 fake Pi footer 与 `/tg panel`，用官方两行 footer/status 保留 attached feed 紧凑统计、隐藏 operator usage，并保留 `/tg status` 明细。
 5. 对齐Pi原生工具卡并重排Telegram卡片身份层级。
 6. 合并 compaction e2e、删除完成态调查记录，并按长期 invariant 收缩测试。
 7. 运行完整验证漏斗；全部通过后才部署并检查生产 daemon。
