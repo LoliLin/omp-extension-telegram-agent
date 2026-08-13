@@ -323,7 +323,7 @@ describe("unified usage telemetry", () => {
 			expect(piStatus).toContain("context_current=777 / 128,000 (0.6%)");
 			expect(piStatus).toContain("cache_and_cost=CH 46.7% · $0.1500");
 			expect(footerLines[0]).toBe("~/project (main) • ops");
-			expect(footerLines[1]).toStartWith("↑750 ↓170 R700 W50 CH46.7% $0.1500 0.6%/128k (auto)");
+			expect(footerLines[1]).toStartWith("↑750 ↓170 R700 W50 CH46.7% $0.1500 0.8%/128k (auto)");
 			expect(footerLines[1]).toEndWith("(test) chat-model • high");
 			expect(visibleWidth(footerLines[1]!)).toBe(100);
 			expect(footerLines).toHaveLength(2);

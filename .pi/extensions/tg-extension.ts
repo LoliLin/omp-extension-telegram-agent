@@ -608,11 +608,7 @@ export function telegramFooterUsage(
 	const status = statuses[currentBotId];
 	const bot = configured.get(currentBotId);
 	const model = resolveStatusModel(bot, status, host);
-	const usage = summarizeBotUsage(
-		totals,
-		model?.contextWindow ?? status?.contextWindow ?? 0,
-		status?.currentContextTokens,
-	);
+	const usage = summarizeBotUsage(totals, model?.contextWindow ?? status?.contextWindow ?? 0);
 	return {
 		inputTokens: totals.cacheMiss,
 		outputTokens: totals.outputTokens,
