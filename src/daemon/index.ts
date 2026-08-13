@@ -352,7 +352,17 @@ async function shutdown(signal: string) {
 	for (const p of pollers) p.stop();
 	clearInterval(retentionTimer);
 	const mediaCacheStop = mediaCache.stop();
-	for (const rt of runtimes.values()) await rt.stop();
+	const runtimeStops = await Promise.allSettled([...runtimes.values()].map((rt) => rt.stop()));
+	for (const [index, result] of runtimeStops.entries()) {
+		if (result.status === "rejected") {
+			const botId = [...runtimes.keys()][index];
+			log.warn("daemon", "runtime_stop_failed", {
+				bot_id: botId,
+				category: "dispose_failed",
+				error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+			});
+		}
+	}
 	await mediaCacheStop;
 	if (controlTasks.size > 0) {
 		await Promise.race([Promise.allSettled([...controlTasks]), new Promise((resolve) => setTimeout(resolve, 5_000))]);
