@@ -159,3 +159,6 @@ personas/*.md
 !personas/template.en.md
 .DS_Store
 docs/dev/req.md
+
+# pi-subagents run artifacts
+.pi/subagents/
