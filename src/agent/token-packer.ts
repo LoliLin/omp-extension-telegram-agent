@@ -76,7 +76,6 @@ export interface PackedMessageEvents {
 	estimatedTokens: number;
 	visibleMessageIds: number[];
 	deferredMandatory: number;
-	droppedNormal: number;
 }
 
 function eventKey(event: MessageEvent): string {
@@ -117,9 +116,8 @@ export function packMessageEvents(
 	for (const event of mandatory) {
 		if (!trySelect(event, true)) deferredMandatory++;
 	}
-	let droppedNormal = 0;
 	for (let index = normal.length - 1; index >= 0; index--) {
-		if (!trySelect(normal[index]!, false)) droppedNormal++;
+		trySelect(normal[index]!, false);
 	}
 	selected.sort((left, right) => left.ingestSeq - right.ingestSeq || left.eventDate - right.eventDate);
 	const visibleBefore = new Set(serializeOptions.visibleIds);
@@ -133,6 +131,5 @@ export function packMessageEvents(
 		estimatedTokens: estimateProviderTokensUpperBound(text),
 		visibleMessageIds: [...new Set(visibleMessageIds)],
 		deferredMandatory,
-		droppedNormal,
 	};
 }

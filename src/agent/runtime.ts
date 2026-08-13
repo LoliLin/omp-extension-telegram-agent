@@ -1200,10 +1200,17 @@ export class BotRuntime {
 					!obligationIds.has(event.messageId) &&
 					!(event.kind === "message" && this.visibleMessageIds.has(event.messageId)),
 			);
-		const requiredEvents = (): MessageEvent[] =>
-			[...obligationEvents, ...recent.filter((event) => obligationIds.has(event.messageId))].filter(
-				(event) => !consumedControl.has(event.messageId),
-			);
+		const requiredEvents = (): MessageEvent[] => {
+			const seen = new Set<number>();
+			const result: MessageEvent[] = [];
+			const candidates = [...obligationEvents, ...recent.filter((event) => obligationIds.has(event.messageId))];
+			for (const event of candidates) {
+				if (consumedControl.has(event.messageId) || seen.has(event.ingestSeq)) continue;
+				seen.add(event.ingestSeq);
+				result.push(event);
+			}
+			return result;
+		};
 		let mandatory = requiredEvents();
 		let normal = ordinaryEvents();
 
@@ -1248,9 +1255,19 @@ export class BotRuntime {
 			estimated_tokens: packed.estimatedTokens,
 			suffix_budget: suffixBudget,
 		});
+		if (packed.deferredMandatory > 0) {
+			log.warn("agent_runtime", "obligations_deferred", {
+				bot_id: this.bot.id,
+				trigger_message_id: this.currentTriggerMessageId,
+				deferred_mandatory: packed.deferredMandatory,
+				suffix_budget: suffixBudget,
+			});
+		}
 		if (!packed.text.trim()) {
 			if (highWater > consumedSeq) setConsumedSeq(this.db, this.bot.id, chatId, highWater);
-			return replyObligationCount(this.db, this.bot.id, chatId) > 0;
+			// No provider call was made: nothing changed, so looping again cannot make progress.
+			// Deferred obligations stay pending until the next trigger or a compaction frees budget.
+			return false;
 		}
 		const stickerCandidates = recentContextStickerCandidates(
 			this.db,
