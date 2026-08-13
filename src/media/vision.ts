@@ -390,10 +390,6 @@ function emitTelemetry(options: EnsureVisionOptions, telemetry: VisionTelemetry)
 	}
 }
 
-export function visionMimeForPath(filePath: string): VisionImageInput["mimeType"] | null {
-	return staticMediaMimeForPath(filePath);
-}
-
 function localMediaVisionOutcome(outcome: LocalMediaFailure): VisionOutcome {
 	if (outcome === "aborted") return "media_download_aborted";
 	return outcome;

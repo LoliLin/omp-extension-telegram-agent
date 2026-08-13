@@ -1052,7 +1052,6 @@ export class BotRuntime {
 					await finishCommittedComponent("sticker", error.raw, rawTelegramMessageId(error.raw));
 				}
 			} catch (error) {
-				if (error instanceof SentMessagePersistenceError) throw error;
 				return await handleCreateFailure("sticker", error);
 			}
 		}

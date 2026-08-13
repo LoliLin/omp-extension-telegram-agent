@@ -207,7 +207,3 @@ export function setBotState(db: Database, botId: string, key: string, value: str
 		"INSERT INTO bot_state (bot_id, key, value) VALUES (?, ?, ?) ON CONFLICT(bot_id, key) DO UPDATE SET value = excluded.value",
 	).run(botId, key, value);
 }
-
-export function deleteBotState(db: Database, botId: string, key: string): void {
-	db.query("DELETE FROM bot_state WHERE bot_id = ? AND key = ?").run(botId, key);
-}

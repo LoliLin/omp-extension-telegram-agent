@@ -1,8 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { RoutingDecision, TriggerResult } from "../agent/router.ts";
 
-const ACCEPTED_STATUSES = ["started", "coalesced"] as const;
-
 /**
  * Reserve one deterministic routing attempt. A later enrichment may route only when no prior
  * attempt was accepted by a runtime. `nobody` decisions intentionally create no claim.
@@ -49,8 +47,4 @@ export function finishRoutingClaim(
 		   SET status = ?, updated_at = ?
 		 WHERE chat_id = ? AND message_id = ? AND bot_id = ? AND route_version = ?
 	`).run(status, Date.now(), decision.chatId, decision.messageId, decision.target, routeVersion);
-}
-
-export function isAcceptedRoutingStatus(status: string): boolean {
-	return (ACCEPTED_STATUSES as readonly string[]).includes(status);
 }
