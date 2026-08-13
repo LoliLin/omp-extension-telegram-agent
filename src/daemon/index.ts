@@ -145,12 +145,8 @@ if (storedSchema !== String(CACHE_SCHEMA_VERSION)) {
 	log.info("daemon", "cache_schema_reconciled", { previous: storedSchema ?? "none", current: CACHE_SCHEMA_VERSION });
 	setDaemonState(db, "cache_schema_version", String(CACHE_SCHEMA_VERSION));
 }
-const routeCounters = new Map<string, number>();
-
 function recordRouteMetric(metric: string, botId: string, messageId: number): void {
-	const count = (routeCounters.get(metric) ?? 0) + 1;
-	routeCounters.set(metric, count);
-	log.info("routing", "decision", { bot_id: botId, message_id: messageId, outcome: metric, count });
+	log.info("routing", "decision", { bot_id: botId, message_id: messageId, outcome: metric });
 }
 
 // IPC server for TUI attach/detach
