@@ -21,6 +21,7 @@
 - `docs/engineering/debugging-guide.md` — 结构化日志与 Debug impact
 - `docs/engineering/documentation-guide.md` — 文档写作规范
 - `docs/engineering/code-review-2608.md` — 2026-08 全面 review 结论与 Pi 能力审计
+- `docs/engineering/code-review-2608-2.md` — 2026-08-13 四路并行 review:误报记录、修复决策与未采纳清单
 - `docs/runbooks/daemon.md` — daemon 运维
 - `docs/user-guide/` — 双语用户指南
 
