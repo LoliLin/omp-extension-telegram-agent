@@ -22,6 +22,7 @@ const MAX_VISION_UPDATES = 256;
 const VISION_UPDATE_TTL_MS = 10 * 60 * 1000;
 const MAX_MEDIA_READY_UPDATES = 256;
 const MEDIA_READY_TTL_MS = 10 * 60 * 1000;
+const MAX_PENDING_USAGE = 256;
 const IMAGE_MIME: Record<string, string> = {
 	png: "image/png",
 	jpg: "image/jpeg",
@@ -297,6 +298,10 @@ export class TimelineClient implements TimelinePort {
 			this.emitFresh("append", [message.item]);
 		} else if (message.type === "usage") {
 			this.pendingUsage.set(message.run.id, message.run);
+			if (this.pendingUsage.size > MAX_PENDING_USAGE) {
+				const oldest = this.pendingUsage.keys().next().value as number | undefined;
+				if (oldest !== undefined) this.pendingUsage.delete(oldest);
+			}
 			this.emitStats();
 		} else if (message.type === "vision_update") {
 			this.receiveVisionUpdate(message.fileUniqueId, message.text);
