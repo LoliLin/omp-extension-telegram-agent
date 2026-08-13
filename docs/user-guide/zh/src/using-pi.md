@@ -51,7 +51,7 @@ feed header 会在 `attached` 后显示 `send as ...` 或 `choose bot on send`�
 /tg status friend      # lifetime + latest 明细
 ```
 
-Pi `/tg status` 与 Telegram `/status` 共用[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)：lifetime 来自 SQLite `llm_runs` 保留期并包含 compact 调用，current context 只取最近主对话 run 并显示 `used/window/percent`，不是历史 prompt 总和。attached footer 保持 Pi 原生的路径与 usage/model 信息顺序，compose guidance 留在 feed header；`/tg detach`后恢复Pi默认footer。
+Pi `/tg status` 与 Telegram `/status` 共用[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)：lifetime 来自 SQLite `llm_runs` 保留期并包含 compact 调用，current context 直接取 daemon 中对应 Pi session 的实时 `used/window/percent`，不是最近 run 或历史 prompt 总和。attached footer 使用同一实时值，并保持 Pi 原生的路径与 usage/model 信息顺序；compose guidance 留在 feed header，`/tg detach`后恢复Pi默认footer。
 
 ## 本地事件、stream 与媒体
 

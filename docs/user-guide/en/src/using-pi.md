@@ -51,7 +51,7 @@ This boundary prevents a remote success plus local acknowledgement failure from 
 /tg status friend      # Lifetime + latest details
 ```
 
-Pi `/tg status` and Telegram `/status` share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md): lifetime covers retained SQLite `llm_runs`, including compaction calls, while current context is `used/window/percent` from the latest main-conversation run rather than a historical prompt sum. The attached footer follows Pi's native path and usage/model rows, while compose guidance stays in the feed header; `/tg detach` restores Pi's default footer.
+Pi `/tg status` and Telegram `/status` share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md): lifetime covers retained SQLite `llm_runs`, including compaction calls, while current context is the live `used/window/percent` from the corresponding Pi session rather than the latest run or a historical prompt sum. The attached footer uses that same live value and follows Pi's native path and usage/model rows, while compose guidance stays in the feed header; `/tg detach` restores Pi's default footer.
 
 ## Local events, streams, and media
 
