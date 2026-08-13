@@ -111,7 +111,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true` 才会执行。`auxili
 
 ## Compaction 与 context epoch
 
-- 主模型传给Pi的有效context window固定为65,536；Pi估算达到32,768时，`tg-compaction` 用状态导向 prompt 生成不超过800字的摘要，并只保留最后一个完整turn原文。更早原文不再进入provider，只有摘要仍可见。
+- 主模型传给Pi的有效context window固定为65,536；compaction 触发公式为 `contextTokens > contextWindow - reserveTokens`，其中 `reserveTokens = max(16,384, 65,536 - compaction_threshold)`，所以 threshold 最高生效值为 49,152（config 校验拒绝超过它的值，避免 requested/effective 静默分叉）。缺省/示例 threshold 为 32,768（提前触发，缓冲 Pi 对 CJK 的 token 低估），生产为 49,152。`tg-compaction` 用状态导向 prompt 生成不超过800字的摘要，并保留最近 `compaction_keep_recent` token 原文（缺省 1 = 最后一个完整turn，生产 20,000）。更早原文不再进入provider，只有摘要仍可见。
 - summary 输入使用 Pi 的 `serializeConversation(convertToLlm(messages))`，因此 Telegram custom message 与 Pi 原生消息遵循同一 provider projection。
 - 空摘要、provider failure 或 abort 会 cancel；cursor、visible refs 与 epoch 均不伪造变化。
 - 成功结果的 structured details 保存当前 `consumedSeq` 与 retained `visibleMessageIds`。runtime 用这些 details 替换 visibility、推进 epoch；`consumedSeq` 永不回退。

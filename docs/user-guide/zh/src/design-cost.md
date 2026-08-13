@@ -24,7 +24,7 @@ Telegram canonical history与immutable event stream保存在SQLite。每只bot�
 
 ## 4. Compaction 在明确边界换epoch
 
-主模型有效context固定为64K；Pi估算到32K时生成摘要，只保留最后一个完整turn原文，然后进入新epoch。失败或空摘要不会伪造epoch；structured details替换visible refs，业务消费cursor永不回退，也不会重放已压缩历史。
+主模型有效context固定为64K；上下文到达可配置的触发阈值（缺省32K，最高49,152）时生成摘要，保留最近可配置数量的原文（缺省只保留最后一个完整turn），然后进入新epoch。失败或空摘要不会伪造epoch；structured details替换visible refs，业务消费cursor永不回退，也不会重放已压缩历史。
 
 compaction使用配置的廉价task model且关闭provider cache retention，因此不是每轮在线优化器。阈值和保留量由配置决定，效果用telemetry验证。权威规则见[Cache工程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md)与[测试状态](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/testing.md)。
 

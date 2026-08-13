@@ -24,7 +24,7 @@ The default new-suffix cap is 12,000 tokens and the per-event cap is 4,096. This
 
 ## 4. Compaction changes epochs at an explicit boundary
 
-The main model uses an effective 64K context window. When Pi estimates 32K tokens, it produces a summary, retains only the latest complete turn verbatim, and starts a new epoch. Failed or empty summaries do not fabricate an epoch. Structured details replace visible references, while the business-consumption cursor never moves backward or replays compacted history.
+The main model uses an effective 64K context window. When context reaches the configurable trigger threshold (default 32K, maximum 49,152), it produces a summary, retains the configured amount of recent verbatim text (default: only the latest complete turn), and starts a new epoch. Failed or empty summaries do not fabricate an epoch. Structured details replace visible references, while the business-consumption cursor never moves backward or replays compacted history.
 
 Compaction uses a configured cheap task model with provider cache retention disabled, so it is not an every-turn online optimizer. Configuration controls the threshold and retained amount; telemetry validates the result. See [Cache engineering](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md) and [test status](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/testing.md).
 

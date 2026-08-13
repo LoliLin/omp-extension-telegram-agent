@@ -18,7 +18,7 @@ import {
 	type SessionEntry,
 	type SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
-import type { BotConfig, AppConfig } from "../config.ts";
+import { EFFECTIVE_CONTEXT_WINDOW, MIN_COMPACTION_RESERVE, type AppConfig, type BotConfig } from "../config.ts";
 import { getBotState, setBotState } from "../db/db.ts";
 import { BotApi, TelegramApiError } from "../telegram/api.ts";
 import { TelegramTypingLease, type ActivityScheduler } from "../telegram/activity.ts";
@@ -333,7 +333,7 @@ export class BotRuntime {
 		};
 		const catalogModel = this.modelRuntime.getModel(this.bot.provider, this.bot.model);
 		if (!catalogModel) throw new Error(`model not found: ${this.bot.provider}/${this.bot.model}`);
-		const model = { ...catalogModel, contextWindow: Math.min(catalogModel.contextWindow, 65_536) };
+		const model = { ...catalogModel, contextWindow: Math.min(catalogModel.contextWindow, EFFECTIVE_CONTEXT_WINDOW) };
 		this.model = model;
 		const compactionSelection = parsePiModelReference(this.bot.compactionModel);
 		if (!compactionSelection) throw new Error("invalid compaction_model; expected provider/model:effort");
@@ -347,7 +347,7 @@ export class BotRuntime {
 		// Custom compaction: chat-oriented summary (state, not replay), threshold from config.
 		// Pi's trigger formula is contextTokens > contextWindow - reserveTokens, so reserve = window - threshold.
 		const threshold = this.bot.compactionThreshold;
-		const reserveTokens = Math.max(16_384, model.contextWindow - threshold);
+		const reserveTokens = Math.max(MIN_COMPACTION_RESERVE, model.contextWindow - threshold);
 		// Tool order is cache-visible protocol: never reorder (docs/cache.md, REQ-TEST-0001 R2).
 		// Per-bot tool toggles (REQ-CONF-0001): filter the fixed-order tool list. send off
 		// means the bot cannot speak in-group (observer-only); search/run_js off saves tokens.

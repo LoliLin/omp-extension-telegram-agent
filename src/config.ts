@@ -18,6 +18,15 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isPiThinkingLevel, loadPiModelDefaults, type PiModelDefaults } from "./agent/model-settings.ts";
 import { canonicalPiModelReference, DEFAULT_AUXILIARY_VISUAL_MODEL } from "./agent/model-ref.ts";
 
+// Effective main-model context window passed to Pi, and the minimum reserve Pi keeps for the
+// next response + compaction output. Together they cap the highest meaningful compaction
+// threshold: any value above MAX_COMPACTION_THRESHOLD behaves identically to it (silently
+// clamped by max() in BotRuntime). Config must reject values above the cap instead of letting
+// a requested/effective fork go unnoticed (same stance as model-runtime.ts on reasoning).
+export const EFFECTIVE_CONTEXT_WINDOW = 65_536;
+export const MIN_COMPACTION_RESERVE = 16_384;
+export const MAX_COMPACTION_THRESHOLD = EFFECTIVE_CONTEXT_WINDOW - MIN_COMPACTION_RESERVE;
+
 export interface TelegramToolsConfigInput {
 	send?: boolean;
 	search?: boolean;
@@ -674,6 +683,12 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 				`[config] bot "${String(b.id)}" selects provider "${provider}" without a model; select both in config or Pi /model`,
 			);
 		}
+		const effectiveThreshold = typeof b.compaction_threshold === "number" ? b.compaction_threshold : defaultThreshold;
+		if (effectiveThreshold > MAX_COMPACTION_THRESHOLD) {
+			errors.push(
+				`[config] bot "${String(b.id)}" compaction_threshold ${effectiveThreshold}: effective trigger is capped at ${MAX_COMPACTION_THRESHOLD} (64K window minus ${MIN_COMPACTION_RESERVE} reserve); use a value <= ${MAX_COMPACTION_THRESHOLD}`,
+			);
+		}
 		return {
 			id: b.id as string,
 			name: typeof b.name === "string" && b.name ? b.name : (b.id as string),
@@ -684,7 +699,7 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 			provider,
 			model,
 			reasoningEffort: isPiThinkingLevel(b.reasoning_effort) ? b.reasoning_effort : defaultEffort,
-			compactionThreshold: typeof b.compaction_threshold === "number" ? b.compaction_threshold : defaultThreshold,
+			compactionThreshold: effectiveThreshold,
 			compactionKeepRecent: typeof b.compaction_keep_recent === "number" ? b.compaction_keep_recent : defaultKeepRecent,
 			compactionModel:
 				typeof b.compaction_model === "string"
