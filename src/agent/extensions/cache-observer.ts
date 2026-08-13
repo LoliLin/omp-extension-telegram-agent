@@ -9,6 +9,22 @@ export interface ProviderPayloadObservation {
 	firstDivergentSegment: "system" | "tools" | "messages" | "payload" | null;
 	firstDivergentMessageIndex: number | null;
 	firstDivergentByteOffset: number | null;
+	tokenEstimate: {
+		system: number;
+		tools: number;
+		compactedHistory: number;
+		messages: number;
+	};
+}
+
+function tokenEstimate(value: unknown): number {
+	return Math.max(0, Math.round(Buffer.byteLength(canonicalJson(value), "utf8") / 2));
+}
+
+function containsCompactionSummary(value: unknown): boolean {
+	if (typeof value === "string") return value.includes("conversation history before this point was compacted");
+	if (Array.isArray(value)) return value.some(containsCompactionSummary);
+	return Boolean(value && typeof value === "object" && Object.values(value).some(containsCompactionSummary));
 }
 
 export interface PreviousProviderPayloadFingerprint {
@@ -124,6 +140,8 @@ export function observeProviderPayload(
 	const toolsHash = hmac(key, toolsJson);
 	const messageHashes = messageJson.map((message) => hmac(key, message));
 	const fullPayloadHash = hmac(key, fullJson);
+	const compactedMessages = segments.messages.filter(containsCompactionSummary);
+	const ordinaryMessages = segments.messages.filter((message) => !containsCompactionSummary(message));
 	let firstDivergentSegment: ProviderPayloadObservation["firstDivergentSegment"] = null;
 	let firstDivergentMessageIndex: number | null = null;
 	let firstDivergentByteOffset: number | null = null;
@@ -160,6 +178,12 @@ export function observeProviderPayload(
 		firstDivergentSegment,
 		firstDivergentMessageIndex,
 		firstDivergentByteOffset,
+		tokenEstimate: {
+			system: tokenEstimate(segments.system),
+			tools: tokenEstimate(segments.tools),
+			compactedHistory: compactedMessages.reduce<number>((sum, message) => sum + tokenEstimate(message), 0),
+			messages: ordinaryMessages.reduce<number>((sum, message) => sum + tokenEstimate(message), 0),
+		},
 	};
 	Object.defineProperty(observation, PAYLOAD_SNAPSHOT, {
 		value: { systemJson, toolsJson, messageJson, fullJson } satisfies PayloadSnapshot,

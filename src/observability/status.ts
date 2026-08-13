@@ -41,6 +41,8 @@ export const BOT_STATUS_FIELD_KEYS = [
 	"state",
 	"model",
 	"context_current",
+	"context_breakdown",
+	"speed",
 	"latest_request",
 	"latest_usage",
 	"lifetime",
@@ -80,7 +82,7 @@ export function buildBotStatusView(
 	};
 }
 
-export function botStatusFields(view: BotStatusView): BotStatusField[] {
+export function botStatusFields(view: BotStatusView, visual = false): BotStatusField[] {
 	const last = view.stats.last;
 	const latestApprox = last?.cacheEstimated ? "≈" : "";
 	const lifetimeApprox = view.usage.cacheEstimated ? "≈" : "";
@@ -91,6 +93,11 @@ export function botStatusFields(view: BotStatusView): BotStatusField[] {
 			value: `${view.provider}/${view.model} · reasoning ${view.reasoningEffort} · epoch ${view.epoch == null ? "—" : integer(view.epoch)}`,
 		},
 		context_current: { label: "当前上下文", value: formatContext(view.usage.context) },
+		context_breakdown: { label: "上下文构成", value: formatContextBreakdown(view, visual) },
+		speed: {
+			label: "平均速度",
+			value: `${rate(view.usage.averageTokensPerSecond)} tok/s · send ${duration(view.usage.averageSendMs)} · think ${duration(view.usage.averageThinkingMs)}`,
+		},
 		latest_request: {
 			label: "最近请求",
 			value: last ? `${time(last.ts)} · ${duration(last.latencyMs)} · $${formatUsdCost(last.cost)}` : "—",
@@ -123,6 +130,34 @@ export function botStatusFields(view: BotStatusView): BotStatusField[] {
 		},
 	};
 	return BOT_STATUS_FIELD_KEYS.map((key) => ({ key, ...fields[key] }));
+}
+
+function rate(value: number | null): string {
+	return value == null ? "—" : value.toFixed(1);
+}
+
+function formatContextBreakdown(view: BotStatusView, visual: boolean): string {
+	const breakdown = view.stats.last?.contextBreakdown;
+	const window = view.usage.context.contextWindow;
+	if (!breakdown || window <= 0) return "—";
+	const parts = [
+		["S", "🟥", "system prompt", breakdown.system],
+		["T", "🟪", "tool desc", breakdown.tools],
+		["C", "🟫", "compacted history", breakdown.compactedHistory],
+		["M", "🟦", "message", breakdown.messages],
+		[
+			"F",
+			"🟩",
+			"free",
+			Math.max(0, window - breakdown.system - breakdown.tools - breakdown.compactedHistory - breakdown.messages),
+		],
+	] as const;
+	return parts
+		.map(([short, square, label, tokens]) => {
+			const percentage = `${((tokens / window) * 100).toFixed(1)}%`;
+			return visual ? `${square.repeat(Math.round(tokens / 1024))} (${label} ${percentage})` : `${short} ${percentage}`;
+		})
+		.join(visual ? "  " : " · ");
 }
 
 export function renderBotStatusPlain(view: BotStatusView): string {

@@ -30,6 +30,7 @@ function fingerprintInput(): ContextFingerprintInput {
 		provider: "openai-codex",
 		api: "responses",
 		model: "gpt-5.6-luna",
+		contextWindow: 65_536,
 		reasoningEffort: "off",
 		cacheRetention: "short",
 		cacheSchemaVersion: 8,
@@ -102,7 +103,7 @@ describe("Pi context protocol", () => {
 			model: "deepseek-v4-flash",
 			requested: "medium",
 			effective: "high",
-			supported: ["off", "high", "max"],
+			supported: ["off", "low", "high", "max"],
 			valid: false,
 		});
 		await expect(
@@ -118,7 +119,7 @@ describe("Pi context protocol", () => {
 		).rejects.toMatchObject({
 			category: "unsupported_reasoning_effort",
 			purpose: "bot:A",
-			reasoning: { requested: "medium", effective: "high", supported: ["off", "high", "max"] },
+			reasoning: { requested: "medium", effective: "high", supported: ["off", "low", "high", "max"] },
 		});
 		expect(
 			await configureBotModelRuntime(
@@ -277,13 +278,29 @@ describe("Pi context protocol", () => {
 				content: "stale-display",
 				display: false,
 				details: {
-					version: 2,
+					version: 3,
 					consumedSeq: 9,
 					providerText: "canonical-provider-text",
+					stickerCandidates: "candidate",
 					visibleMessageIds: [42],
 					events: [{ ingestSeq: 9, kind: "message", chatId: -1001, messageId: 42, fullMessageVisible: true }],
 				},
 				timestamp: 1,
+			},
+			{
+				role: "custom",
+				customType: "telegram_context_v2",
+				content: "stale-display-2",
+				display: false,
+				details: {
+					version: 3,
+					consumedSeq: 10,
+					providerText: "newest-provider-text",
+					stickerCandidates: "newest-candidate",
+					visibleMessageIds: [43],
+					events: [{ ingestSeq: 10, kind: "message", chatId: -1001, messageId: 43, fullMessageVisible: true }],
+				},
+				timestamp: 2,
 			},
 			{
 				role: "toolResult",
@@ -292,12 +309,13 @@ describe("Pi context protocol", () => {
 				content: [{ type: "text", text: "ok" }],
 				details: { sent: [100, 101] },
 				isError: false,
-				timestamp: 2,
+				timestamp: 3,
 			},
 		] as never);
 
 		expect((projected[0] as { content: string }).content).toBe("canonical-provider-text");
-		expect(JSON.stringify(projected[1])).toContain("sent_message_ids=#100,#101");
+		expect((projected[1] as { content: string }).content).toBe("newest-provider-text\n\nnewest-candidate");
+		expect(JSON.stringify(projected[2])).toContain("sent_message_ids=#100,#101");
 	});
 
 	test("unpublished assistant prose is absent from the next context", () => {

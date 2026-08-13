@@ -24,8 +24,8 @@ export default defineConfig({
 
 	// ===== Local behavior (every field has a default; shown for visibility) =====
 
-	compaction_threshold: 128_000, // compact only when context exceeds this many tokens
-	compaction_keep_recent: 20_000, // keep this many recent tokens verbatim after compaction
+	compaction_threshold: 32_768, // effective window is 64K; compact early for underestimated CJK text
+	compaction_keep_recent: 1, // keep only the latest complete turn verbatim
 	sampling_cooldown_ms: 2_000, // min interval between two unprompted replies per bot
 	max_suffix_tokens: 12_000, // cap on new-message tokens attached per provider call
 	max_message_tokens: 4_096, // per-message token cap

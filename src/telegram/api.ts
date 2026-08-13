@@ -127,8 +127,8 @@ export class BotApi {
 	}
 
 	/** Current deployment's group-capable processing indicator; draft Thinking is private-only. */
-	sendChatAction(chatId: number): Promise<true> {
-		return this.call<true>("sendChatAction", { chat_id: chatId, action: "typing" }, CHAT_ACTION_TIMEOUT_MS);
+	sendChatAction(chatId: number, signal?: AbortSignal): Promise<true> {
+		return this.call<true>("sendChatAction", { chat_id: chatId, action: "typing" }, CHAT_ACTION_TIMEOUT_MS, signal);
 	}
 
 	getFile(

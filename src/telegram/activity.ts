@@ -22,12 +22,13 @@ export class TelegramTypingLease {
 	private generation = 0;
 	private timer: unknown = null;
 	private inFlight = false;
+	private inFlightAbort: AbortController | null = null;
 	private attemptedThisLease = false;
 	private failureReported = false;
 	private readonly counts: TypingLeaseMetrics = { starts: 0, attempts: 0, renewals: 0, stops: 0, failures: 0 };
 
 	constructor(
-		private readonly sendTyping: () => Promise<unknown>,
+		private readonly sendTyping: (signal: AbortSignal) => Promise<unknown>,
 		private readonly options: {
 			intervalMs?: number;
 			scheduler?: ActivityScheduler;
@@ -60,6 +61,8 @@ export class TelegramTypingLease {
 		this.generation++;
 		if (this.timer != null) this.scheduler.clearTimeout(this.timer);
 		this.timer = null;
+		this.inFlightAbort?.abort();
+		this.inFlightAbort = null;
 		this.counts.stops++;
 		return true;
 	}
@@ -76,14 +79,17 @@ export class TelegramTypingLease {
 		if (this.inFlight) return;
 
 		this.inFlight = true;
+		const abort = new AbortController();
+		this.inFlightAbort = abort;
 		this.counts.attempts++;
 		if (this.attemptedThisLease) this.counts.renewals++;
 		this.attemptedThisLease = true;
 		let request: Promise<unknown>;
 		try {
-			request = this.sendTyping();
+			request = this.sendTyping(abort.signal);
 		} catch (error) {
 			this.inFlight = false;
+			if (this.inFlightAbort === abort) this.inFlightAbort = null;
 			this.noteFailure(error, generation);
 			return;
 		}
@@ -93,6 +99,7 @@ export class TelegramTypingLease {
 			})
 			.catch((error) => this.noteFailure(error, generation))
 			.finally(() => {
+				if (this.inFlightAbort === abort) this.inFlightAbort = null;
 				this.inFlight = false;
 				if (this.active && generation !== this.generation && !this.attemptedThisLease) {
 					if (this.timer != null) this.scheduler.clearTimeout(this.timer);

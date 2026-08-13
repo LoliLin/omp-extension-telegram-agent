@@ -438,7 +438,7 @@ function escapeRichStatusValue(value: string): string {
 function statusRichSection(view: BotStatusView): string {
 	return [
 		`## ${escapeRichMarkdown(view.name)} · ${escapeRichMarkdown(view.id)}`,
-		...botStatusFields(view).map((field) => `- **${field.label}**：${escapeRichStatusValue(field.value)}`),
+		...botStatusFields(view, true).map((field) => `- **${field.label}**：${escapeRichStatusValue(field.value)}`),
 	].join("\n");
 }
 

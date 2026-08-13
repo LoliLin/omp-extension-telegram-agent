@@ -3,7 +3,7 @@ import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { MessageEventKind } from "../../db/message-events.ts";
 
 export const TELEGRAM_CONTEXT_TYPE = "telegram_context_v2";
-export const TELEGRAM_CONTEXT_VERSION = 2;
+export const TELEGRAM_CONTEXT_VERSION = 3;
 
 export interface TelegramContextEventRef {
 	ingestSeq: number;
@@ -17,6 +17,7 @@ export interface TelegramContextDetails {
 	version: typeof TELEGRAM_CONTEXT_VERSION;
 	consumedSeq: number;
 	providerText: string;
+	stickerCandidates: string;
 	visibleMessageIds: number[];
 	events: TelegramContextEventRef[];
 }
@@ -29,6 +30,7 @@ export function isTelegramContextDetails(value: unknown): value is TelegramConte
 		Number.isSafeInteger(details.consumedSeq) &&
 		(details.consumedSeq as number) >= 0 &&
 		typeof details.providerText === "string" &&
+		typeof details.stickerCandidates === "string" &&
 		Array.isArray(details.visibleMessageIds) &&
 		details.visibleMessageIds.every((id) => Number.isSafeInteger(id) && id > 0) &&
 		Array.isArray(details.events) &&
@@ -51,7 +53,10 @@ export function isTelegramContextDetails(value: unknown): value is TelegramConte
  * rendered Telegram grammar to recover message identities.
  */
 export function projectTelegramContext(messages: AgentMessage[]): AgentMessage[] {
-	return messages.map((message) => {
+	const lastTelegramContext = messages.findLastIndex(
+		(message) => message.role === "custom" && message.customType === TELEGRAM_CONTEXT_TYPE,
+	);
+	return messages.map((message, index) => {
 		if (message.role === "toolResult" && message.toolName === "send") {
 			const details = message.details as { sent?: unknown; outcome?: unknown } | undefined;
 			const sent = Array.isArray(details?.sent)
@@ -67,7 +72,11 @@ export function projectTelegramContext(messages: AgentMessage[]): AgentMessage[]
 		}
 		if (message.role !== "custom" || message.customType !== TELEGRAM_CONTEXT_TYPE) return message;
 		if (!isTelegramContextDetails(message.details)) return message;
-		return { ...message, content: message.details.providerText };
+		const candidates = index === lastTelegramContext ? message.details.stickerCandidates.trim() : "";
+		return {
+			...message,
+			content: candidates ? `${message.details.providerText}\n\n${candidates}` : message.details.providerText,
+		};
 	});
 }
 

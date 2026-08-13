@@ -57,6 +57,13 @@ function migrate(db: Database): void {
 		["input_events", "INTEGER NOT NULL DEFAULT 0"],
 		["input_tokens_estimated", "INTEGER NOT NULL DEFAULT 0"],
 		["rows_scanned", "INTEGER NOT NULL DEFAULT 0"],
+		["system_tokens", "INTEGER NOT NULL DEFAULT 0"],
+		["tools_tokens", "INTEGER NOT NULL DEFAULT 0"],
+		["compacted_history_tokens", "INTEGER NOT NULL DEFAULT 0"],
+		["message_tokens", "INTEGER NOT NULL DEFAULT 0"],
+		["thinking_ms", "INTEGER NOT NULL DEFAULT 0"],
+		["send_ms", "INTEGER NOT NULL DEFAULT 0"],
+		["send_samples", "INTEGER NOT NULL DEFAULT 0"],
 	];
 	let addedCacheEstimate = false;
 	for (const [column, sqlType] of runMigrations) {

@@ -5,6 +5,7 @@ import type { Database } from "bun:sqlite";
 import type { BotConfig } from "../src/config.ts";
 import { openDb } from "../src/db/db.ts";
 import { BotApi, TelegramApiError } from "../src/telegram/api.ts";
+import { TelegramTypingLease } from "../src/telegram/activity.ts";
 import {
 	TelegramControlCommandService,
 	type ParsedTelegramControlCommand,
@@ -29,6 +30,23 @@ beforeEach(() => {
 
 afterEach(() => {
 	db.close();
+});
+
+test("typing stop aborts an in-flight action so it cannot reappear after a fast reply", async () => {
+	let aborted = false;
+	const lease = new TelegramTypingLease(
+		(signal) =>
+			new Promise((_resolve, reject) => {
+				signal.addEventListener("abort", () => {
+					aborted = true;
+					reject(signal.reason);
+				});
+			}),
+	);
+	lease.start();
+	expect(lease.stop()).toBe(true);
+	await Bun.sleep(0);
+	expect(aborted).toBe(true);
 });
 
 function telegramMessage(messageId: number, rich: boolean): Record<string, unknown> {

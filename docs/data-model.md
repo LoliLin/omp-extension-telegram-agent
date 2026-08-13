@@ -84,7 +84,7 @@
 
 ### llm_runs
 
-- 每次 provider response 记录 usage/cost/latency/epoch，以及 provider/api、session id hash、cache retention、system/tools/messages/full payload HMAC 与首次 divergence 位置。`cache_read/cache_write/cache_miss` 保留 provider 原值；nullable `cache_read_estimated` 只在相邻两次 raw payload 满足严格前缀时保存本地理论复用量。
+- 每次 provider response 记录 usage/cost/latency/epoch、thinking/send耗时，以及 provider/api、session id hash、cache retention、system/tools/messages/full payload HMAC 与首次 divergence 位置。`system/tools/compacted_history/message_tokens`保存按payload形状归一到实际provider总token的分段估算；`cache_read/cache_write/cache_miss` 保留 provider 原值。
 - 同时记录 trigger message、public send count、vision calls、tool follow-up rounds、input event 数、保守 token estimate 与 rows scanned。
 - status 的 lifetime totals 聚合**当前保留行**（含 compaction）；current context 只取最新 `compaction = 0` 主对话 run，不累计 occupancy。字段和公式以 `docs/telemetry.md` 为准。
 

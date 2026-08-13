@@ -35,7 +35,7 @@ import {
 } from "../src/agent/extensions/index.ts";
 
 const GOLDEN = {
-	schemaVersion: 12,
+	schemaVersion: 13,
 	systemZhTemplate: "0dadcaf37061",
 	systemEnTemplate: "fabd0ba82eab",
 	serialize: "68a17d6e5c05",
@@ -43,7 +43,7 @@ const GOLDEN = {
 	tools: "b16b54cf6564",
 	compactionPrompt: "045a5241fdd7",
 	extensionOrder: "e04f7032d531",
-	contextProtocol: "a9ca6974ac5f",
+	contextProtocol: "c810cd1e5ab3",
 };
 
 test("CACHE_SCHEMA_VERSION unchanged", () => {

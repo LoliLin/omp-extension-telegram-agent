@@ -5,7 +5,7 @@
 ## Invariants
 
 1. 稳定 prefix 的首字节始终来自共享群聊协议，之后才是 persona；固定顺序的 tool name、description 与 parameter schema 属于同一 cache cohort。
-2. Telegram 动态内容只能以新的结构化 session entry 追加，不得改写已持久 entry 的 provider projection。
+2. Telegram 消息正文只能以新的结构化 session entry 追加，不得改写；recent sticker candidates是唯一例外，它不属于正文，投影时会从旧entry移除并只放在当前最后一批消息后。
 3. `messages` 是 UI/canonical 最新读模型；provider 只消费不可变 `message_events`。edit、metadata enrichment 与 vision completion 都追加 delta。
 4. 已消费位置与当前可见性分离：`bot_cursors.consumed_seq` 只单调前进，`bot_visible_messages` 可在成功 compaction 或 session 轮换时替换。
 5. 只有完整 context fingerprint 相同且 manifest 指向的 session 文件存在时才恢复 session。cache-visible 身份改变必须在 restore 前创建新 session/context epoch。
@@ -14,7 +14,9 @@
 
 ## CACHE_SCHEMA_VERSION
 
-当前：**12**。
+当前：**13**。
+
+v13 把最近 sticker 候选从每个历史 Telegram entry 的永久正文拆为结构化字段；context 投影只在最后一个 Telegram batch 后追加一次候选，因此历史形态从 `msg1+candidates, msg2+candidates, msg3+candidates` 变为 `msg1, msg2, msg3+candidates`。这会让相邻请求从上一轮候选位置分叉，但把候选总量从随turn线性增长降为恒定最多8条；对当前缺少provider cache usage的deployment，选择显著更小的64K输入。主模型有效窗口同时固定为64K，Pi估算32K时触发compaction且只保留最后一个完整turn原文。升级会为每个 bot 创建新 epoch，旧 session 文件保留。
 
 v12 修正 custom Telegram message 的 compaction 输入：严格按 Pi 官方流程先调用 `convertToLlm()`，再把 provider messages 交给 `serializeConversation()`。旧实现用 cast 绕过类型并直接序列化 `AgentMessage[]`，可能让 Telegram context 在摘要输入中消失。升级会为每个 bot 创建新 epoch，旧 session 文件保留。
 
@@ -54,18 +56,19 @@ cache-visible protocol 包括：
 - v10：恢复当前可见上下文中最近 8 个、该 bot 可发送的用户 sticker，作为本轮消息后的最终动态 suffix；更新 send tool description。
 - v11：固定 catalog、最近候选与 send tool description 显式标注 static / animated / video sticker。
 - v12：compaction 先用 Pi `convertToLlm` 投影 custom Telegram messages，再序列化 summary 输入。
+- v13：recent sticker candidates只投影在最后一个Telegram batch；主模型有效窗口固定64K并在Pi估算32K时压缩到摘要+最后turn。
 
 ## Provider payload 结构
 
 ```text
 system: SHARED_PROTOCOL + separator + persona [+ separator + identity + format sticker catalog]
-messages: structured Telegram projection [+ final recent-context sticker candidates] + assistant/tool/summary entries
+messages: structured Telegram projections + assistant/tool/summary entries; recent-context sticker candidates only follow the last Telegram projection
 tools: [{ name, description, parameters }] in fixed order
 ```
 
 - `src/agent/prompt.ts` 拥有 shared protocol/persona 组装。
 - `src/agent/tools.ts` 是 provider-facing 工具参数、调用、错误和终止语义的唯一权威；persona 不复制工具参数表。
-- `src/agent/extensions/context.ts` 从 `telegram_context_v2.details.providerText` 投影 provider 内容；恢复 cursor/visible ids 只读 structured details，绝不解析渲染文本。
+- `src/agent/extensions/context.ts` 从 `telegram_context_v2.details.providerText/stickerCandidates` 投影 provider 内容；旧 entry 只投影消息正文，候选只跟在当前最后一个 Telegram entry 后。恢复 cursor/visible ids 只读 structured details，绝不解析渲染文本。
 - `send` 成功后 provider 只看到有界 ACK 与 sent message ids；本地发送详情继续写 SQLite/event。
 - 未通过 `send` 发布的 assistant prose 写入本地 `agent_events`，session 中用固定 `[no_send]` 代替；thinking/tool protocol entry 保留。
 
@@ -82,7 +85,7 @@ tools: [{ name, description, parameters }] in fixed order
 
 - message event 保留原有日期、时间、sender、reply、quote、forward 与媒体占位符语义。
 - message/event bytes 一旦写入 session 就不重算；后续变化使用 `edit`、`metadata`、`media_update` delta。
-- `telegram_context_v2.details` 同时保存 `consumedSeq`、本 entry 的 event refs、`visibleMessageIds` 与固定 provider projection。
+- `telegram_context_v2.details` 同时保存 `consumedSeq`、本 entry 的 event refs、`visibleMessageIds`、固定消息 projection 与独立 sticker candidates。
 - session 写入成功或启动 reconcile 能从 structured details 证明写入后，SQLite cursor 才前进。provider 失败不会靠文本猜测状态。
 
 ## 有界 suffix 与 sticker catalog
@@ -91,8 +94,7 @@ tools: [{ name, description, parameters }] in fixed order
 - reply obligation 优先打包；普通 event 从最新端选择后恢复时间顺序。默认 suffix 上限 12,000 tokens，单 event 上限 4,096 tokens，并为输出、reasoning 与 tool follow-up 预留空间。
 - 普通溢出 event 可以被 cursor 消费但不标 visible；reply obligation 只有在结构化 commit marker 证明交付后才删除。
 - sticker catalog 在启动时同步进 DB 后以 identity + format block（每行 set + format + emoji + short_id，按 set 名 + rowid 排序）固化在 system prompt 尾部；prefix 由配置 + DB catalog 唯一决定，重启间稳定。catalog identity/format 变化通过 fingerprint snapshot 开新 epoch。
-- runtime 另从 `bot_visible_messages` 与本轮新打包消息的并集取最近 8 个不同的用户 sticker；只保留当前 bot 有 mapping 的项，并在 event/message bytes 全部序列化后追加 `Available stickers (recent context)`。这只增加当前 entry 尾部的有界 miss bytes，之前的 provider prefix 保持逐字节不变；预算不足时不追加。
-- 这段 recent sticker tail 是明确接受的趣味功能与成本：只要它仍严格位于最终尾部、上限 8 条且不重算旧 entry/prefix，cache review 不应为了消除这点有界 miss bytes 而删除或重构它。
+- runtime 另从 `bot_visible_messages` 与本轮新打包消息的并集取最近 8 个不同的用户 sticker；只保留当前 bot 有 mapping 的项。候选独立存储，provider projection会从所有旧 Telegram entry 移除候选，只在当前最后一批消息后追加一次；预算不足时不追加。
 - page fetch 先受 8,000 字符本地护栏约束，再受 2,048 provider tokens 上限约束；query 与工具失败输出同样有界。
 
 ## Vision 与 provider boundary
@@ -109,7 +111,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true` 才会执行。`auxili
 
 ## Compaction 与 context epoch
 
-- Pi 达到配置阈值时，`tg-compaction` 用状态导向 prompt 生成不超过 800 字的摘要，并保留配置的 recent tail。
+- 主模型传给Pi的有效context window固定为65,536；Pi估算达到32,768时，`tg-compaction` 用状态导向 prompt 生成不超过800字的摘要，并只保留最后一个完整turn原文。更早原文不再进入provider，只有摘要仍可见。
 - summary 输入使用 Pi 的 `serializeConversation(convertToLlm(messages))`，因此 Telegram custom message 与 Pi 原生消息遵循同一 provider projection。
 - 空摘要、provider failure 或 abort 会 cancel；cursor、visible refs 与 epoch 均不伪造变化。
 - 成功结果的 structured details 保存当前 `consumedSeq` 与 retained `visibleMessageIds`。runtime 用这些 details 替换 visibility、推进 epoch；`consumedSeq` 永不回退。
@@ -133,7 +135,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true` 才会执行。`auxili
 
 | 项目 | 值 |
 | --- | --- |
-| schema | `12` |
+| schema | `13` |
 | zh system | `0dadcaf37061` |
 | en system | `fabd0ba82eab` |
 | legacy message serializer | `68a17d6e5c05` |
@@ -141,7 +143,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true` 才会执行。`auxili
 | tools | `b16b54cf6564` |
 | compaction prompt | `045a5241fdd7` |
 | extension order | `e04f7032d531` |
-| context protocol | `a9ca6974ac5f` |
+| context protocol | `c810cd1e5ab3` |
 | sticker catalog block | exact-string lock（identity + format grammar） |
 | recent-context sticker suffix | exact-string lock（最近、去重、user-only、bot-sendable、最终尾部） |
 

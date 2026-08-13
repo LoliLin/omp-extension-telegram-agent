@@ -42,9 +42,12 @@ daemon 的 runtime snapshot 是 provider/model、**实际生效 reasoning effort
 | 当前上下文 | `context` | latest 主对话 `context_tokens / model.contextWindow` | 同时显示 tokens、window 与一位小数百分比；不是 lifetime prompt 总和 |
 | Reasoning | `reasoning` | `reasoning_tokens` | latest 取单行；lifetime 求和 |
 | Latency | `latency` / `avg` | `latency_ms` / `SUM(latency_ms) ÷ COUNT(latency_ms)` | 缺失样本显示 `—` |
+| Token speed | `tok/s` | 主对话 `SUM(output_tokens) ÷ SUM(latency_ms)` | compaction output不参与 |
+| Thinking | `think` | 主对话thinking可见段的wall time平均；无thinking为0 | 不保存thinking正文 |
+| Send | `send` | `send` tool从执行到settle的wall time平均 | 包含Telegram create与本地commit |
 | Cost | `$` | `cost` | latest 取单行；lifetime 跨 provider/model 求和 |
 
-`context_tokens` 是发送给 provider 的 prompt tokens，即 `↑ + R + W`；`output_tokens` 单列。因此“当前上下文 16,000 / 128,000”与“累计 prompt 1,600,000”可以同时成立，二者不可互换。
+`context_tokens` 是发送给 provider 的 prompt tokens，即 `↑ + R + W`；`output_tokens` 单列。主对话有效window固定为65,536。payload observer按provider请求中的system、tools、compaction summary、其他messages估算相对占比，再归一到provider返回的`context_tokens`，保证四段和等于实际总数；free为window减四段。Telegram按provider顺序用红/紫/棕/蓝/绿方块展示，每个方块代表四舍五入后的1,024 tokens；Pi用`S/T/C/M/F`文字简写。
 
 本地 fallback 仅在以下条件全部成立时启用：当前 provider 原始 `cache_read = 0` 且 `cache_write = 0`、cache retention 不是 `none`；上一条主对话 run 与当前 run 的 bot/provider/api/model/epoch/session/cache retention 相同；两次 raw payload 的 system 与 tools HMAC 相同，上一条完整 message HMAC 列表是当前列表的逐项严格前缀；且当前 `context_tokens` 不小于上一条。此时 `cache_read_estimated = previous.context_tokens`。首次请求、任一旧 message 被改写、模型或 session/epoch 切换、compaction、无缓存策略以及 provider 已报告 read/write 时都不估算。旧库 migration 对保留行使用完全相同的相邻双 payload 规则回填。
 
@@ -69,7 +72,7 @@ attached feed 的 footer 与 Pi 原生 `FooterComponent` 保持相同信息顺�
 
 ## 格式与边界
 
-- Telegram `/status`、Pi `/tg status` 与 attached footer 的费用使用同一 formatter：至少 4 位、至多 6 位小数，费用整数部分使用英文逗号千位分隔；百分比固定一位小数。
+- Telegram `/status`、Pi `/tg status` 与 attached footer 的费用使用同一 formatter：至少 4 位、至多 6 位小数，费用整数部分使用英文逗号千位分隔；百分比固定一位小数。详细status同时展示平均tok/s、send与think耗时及上下文分段。
 - Pi `/tg status` 与 Telegram `/status` 的详细整数统一使用英文逗号千位分隔。
 - Telegram 富消息仍受 3500 字上限；只能按完整 bot 小节省略，不能在 Markdown 中间截断。
 - 格式化和查看 telemetry 不调用 provider，不改变 session、context epoch 或 cache-visible payload。

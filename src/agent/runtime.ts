@@ -110,6 +110,7 @@ import { parsePiModelReference, type PiRequestThinkingLevel } from "./model-ref.
 import type { VisionScheduler } from "../media/vision-scheduler.ts";
 import type { VideoTranscoderAvailability } from "../media/video-frames.ts";
 import { log } from "../observability/log.ts";
+import { fitContextBreakdown } from "../observability/usage.ts";
 import { AgentActivityCollector } from "./activity.ts";
 
 const MAX_EVENT_SCAN = 256;
@@ -205,6 +206,10 @@ export class BotRuntime {
 	private pendingInputMetrics = { inputEvents: 0, estimatedTokens: 0, rowsScanned: 0, visionCalls: 0 };
 	private providerCallsInRun = 0;
 	private lastLlmRunId: number | null = null;
+	private lastUsageRun: UsageRun | null = null;
+	private thinkingStartedAt = 0;
+	private thinkingMs = 0;
+	private thinkingFinished = false;
 	private readonly visionScheduler: VisionScheduler | null;
 	private readonly typingLease: TelegramTypingLease;
 	private readonly videoTranscoder: VideoTranscoderAvailability | undefined;
@@ -231,7 +236,7 @@ export class BotRuntime {
 		options: {
 			monotonicNow?: () => number;
 			activityScheduler?: ActivityScheduler;
-			chatActionSender?: () => Promise<unknown>;
+			chatActionSender?: (signal: AbortSignal) => Promise<unknown>;
 			api?: BotApi;
 			botApis?: ReadonlyMap<string, MediaDownloadApi>;
 			visionExecutor?: VisionExecutor;
@@ -250,18 +255,21 @@ export class BotRuntime {
 		this.api = options.api ?? new BotApi(bot.token);
 		this.botApis = options.botApis ?? new Map([[bot.id, this.api]]);
 		const chatId = Number(`-100${config.groupPeerId}`);
-		this.typingLease = new TelegramTypingLease(options.chatActionSender ?? (() => this.api.sendChatAction(chatId)), {
-			scheduler: options.activityScheduler,
-			onFailure: (error) => {
-				const category =
-					error instanceof TelegramApiError
-						? `telegram_${error.code}`
-						: typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "TimeoutError"
-							? "timeout"
-							: "request_failed";
-				log.warn("telegram_activity", "typing_failed", { bot_id: this.bot.id, category, retry: true });
+		this.typingLease = new TelegramTypingLease(
+			options.chatActionSender ?? ((signal) => this.api.sendChatAction(chatId, signal)),
+			{
+				scheduler: options.activityScheduler,
+				onFailure: (error) => {
+					const category =
+						error instanceof TelegramApiError
+							? `telegram_${error.code}`
+							: typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "TimeoutError"
+								? "timeout"
+								: "request_failed";
+					log.warn("telegram_activity", "typing_failed", { bot_id: this.bot.id, category, retry: true });
+				},
 			},
-		});
+		);
 		this.epoch = Number(getBotState(db, bot.id, EPOCH_KEY) ?? "1");
 		this.visibleMessageIds = new Set(listVisibleMessageIds(db, bot.id, chatId, this.epoch));
 	}
@@ -323,8 +331,9 @@ export class BotRuntime {
 				};
 			},
 		};
-		const model = this.modelRuntime.getModel(this.bot.provider, this.bot.model);
-		if (!model) throw new Error(`model not found: ${this.bot.provider}/${this.bot.model}`);
+		const catalogModel = this.modelRuntime.getModel(this.bot.provider, this.bot.model);
+		if (!catalogModel) throw new Error(`model not found: ${this.bot.provider}/${this.bot.model}`);
+		const model = { ...catalogModel, contextWindow: Math.min(catalogModel.contextWindow, 65_536) };
 		this.model = model;
 		const compactionSelection = parsePiModelReference(this.bot.compactionModel);
 		if (!compactionSelection) throw new Error("invalid compaction_model; expected provider/model:effort");
@@ -354,6 +363,7 @@ export class BotRuntime {
 			provider: this.bot.provider,
 			api: model.api,
 			model: this.bot.model,
+			contextWindow: model.contextWindow,
 			reasoningEffort: this.bot.reasoningEffort,
 			cacheRetention: this.bot.cacheRetention,
 			cacheSchemaVersion: CACHE_SCHEMA_VERSION,
@@ -551,19 +561,28 @@ export class BotRuntime {
 					this.runStartTs = now;
 					this.providerCallsInRun = 0;
 					this.lastLlmRunId = null;
+					this.lastUsageRun = null;
+					this.thinkingStartedAt = 0;
+					this.thinkingMs = 0;
+					this.thinkingFinished = false;
 					this.pendingPayloadObservations = [];
 					break;
 				case "message_start":
 					if (event.message.role === "assistant") {
+						this.observeThinking(event.message, now);
 						this.updateAssistantStream(event.message, now);
 					}
 					break;
 				case "message_update":
-					if (event.message.role === "assistant") this.updateAssistantStream(event.message, now);
+					if (event.message.role === "assistant") {
+						this.observeThinking(event.message, now);
+						this.updateAssistantStream(event.message, now);
+					}
 					break;
 				case "message_end": {
 					const msg = event.message;
 					if (msg.role === "assistant") {
+						this.observeThinking(msg, now, true);
 						const thinking = msg.content
 							.filter((c) => c.type === "thinking")
 							.map((c) => (c as { thinking: string }).thinking)
@@ -606,6 +625,7 @@ export class BotRuntime {
 					break;
 				case "agent_settled":
 					this.running = false;
+					this.typingLease.stop();
 					this.finishAssistantActivity(now);
 					// no flush re-trigger here: the flush loop owns pendingTrigger (REQ-AGENT-0001 R1)
 					break;
@@ -614,6 +634,24 @@ export class BotRuntime {
 					break;
 			}
 		});
+	}
+
+	private observeThinking(message: Extract<AgentMessage, { role: "assistant" }>, now: number, ended = false): void {
+		if (this.thinkingFinished) return;
+		const hasThinking = message.content.some(
+			(content) => content.type === "thinking" && Boolean((content as { thinking?: string }).thinking),
+		);
+		const hasAnswer = message.content.some((content) =>
+			content.type !== "thinking" && content.type !== "text" ? true : content.type === "text" && Boolean(content.text),
+		);
+		if (hasThinking && this.thinkingStartedAt === 0) this.thinkingStartedAt = now;
+		if (this.thinkingStartedAt > 0 && (hasAnswer || ended)) {
+			this.thinkingMs += Math.max(0, now - this.thinkingStartedAt);
+			this.thinkingStartedAt = 0;
+			this.thinkingFinished = true;
+		} else if (ended) {
+			this.thinkingFinished = true;
+		}
 	}
 
 	private beginAssistantActivity(now: number): void {
@@ -799,6 +837,15 @@ export class BotRuntime {
 	}
 
 	private async executeSend(params: SendParams) {
+		const startedAt = Date.now();
+		try {
+			return await this.executeSendAttempt(params);
+		} finally {
+			this.recordSendDuration(Date.now() - startedAt);
+		}
+	}
+
+	private async executeSendAttempt(params: SendParams) {
 		if (!params.message && !params.sticker) {
 			log.warn("agent_send", "preflight_failed", {
 				bot_id: this.bot.id,
@@ -1213,17 +1260,17 @@ export class BotRuntime {
 			packed.visibleMessageIds,
 		);
 		const stickerCandidateTokens = stickerCandidates ? estimateProviderTokensUpperBound(`\n\n${stickerCandidates}`) : 0;
-		const providerText =
-			stickerCandidates && packed.estimatedTokens + stickerCandidateTokens <= suffixBudget
-				? appendStickerCandidateSuffix(packed.text, stickerCandidates)
-				: packed.text;
+		const boundedStickerCandidates =
+			stickerCandidates && packed.estimatedTokens + stickerCandidateTokens <= suffixBudget ? stickerCandidates : "";
+		const providerText = appendStickerCandidateSuffix(packed.text, boundedStickerCandidates);
 
 		const selectedIds = new Set(packed.visibleMessageIds);
 		const delivered = obligations.filter((obligation) => selectedIds.has(obligation.messageId));
 		const details: TelegramContextDetails = {
 			version: TELEGRAM_CONTEXT_VERSION,
 			consumedSeq: highWater,
-			providerText,
+			providerText: packed.text,
+			stickerCandidates: boundedStickerCandidates,
 			visibleMessageIds: packed.visibleMessageIds,
 			events: packed.events.map((event) => ({
 				ingestSeq: event.ingestSeq,
@@ -1449,6 +1496,10 @@ export class BotRuntime {
 		const reasoningTokens = usage.reasoning ?? 0;
 		const latencyMs = this.runStartTs ? now - this.runStartTs : null;
 		const observation = this.pendingPayloadObservations.shift();
+		const contextBreakdown = fitContextBreakdown(
+			observation?.tokenEstimate ?? { system: 0, tools: 0, compactedHistory: 0, messages: contextTokens },
+			contextTokens,
+		);
 		const metrics = this.pendingInputMetrics;
 		const sessionIdHash = this.session ? sha256(`${this.telemetryHmacKey}:${this.session.sessionId}`) : null;
 		const previous =
@@ -1512,8 +1563,9 @@ export class BotRuntime {
 					cache_retention, full_payload_hash, first_divergent_segment,
 					first_divergent_message_index, first_divergent_byte_offset, trigger_message_id,
 					public_send_count, vision_calls, tool_followup_rounds, input_events,
-					input_tokens_estimated, rows_scanned
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+					input_tokens_estimated, rows_scanned, system_tokens, tools_tokens,
+					compacted_history_tokens, message_tokens, thinking_ms
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				this.bot.id,
@@ -1546,10 +1598,15 @@ export class BotRuntime {
 				metrics.inputEvents,
 				metrics.estimatedTokens,
 				metrics.rowsScanned,
+				contextBreakdown.system,
+				contextBreakdown.tools,
+				contextBreakdown.compactedHistory,
+				contextBreakdown.messages,
+				this.thinkingMs,
 			);
 		this.lastLlmRunId = Number(res.lastInsertRowid);
 		this.pendingInputMetrics = { inputEvents: 0, estimatedTokens: 0, rowsScanned: 0, visionCalls: 0 };
-		this.usageSink?.({
+		const run: UsageRun = {
 			id: this.lastLlmRunId,
 			botId: this.bot.id,
 			ts: now,
@@ -1563,8 +1620,28 @@ export class BotRuntime {
 			outputTokens: usage.output,
 			reasoningTokens,
 			latencyMs,
+			thinkingMs: this.thinkingMs,
+			contextBreakdown,
 			cost: usage.cost.total,
-		});
+		};
+		this.lastUsageRun = run;
+		this.usageSink?.(run);
+		this.thinkingMs = 0;
+		this.thinkingFinished = false;
+	}
+
+	private recordSendDuration(durationMs: number): void {
+		if (this.lastLlmRunId == null || !Number.isFinite(durationMs)) return;
+		this.db
+			.query("UPDATE llm_runs SET send_ms = send_ms + ?, send_samples = send_samples + 1 WHERE id = ?")
+			.run(Math.max(0, Math.round(durationMs)), this.lastLlmRunId);
+		if (!this.lastUsageRun || this.lastUsageRun.id !== this.lastLlmRunId) return;
+		this.lastUsageRun = {
+			...this.lastUsageRun,
+			sendMs: (this.lastUsageRun.sendMs ?? 0) + Math.max(0, Math.round(durationMs)),
+			sendSamples: (this.lastUsageRun.sendSamples ?? 0) + 1,
+		};
+		this.usageSink?.(this.lastUsageRun);
 	}
 
 	private recordCompactionUsage(

@@ -6,6 +6,7 @@ export interface ContextFingerprintInput {
 	provider: string;
 	api: string;
 	model: string;
+	contextWindow: number;
 	reasoningEffort: string;
 	cacheRetention: string;
 	cacheSchemaVersion: number;

@@ -12,7 +12,7 @@ mention、reply、配置名称和HMAC概率桶都由本地代码判断。普通�
 
 ## 2. Stable provider prefix 复用cache
 
-共享协议位于最前，persona随后，末尾是有界的 identity + format sticker 目录，再之后是固定顺序tool schema，让多只bot尽可能共享逐字节相同的prefix。固定目录只含有上限的 set + `static|animated|video` + emoji + short_id。另一份最多8条的动态候选只取当前context真正可见、且该bot可发送的最近用户sticker，并带相同格式标记严格追加在本轮序列化消息之后；它不改写此前prefix，suffix预算不足时整体省略。三种格式都通过Telegram原始file id发送。
+共享协议位于最前，persona随后，末尾是有界的 identity + format sticker 目录，再之后是固定顺序tool schema，让多只bot尽可能共享逐字节相同的prefix。固定目录只含有上限的 set + `static|animated|video` + emoji + short_id。另一份最多8条的动态候选只取当前context真正可见、且该bot可发送的最近用户sticker。候选在session中独立保存，provider只在最后一批Telegram消息之后看到一次，不会在每个历史消息批次后重复；suffix预算不足时整体省略。三种格式都通过Telegram原始file id发送。
 
 fingerprint覆盖Pi/provider/model/cache policy、protocol、persona、serializer、compaction、extensions与tools。cache-visible内容变化必须升级schema，并在restore前创建新session/epoch；旧session文件保留，但不会用不同identity恢复。UI、telemetry和operator命令不能偷偷改变provider bytes。权威规则见[Cache工程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md)。
 
@@ -24,7 +24,7 @@ Telegram canonical history与immutable event stream保存在SQLite。每只bot�
 
 ## 4. Compaction 在明确边界换epoch
 
-context达到配置阈值时，Pi生成摘要并保留最近尾部，然后进入新epoch。失败或空摘要不会伪造epoch；structured details替换visible refs，业务消费cursor永不回退，也不会重放已压缩历史。
+主模型有效context固定为64K；Pi估算到32K时生成摘要，只保留最后一个完整turn原文，然后进入新epoch。失败或空摘要不会伪造epoch；structured details替换visible refs，业务消费cursor永不回退，也不会重放已压缩历史。
 
 compaction使用配置的廉价task model且关闭provider cache retention，因此不是每轮在线优化器。阈值和保留量由配置决定，效果用telemetry验证。权威规则见[Cache工程](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/cache.md)与[测试状态](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/testing.md)。
 

@@ -74,6 +74,10 @@ export interface UsageRun {
 	/** Additive detail fields; absent from old daemons. */
 	reasoningTokens?: number;
 	latencyMs?: number | null;
+	thinkingMs?: number;
+	sendMs?: number;
+	sendSamples?: number;
+	contextBreakdown?: { system: number; tools: number; compactedHistory: number; messages: number };
 	cost: number;
 	/** Auxiliary compaction response: included in totals, never replaces latest conversation context. */
 	compaction?: boolean;
@@ -90,10 +94,16 @@ export interface BotStats {
 	/** Number of retained runs using local structural cache estimates. */
 	estimatedCacheRuns?: number;
 	outputTokens: number;
+	/** Main-conversation output used for speed; excludes auxiliary compaction. */
+	speedOutputTokens?: number;
 	/** Lifetime detail totals; absent from old daemons. */
 	reasoningTokens?: number;
 	totalLatencyMs?: number;
 	latencySamples?: number;
+	totalThinkingMs?: number;
+	thinkingSamples?: number;
+	totalSendMs?: number;
+	sendSamples?: number;
 	firstRunTs?: number | null;
 	cost: number;
 	epoch: number;

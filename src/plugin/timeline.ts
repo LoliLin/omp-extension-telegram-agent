@@ -420,6 +420,11 @@ export class TimelineClient implements TimelinePort {
 				cacheWrite: baseline.cacheWrite ?? 0,
 				estimatedCacheRuns: baseline.estimatedCacheRuns ?? 0,
 				reasoningTokens: baseline.reasoningTokens ?? 0,
+				speedOutputTokens: baseline.speedOutputTokens ?? baseline.outputTokens,
+				totalThinkingMs: baseline.totalThinkingMs ?? 0,
+				thinkingSamples: baseline.thinkingSamples ?? 0,
+				totalSendMs: baseline.totalSendMs ?? 0,
+				sendSamples: baseline.sendSamples ?? 0,
 				totalLatencyMs: baseline.totalLatencyMs ?? 0,
 				latencySamples: baseline.latencySamples ?? 0,
 				firstRunTs: baseline.firstRunTs ?? baseline.last?.ts ?? null,
@@ -432,7 +437,14 @@ export class TimelineClient implements TimelinePort {
 				if (run.cacheEstimated) merged.estimatedCacheRuns!++;
 				merged.cacheMiss += run.cacheMiss;
 				merged.outputTokens += run.outputTokens;
+				if (!run.compaction) merged.speedOutputTokens! += run.outputTokens;
 				merged.reasoningTokens! += run.reasoningTokens ?? 0;
+				if (!run.compaction) {
+					merged.totalThinkingMs! += run.thinkingMs ?? 0;
+					merged.thinkingSamples!++;
+				}
+				merged.totalSendMs! += run.sendMs ?? 0;
+				merged.sendSamples! += run.sendSamples ?? 0;
 				if (run.latencyMs != null) {
 					merged.totalLatencyMs! += run.latencyMs;
 					merged.latencySamples!++;

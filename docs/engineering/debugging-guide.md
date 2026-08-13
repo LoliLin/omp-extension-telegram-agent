@@ -46,7 +46,7 @@ bun run debug -- --bot A --show-provider-content  # 敏感：显式读取完整�
 2. `routing.decision` + `routing_claims`：目标、reason、started/skipped/coalesced是否明确。
 3. `agent_runtime.flush_started`：runtime是否得到response opportunity。
 4. `agent_runtime.context_packed`：`input_events/visible_count/obligation_count/rows_scanned/suffix_budget`是否合理；不查看正文。
-5. `llm_runs` + `agent_runtime.provider_turn_settled|flush_failed|model_silence`：provider是否完成、失败还是沉默。
+5. `llm_runs` + `agent_runtime.provider_turn_settled|flush_failed|model_silence`：provider是否完成、失败还是沉默；run同时给出system/tools/compacted/messages分段与thinking/send耗时，便于核对status。
 6. `agent_tool.execution_started|finished`：哪个tool、是否error；args只在受限本地`agent_events`已有契约内，不进入daemon log/debug报告。
 7. `agent_send.preflight_failed|started|committed|degraded`：Telegram create之前或之后的准确commit boundary。
 8. canonical sent row、`agent_events.send/send_degraded`与IPC event：远端结果后的本地持久化/展示是否完成。

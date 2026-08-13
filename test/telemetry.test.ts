@@ -16,8 +16,8 @@ import { IpcServer } from "../src/daemon/ipc-server.ts";
 import { openDb } from "../src/db/db.ts";
 import { loadBotStats } from "../src/db/usage.ts";
 import type { BotStats, RuntimeControlSnapshot, UsageRun } from "../src/ipc.ts";
-import { BOT_STATUS_FIELD_KEYS } from "../src/observability/status.ts";
-import { summarizeBotUsage } from "../src/observability/usage.ts";
+import { BOT_STATUS_FIELD_KEYS, botStatusFields, buildBotStatusView } from "../src/observability/status.ts";
+import { fitContextBreakdown, summarizeBotUsage } from "../src/observability/usage.ts";
 import { TimelineClient, type TimelineEvent } from "../src/plugin/timeline.ts";
 
 const directories = new Set<string>();
@@ -48,14 +48,20 @@ function insertRun(
 		cost: number;
 		compaction: boolean;
 		estimatedRead?: number | null;
+		breakdown?: { system: number; tools: number; compacted: number; messages: number };
+		thinking?: number;
+		send?: number;
+		sendSamples?: number;
 	},
 ): number {
 	const result = db
 		.query(
 			`INSERT INTO llm_runs
 			 (bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
-			  output_tokens, reasoning_tokens, latency_ms, cost, compaction, cache_read_estimated)
-			 VALUES ('A', ?, ?, 3, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			  output_tokens, reasoning_tokens, latency_ms, cost, compaction, cache_read_estimated,
+			  system_tokens, tools_tokens, compacted_history_tokens, message_tokens,
+			  thinking_ms, send_ms, send_samples)
+			 VALUES ('A', ?, ?, 3, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.run(
 			input.ts,
@@ -70,6 +76,13 @@ function insertRun(
 			input.cost,
 			input.compaction ? 1 : 0,
 			input.estimatedRead ?? null,
+			input.breakdown?.system ?? 0,
+			input.breakdown?.tools ?? 0,
+			input.breakdown?.compacted ?? 0,
+			input.breakdown?.messages ?? 0,
+			input.thinking ?? 0,
+			input.send ?? 0,
+			input.sendSamples ?? 0,
 		);
 	return Number(result.lastInsertRowid);
 }
@@ -89,6 +102,58 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
 }
 
 describe("unified usage telemetry", () => {
+	test("renders provider-order context segments and average speed", () => {
+		const breakdown = fitContextBreakdown(
+			{ system: 8_000, tools: 4_000, compactedHistory: 2_000, messages: 18_000 },
+			32_768,
+		);
+		expect(Object.values(breakdown).reduce((sum, value) => sum + value, 0)).toBe(32_768);
+		const stats: BotStats = {
+			runs: 2,
+			contextTokens: 40_000,
+			cacheRead: 0,
+			cacheMiss: 40_000,
+			outputTokens: 200,
+			speedOutputTokens: 200,
+			totalLatencyMs: 10_000,
+			latencySamples: 2,
+			totalThinkingMs: 2_000,
+			thinkingSamples: 2,
+			totalSendMs: 400,
+			sendSamples: 2,
+			cost: 0,
+			epoch: 1,
+			last: {
+				id: 1,
+				botId: "A",
+				ts: 1,
+				model: "m",
+				epoch: 1,
+				contextTokens: 32_768,
+				cacheRead: 0,
+				cacheMiss: 32_768,
+				outputTokens: 100,
+				contextBreakdown: breakdown,
+				cost: 0,
+			},
+		};
+		const view = buildBotStatusView(
+			{ id: "A", name: "A", provider: "p", model: "m", reasoningEffort: "off", routingP: 0, samplingCooldownMs: 0 },
+			stats,
+			undefined,
+			65_536,
+		);
+		const plain = botStatusFields(view).find((field) => field.key === "context_breakdown")?.value;
+		const visual = botStatusFields(view, true).find((field) => field.key === "context_breakdown")?.value;
+		expect(plain).toMatch(/^S .* · T .* · C .* · M .* · F /);
+		expect(visual).toMatch(
+			/^🟥.*\(system prompt .*\) {2}🟪.*\(tool desc .*\) {2}🟫.*\(compacted history .*\) {2}🟦.*\(message .*\) {2}🟩.*\(free .*\)$/,
+		);
+		expect(botStatusFields(view).find((field) => field.key === "speed")?.value).toBe(
+			"20.0 tok/s · send 200 ms · think 1.00 s",
+		);
+	});
+
 	test("keeps compose guidance in the one-line attached-feed header", () => {
 		const styles: Array<[string, string]> = [];
 		const theme = {

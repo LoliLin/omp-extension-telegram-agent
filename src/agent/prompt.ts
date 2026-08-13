@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-export const CACHE_SCHEMA_VERSION = 12; // v12: compaction serializes Pi-converted custom messages
+export const CACHE_SCHEMA_VERSION = 13; // v13: only the latest Telegram batch exposes sticker candidates
 
 // Fixed shared protocol is deliberately the first byte of every bot's system prompt so bots in
 // the same provider/cache cohort share the longest possible exact prefix.

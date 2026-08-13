@@ -633,8 +633,8 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 				? undefined
 				: piDefaults.model;
 	const defaultEffort = isPiThinkingLevel(raw.reasoning_effort) ? raw.reasoning_effort : "off";
-	const defaultThreshold = num("compaction_threshold", 128000, 1, Number.MAX_SAFE_INTEGER);
-	const defaultKeepRecent = num("compaction_keep_recent", 20000, 1, Number.MAX_SAFE_INTEGER);
+	const defaultThreshold = num("compaction_threshold", 32_768, 1, Number.MAX_SAFE_INTEGER);
+	const defaultKeepRecent = num("compaction_keep_recent", 1, 1, Number.MAX_SAFE_INTEGER);
 	const defaultCompactionModel =
 		typeof raw.compaction_model === "string"
 			? canonicalPiModelReference(raw.compaction_model)!
