@@ -5,6 +5,7 @@ import type { Database } from "bun:sqlite";
 import { readFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { contentText } from "@earendil-works/pi-ai";
 import {
 	createAgentSession,
 	DefaultResourceLoader,
@@ -828,10 +829,7 @@ export class BotRuntime {
 			{ cacheRetention: "none", maxTokens: 4096, reasoning: this.compactionReasoning },
 		);
 		this.recordCompactionUsage(result.usage, Date.now());
-		const summary = result.content
-			.filter((c: { type: string }) => c.type === "text")
-			.map((c: unknown) => (c as { text: string }).text)
-			.join("\n");
+		const summary = contentText(result.content);
 		if (!summary.trim()) return null;
 		return { summary, usage: result.usage };
 	}

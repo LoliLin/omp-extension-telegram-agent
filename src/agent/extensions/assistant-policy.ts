@@ -1,14 +1,11 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { contentText } from "@earendil-works/pi-ai";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 
 export const NO_SEND_MARKER = "[no_send]";
 
 function assistantText(message: Extract<AgentMessage, { role: "assistant" }>): string {
-	return message.content
-		.filter((content) => content.type === "text")
-		.map((content) => content.text)
-		.join("\n")
-		.trim();
+	return contentText(message.content).trim();
 }
 
 /** Keep protocol-required tool/thinking blocks, but never carry unpublished assistant prose. */

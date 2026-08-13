@@ -5,7 +5,7 @@
 import type { Database } from "bun:sqlite";
 import { log } from "../observability/log.ts";
 import { convertToPng, type ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
+import { contentText, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
 import type { BotApi } from "../telegram/api.ts";
 import { parsePiModelReference } from "../agent/model-ref.ts";
 import {
@@ -331,13 +331,7 @@ export function createPiVisionExecutor(
 				};
 			}
 
-			const text = message.content
-				.filter(
-					(content): content is Extract<(typeof message.content)[number], { type: "text" }> => content.type === "text",
-				)
-				.map((content) => content.text)
-				.join("\n")
-				.trim();
+			const text = contentText(message.content).trim();
 			const outcome: VisionOutcome = text ? "ok" : "empty_response";
 			return {
 				text: text || null,
