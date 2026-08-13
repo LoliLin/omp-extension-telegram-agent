@@ -255,7 +255,7 @@ export class TelegramControlCommandService {
 			case "help":
 				return { text: HELP_TEXT, outcome: "ok" };
 			case "status":
-				return this.formatStatus();
+				return this.formatStatus(command.replyBotId);
 			case "set":
 				return this.set(command.replyBotId, command.action.parameter, command.action.value);
 			case "compact":
@@ -265,19 +265,14 @@ export class TelegramControlCommandService {
 		}
 	}
 
-	private formatStatus(): ControlExecutionResult {
-		const lines: string[] = [];
-		const richSections: string[] = [];
-		for (const bot of this.bots) {
-			const snapshot = this.runtimes.get(bot.id)?.controlSnapshot();
-			const view = buildBotStatusView(bot, loadBotStats(this.db, bot.id), snapshot);
-			if (lines.length > 0) lines.push("");
-			lines.push(renderBotStatusPlain(view));
-			richSections.push(statusRichSection(view));
-		}
+	private formatStatus(botId: string): ControlExecutionResult {
+		const bot = this.bots.find((candidate) => candidate.id === botId);
+		if (!bot) return { text: `未知 bot：${bounded(botId)}`, outcome: "unknown_bot" };
+		const snapshot = this.runtimes.get(bot.id)?.controlSnapshot();
+		const view = buildBotStatusView(bot, loadBotStats(this.db, bot.id), snapshot);
 		return {
-			text: boundedReply(lines.join("\n")),
-			richText: boundedRichStatus(richSections),
+			text: boundedReply(renderBotStatusPlain(view)),
+			richText: boundedRichStatus([statusRichSection(view)]),
 			outcome: "ok",
 		};
 	}
@@ -337,7 +332,7 @@ export class TelegramControlCommandService {
 	}
 
 	private audit(command: ParsedTelegramControlCommand, authorized: boolean, outcome: string, startedAt: number): void {
-		const target = command.action.kind === "compact" || command.action.kind === "set" ? command.replyBotId : null;
+		const target = ["status", "compact", "set"].includes(command.action.kind) ? command.replyBotId : null;
 		const finishedAt = this.now();
 		this.db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (?, ?, ?, ?)").run(
 			command.replyBotId,

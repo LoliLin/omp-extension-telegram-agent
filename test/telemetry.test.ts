@@ -146,12 +146,65 @@ describe("unified usage telemetry", () => {
 		const plain = botStatusFields(view).find((field) => field.key === "context_breakdown")?.value;
 		const visual = botStatusFields(view, true).find((field) => field.key === "context_breakdown")?.value;
 		expect(plain).toMatch(/^S .* · T .* · C .* · M .* · F /);
-		expect(visual).toMatch(
-			/^🟥.*\(system prompt .*\) {2}🟪.*\(tool desc .*\) {2}🟫.*\(compacted history .*\) {2}🟦.*\(message .*\) {2}🟩.*\(free .*\)$/,
+		const visualLines = visual?.split("\n") ?? [];
+		expect(visualLines).toHaveLength(6);
+		expect(visualLines[0]).toBe(
+			`${"🟥".repeat(8)}${"🟪".repeat(4)}${"🟫".repeat(2)}${"🟦".repeat(18)}${"🟩".repeat(32)}`,
 		);
+		expect(visualLines.slice(1)).toEqual([
+			"🟥 system prompt 12.5%",
+			"🟪 tool desc 6.3%",
+			"🟫 compacted history 3.1%",
+			"🟦 message 28.1%",
+			"🟩 free 50.0%",
+		]);
 		expect(botStatusFields(view).find((field) => field.key === "speed")?.value).toBe(
 			"20.0 tok/s · send 200 ms · think 1.00 s",
 		);
+	});
+
+	test("uses live session context and hides a previous epoch breakdown", () => {
+		const stats: BotStats = {
+			runs: 1,
+			contextTokens: 117_340,
+			cacheRead: 0,
+			cacheMiss: 117_340,
+			outputTokens: 129,
+			cost: 0,
+			epoch: 43,
+			last: {
+				id: 1,
+				botId: "B",
+				ts: 1,
+				model: "m",
+				epoch: 43,
+				contextTokens: 117_340,
+				cacheRead: 0,
+				cacheMiss: 117_340,
+				outputTokens: 129,
+				contextBreakdown: { system: 10_000, tools: 1_000, compactedHistory: 50_000, messages: 56_340 },
+				cost: 0,
+			},
+		};
+		const view = buildBotStatusView(
+			{ id: "B", name: "B", provider: "p", model: "m", reasoningEffort: "off", routingP: 0, samplingCooldownMs: 0 },
+			stats,
+			{
+				state: "idle",
+				epoch: 45,
+				provider: "p",
+				model: "m",
+				reasoningEffort: "off",
+				contextWindow: 65_536,
+				currentContextTokens: null,
+				routingP: 0,
+				samplingCooldownMs: 0,
+				lastCompact: null,
+			},
+		);
+		const fields = botStatusFields(view, true);
+		expect(fields.find((field) => field.key === "context_current")?.value).toBe("— / 65,536 (—)");
+		expect(fields.find((field) => field.key === "context_breakdown")?.value).toBe("—");
 	});
 
 	test("keeps compose guidance in the one-line attached-feed header", () => {

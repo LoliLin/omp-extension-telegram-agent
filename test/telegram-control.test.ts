@@ -131,6 +131,7 @@ describe("Telegram rich control status", () => {
 				model: "gpt-5.6-luna",
 				reasoningEffort: "high" as const,
 				contextWindow: 128_000,
+				currentContextTokens: 777,
 				routingP: 0.25,
 				samplingCooldownMs: 2_000,
 				lastCompact: { at: 1_786_251_069_000, outcome: "ok" as const },
@@ -156,20 +157,20 @@ describe("Telegram rich control status", () => {
 		expect(result.richText).toContain("epoch 3");
 		expect(result.richText).toContain("reasoning high");
 		expect(result.richText).toContain("cooldown 2,000 ms");
-		expect(result.richText).toContain("当前上下文**：1,000 / 128,000 (0.8%)");
+		expect(result.richText).toContain("当前上下文**：777 / 128,000 (0.6%)");
 		expect(result.richText).toContain("↑miss 250 · ↓output 120 · R 700 · W 50 · reasoning 30");
 		expect(result.richText).toContain("prompt 1,000");
 		expect(result.richText).toContain("CH 70.0%");
-		expect(result.richText).toContain("CH —");
+		expect(result.richText).not.toContain("Bot B");
 		expect(result.richText).toContain("avg 1.25 s");
 		expect(result.richText).toContain("$0.1250");
 		expect(result.richText!.length).toBeLessThanOrEqual(3500);
 		expect(result.text).toContain("A · Bot *A*");
 		expect(result.text).toContain("routing=routing 0.25 · cooldown 2,000 ms");
-		expect(result.text).toContain("context_current=1,000 / 128,000 (0.8%)");
+		expect(result.text).toContain("context_current=777 / 128,000 (0.6%)");
 		expect(result.text).toContain("lifetime_usage=prompt 1,000");
 		expect(result.text).toContain("cache_and_cost=CH 70.0% · $0.1250");
-		expect(result.text).toContain("cache_and_cost=CH — · $0.0000");
+		expect(result.text).not.toContain("B · Bot B");
 		expect(result.text).not.toBe(result.richText);
 	});
 

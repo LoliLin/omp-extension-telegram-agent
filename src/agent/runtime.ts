@@ -1340,6 +1340,7 @@ export class BotRuntime {
 
 	/** Public read model for deterministic Telegram status output. */
 	controlSnapshot(): RuntimeControlSnapshot {
+		const contextUsage = this.session?.getContextUsage();
 		return {
 			state: this.controlCompacting ? "compacting" : this.samplingState(),
 			epoch: this.epoch,
@@ -1347,6 +1348,7 @@ export class BotRuntime {
 			model: this.model.id,
 			reasoningEffort: this.session?.thinkingLevel ?? this.bot.reasoningEffort,
 			contextWindow: this.model.contextWindow,
+			currentContextTokens: contextUsage?.tokens ?? null,
 			routingP: this.bot.routingP,
 			samplingCooldownMs: this.bot.samplingCooldownMs,
 			lastCompact: this.lastControlCompact,

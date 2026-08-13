@@ -41,9 +41,13 @@ export interface BotUsageSummary {
 	context: UsageContextSummary;
 }
 
-export function summarizeUsageContext(last: UsageRun | null, contextWindow: number): UsageContextSummary {
+export function summarizeUsageContext(
+	last: UsageRun | null,
+	contextWindow: number,
+	currentTokens?: number | null,
+): UsageContextSummary {
 	const normalizedWindow = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : 0;
-	const tokens = last?.contextTokens ?? null;
+	const tokens = currentTokens === undefined ? (last?.contextTokens ?? null) : currentTokens;
 	return {
 		tokens,
 		contextWindow: normalizedWindow,
@@ -52,7 +56,11 @@ export function summarizeUsageContext(last: UsageRun | null, contextWindow: numb
 }
 
 /** Shared derived values for Pi and Telegram status. */
-export function summarizeBotUsage(stats: BotStats, contextWindow: number): BotUsageSummary {
+export function summarizeBotUsage(
+	stats: BotStats,
+	contextWindow: number,
+	currentContextTokens?: number | null,
+): BotUsageSummary {
 	const cacheWrite = stats.cacheWrite ?? 0;
 	const cacheDenominator = stats.cacheMiss + stats.cacheRead + cacheWrite;
 	const hasCacheSample = stats.cacheRead > 0 || cacheWrite > 0;
@@ -70,6 +78,6 @@ export function summarizeBotUsage(stats: BotStats, contextWindow: number): BotUs
 			(stats.totalLatencyMs ?? 0) > 0
 				? ((stats.speedOutputTokens ?? stats.outputTokens) * 1000) / (stats.totalLatencyMs ?? 1)
 				: null,
-		context: summarizeUsageContext(stats.last, contextWindow),
+		context: summarizeUsageContext(stats.last, contextWindow, currentContextTokens),
 	};
 }

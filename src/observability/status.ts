@@ -1,5 +1,6 @@
 import type { BotStats, RuntimeControlSnapshot } from "../ipc.ts";
 import { summarizeBotUsage, type BotUsageSummary } from "./usage.ts";
+import { fitContextBreakdown, type ContextBreakdown } from "./usage.ts";
 
 const INTEGER_FORMAT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const COST_FORMAT = new Intl.NumberFormat("en-US", {
@@ -78,7 +79,7 @@ export function buildBotStatusView(
 		samplingCooldownMs: runtime?.samplingCooldownMs ?? bot.samplingCooldownMs,
 		lastCompact: runtime?.lastCompact ?? null,
 		stats,
-		usage: summarizeBotUsage(stats, runtime?.contextWindow ?? contextWindowFallback),
+		usage: summarizeBotUsage(stats, runtime?.contextWindow ?? contextWindowFallback, runtime?.currentContextTokens),
 	};
 }
 
@@ -137,7 +138,7 @@ function rate(value: number | null): string {
 }
 
 function formatContextBreakdown(view: BotStatusView, visual: boolean): string {
-	const breakdown = view.stats.last?.contextBreakdown;
+	const breakdown = currentContextBreakdown(view);
 	const window = view.usage.context.contextWindow;
 	if (!breakdown || window <= 0) return "—";
 	const parts = [
@@ -152,12 +153,29 @@ function formatContextBreakdown(view: BotStatusView, visual: boolean): string {
 			Math.max(0, window - breakdown.system - breakdown.tools - breakdown.compactedHistory - breakdown.messages),
 		],
 	] as const;
-	return parts
-		.map(([short, square, label, tokens]) => {
-			const percentage = `${((tokens / window) * 100).toFixed(1)}%`;
-			return visual ? `${square.repeat(Math.round(tokens / 1024))} (${label} ${percentage})` : `${short} ${percentage}`;
-		})
-		.join(visual ? "  " : " · ");
+	const values = parts.map(([short, square, label, tokens]) => ({
+		short,
+		square,
+		label,
+		tokens,
+		percentage: `${((tokens / window) * 100).toFixed(1)}%`,
+	}));
+	if (!visual) return values.map(({ short, percentage }) => `${short} ${percentage}`).join(" · ");
+	const bar = values.map(({ square, tokens }) => square.repeat(Math.round(tokens / 1024))).join("");
+	return [bar, ...values.map(({ square, label, percentage }) => `${square} ${label} ${percentage}`)].join("\n");
+}
+
+function currentContextBreakdown(view: BotStatusView): ContextBreakdown | null {
+	const last = view.stats.last;
+	const currentTokens = view.usage.context.tokens;
+	if (!last?.contextBreakdown || last.epoch !== view.epoch || currentTokens == null) return null;
+	if (currentTokens >= last.contextTokens) {
+		return {
+			...last.contextBreakdown,
+			messages: last.contextBreakdown.messages + currentTokens - last.contextTokens,
+		};
+	}
+	return fitContextBreakdown(last.contextBreakdown, currentTokens);
 }
 
 export function renderBotStatusPlain(view: BotStatusView): string {

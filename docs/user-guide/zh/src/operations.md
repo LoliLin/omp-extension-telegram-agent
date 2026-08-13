@@ -43,7 +43,7 @@ bun run restart
 
 公开只读命令：`/help`、`/status`。
 
-`/status` 使用 Telegram 富消息按 bot 展示 runtime 状态、provider/model/effective reasoning、当前 context/window/%、按1,024 tokens一个红/紫/棕/蓝/绿方块表示的system/tool/摘要/messages/free分段、平均tok/s/send/think耗时、最近主对话请求、SQLite 保留期累计、缓存命中率、延迟/费用、路由与最近一次 compact；统计数字使用千位分隔。它与 Pi `/tg status` 共用[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)：详细状态字段由同一个共享投影生成，`CH = R / (↑ + R + W)`，没有 cache read/write 样本时显示 `—`，当前 context 绝不使用历史 prompt 求和。若 Telegram 在创建消息前明确拒绝富消息方法或格式，daemon 会改发一次独立生成的纯文本版本；超时、限流和服务端错误等结果不确定时不会重发，以免重复回复。
+`/status` 只展示实际接收命令的bot；用`/status@bot_username`可明确指定。富消息展示 runtime 状态、provider/model/effective reasoning、当前 context/window/%、按1,024 tokens一个红/紫/棕/蓝/绿方块表示的system/tool/摘要/messages/free分段、平均tok/s/send/think耗时、最近主对话请求、SQLite 保留期累计、缓存命中率、延迟/费用、路由与最近一次 compact。方块条单独一行，图例逐项显示在下面。当前context直接读取Pi session；compact后到下一次主请求前显示unknown，不会继续展示旧epoch数值。它与 Pi `/tg status` 共用[统一 telemetry 口径](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md)。若 Telegram 在创建消息前明确拒绝富消息方法或格式，daemon 会改发一次独立生成的纯文本版本；超时、限流和服务端错误等结果不确定时不会重发，以免重复回复。
 
 `telegram_admins` allowlist 才能运行：
 

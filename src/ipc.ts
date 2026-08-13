@@ -121,6 +121,8 @@ export interface RuntimeControlSnapshot {
 	model: string;
 	reasoningEffort: ThinkingLevel;
 	contextWindow: number;
+	/** Live Pi session usage; null immediately after compaction until the next provider response. */
+	currentContextTokens?: number | null;
 	routingP: number;
 	samplingCooldownMs: number;
 	lastCompact: { at: number; outcome: "ok" | "failed" } | null;
