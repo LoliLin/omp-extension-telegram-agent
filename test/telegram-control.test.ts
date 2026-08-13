@@ -120,8 +120,10 @@ describe("Telegram rich control status", () => {
 		db.query(
 			`INSERT INTO llm_runs
 			 (bot_id, ts, model, epoch, context_tokens, cache_read, cache_write, cache_miss,
-			  output_tokens, reasoning_tokens, latency_ms, cost)
-			 VALUES ('A', 1786251069000, 'gpt-5.6-luna', 3, 1000, 700, 50, 250, 120, 30, 1250, 0.125)`,
+			  output_tokens, reasoning_tokens, latency_ms, cost,
+			  system_tokens, tools_tokens, compacted_history_tokens, message_tokens)
+			 VALUES ('A', 1786251069000, 'gpt-5.6-luna', 3, 1000, 700, 50, 250, 120, 30, 1250, 0.125,
+			         400, 200, 150, 250)`,
 		).run();
 		const runtime = {
 			controlSnapshot: () => ({
@@ -158,6 +160,8 @@ describe("Telegram rich control status", () => {
 		expect(result.richText).toContain("reasoning high");
 		expect(result.richText).toContain("cooldown 2,000 ms");
 		expect(result.richText).toContain("当前上下文**：777 / 128,000 (0.6%)");
+		expect(result.richText).toContain("- **上下文构成**：\n```text\n");
+		expect(result.richText).toContain("\n🟥 system prompt");
 		expect(result.richText).toContain("↑miss 250 · ↓output 120 · R 700 · W 50 · reasoning 30");
 		expect(result.richText).toContain("prompt 1,000");
 		expect(result.richText).toContain("CH 70.0%");
