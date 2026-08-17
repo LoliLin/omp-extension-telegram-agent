@@ -16,7 +16,7 @@
 
 当前：**13**。
 
-v13 把最近 sticker 候选从每个历史 Telegram entry 的永久正文拆为结构化字段；context 投影只在最后一个 Telegram batch 后追加一次候选，因此历史形态从 `msg1+candidates, msg2+candidates, msg3+candidates` 变为 `msg1, msg2, msg3+candidates`。这会让相邻请求从上一轮候选位置分叉，但把候选总量从随turn线性增长降为恒定最多8条；对当前缺少provider cache usage的deployment，选择显著更小的64K输入。主模型有效窗口同时固定为64K，Pi估算32K时触发compaction且只保留最后一个完整turn原文。升级会为每个 bot 创建新 epoch，旧 session 文件保留。
+v13 把最近 sticker 候选从每个历史 Telegram entry 的永久正文拆为结构化字段；context 投影只在最后一个 Telegram batch 后追加一次候选，因此历史形态从 `msg1+candidates, msg2+candidates, msg3+candidates` 变为 `msg1, msg2, msg3+candidates`。这会让相邻请求从上一轮候选位置分叉，但把候选总量从随turn线性增长降为恒定最多8条；对当前缺少provider cache usage的deployment，选择显著更小的64K输入。主模型有效窗口同时固定为64K，Pi估算32K时触发compaction，压缩后按 `compaction_keep_recent` token 预算保留近期原文。升级会为每个 bot 创建新 epoch，旧 session 文件保留。
 
 v12 修正 custom Telegram message 的 compaction 输入：严格按 Pi 官方流程先调用 `convertToLlm()`，再把 provider messages 交给 `serializeConversation()`。旧实现用 cast 绕过类型并直接序列化 `AgentMessage[]`，可能让 Telegram context 在摘要输入中消失。升级会为每个 bot 创建新 epoch，旧 session 文件保留。
 
@@ -111,7 +111,7 @@ Vision 默认关闭；只有显式 `vision.enabled: true` 才会执行。`auxili
 
 ## Compaction 与 context epoch
 
-- 主模型传给Pi的有效context window固定为65,536；compaction 触发公式为 `contextTokens > contextWindow - reserveTokens`，其中 `reserveTokens = max(16,384, 65,536 - compaction_threshold)`，所以 threshold 最高生效值为 49,152（config 校验拒绝超过它的值，避免 requested/effective 静默分叉）。缺省/示例 threshold 为 32,768（提前触发，缓冲 Pi 对 CJK 的 token 低估），生产为 49,152。`tg-compaction` 用状态导向 prompt 生成不超过800字的摘要，并保留最近 `compaction_keep_recent` token 原文（缺省 1 = 最后一个完整turn，生产 20,000）。更早原文不再进入provider，只有摘要仍可见。
+- 主模型传给Pi的有效context window固定为65,536；compaction 触发公式为 `contextTokens > contextWindow - reserveTokens`，其中 `reserveTokens = max(16,384, 65,536 - compaction_threshold)`，所以 threshold 最高生效值为 49,152（config 校验拒绝超过它的值，避免 requested/effective 静默分叉）。缺省/示例 threshold 为 32,768（提前触发，缓冲 Pi 对 CJK 的 token 低估），生产为 49,152。`tg-compaction` 用状态导向 prompt 生成不超过800字的摘要，并保留最近 `compaction_keep_recent` token 原文（注意单位是 token 不是 turn：缺省 1 token 连一条消息都装不下，压缩后实际只剩摘要；生产推荐 20,000，约 1-2 个完整 turn 原文）。更早原文不再进入provider，只有摘要仍可见。
 - summary 输入使用 Pi 的 `serializeConversation(convertToLlm(messages))`，因此 Telegram custom message 与 Pi 原生消息遵循同一 provider projection。
 - 空摘要、provider failure 或 abort 会 cancel；cursor、visible refs 与 epoch 均不伪造变化。
 - 成功结果的 structured details 保存当前 `consumedSeq` 与 retained `visibleMessageIds`。runtime 用这些 details 替换 visibility、推进 epoch；`consumedSeq` 永不回退。

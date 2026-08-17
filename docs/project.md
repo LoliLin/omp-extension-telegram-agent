@@ -48,7 +48,7 @@
 ## 主要约束
 
 - 模型选择是部署配置：每 bot 可选择Pi catalog中的provider/model，认证由共享Pi runtime/auth store统一提供；主对话有效context window统一限制为64K
-- 当前 compaction threshold = Pi估算32K tokens；成功后只保留最后一个完整turn原文，更早内容仅保留摘要
+- 当前 compaction threshold = Pi估算32K tokens；成功后按 `compaction_keep_recent` token 预算保留近期原文（缺省 1 token 实际只剩摘要，生产推荐 20,000），更早内容仅保留摘要
 - Telegram 不承担历史恢复职责，SQLite 是事实来源
 - Bot-to-Bot：彼此消息进共同 transcript 可被看到，但**不互相触发**（trigger 只来自满足 routing 条件的 human 消息）
 - Bot 可以保持沉默：assistant local text 存 agent events + TUI 可见，不进群；provider session 只保留固定 silence marker
