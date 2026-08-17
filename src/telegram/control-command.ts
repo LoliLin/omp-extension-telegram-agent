@@ -435,7 +435,7 @@ function statusRichSection(view: BotStatusView): string {
 		`## ${escapeRichMarkdown(view.name)} · ${escapeRichMarkdown(view.id)}`,
 		...botStatusFields(view, true).map((field) =>
 			field.key === "context_breakdown"
-				? `- **${field.label}**：\n\`\`\`text\n${field.value}\n\`\`\``
+				? `- **${field.label}**：\n${field.value}`
 				: `- **${field.label}**：${escapeRichStatusValue(field.value)}`,
 		),
 	].join("\n");

@@ -162,11 +162,12 @@ function formatContextBreakdown(view: BotStatusView, visual: boolean): string {
 	}));
 	if (!visual) return values.map(({ short, percentage }) => `${short} ${percentage}`).join(" · ");
 	const bar = values.map(({ square, tokens }) => square.repeat(Math.round(tokens / 1024))).join("");
-	// Monospace legend: one entry per line, label column padded so percentages align in the
-	// Telegram pre block. Emoji squares are double-width but every line starts with exactly one.
+	// No fenced code block: the emoji bar and the per-line emoji markers stay as plain text so
+	// they render in color, while only the label/percentage column is inline-code (monospace).
+	// Every legend line starts with exactly one emoji, so the inline-code spans all align.
 	return [
 		bar,
-		...values.map(({ square, label, percentage }) => `${square} ${label.padEnd(17)} ${percentage.padStart(6)}`),
+		...values.map(({ square, label, percentage }) => `${square} \`${label.padEnd(17)}${percentage.padStart(6)}\``),
 	].join("\n");
 }
 

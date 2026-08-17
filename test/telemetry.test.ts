@@ -152,11 +152,11 @@ describe("unified usage telemetry", () => {
 			`${"🟥".repeat(8)}${"🟪".repeat(4)}${"🟫".repeat(2)}${"🟦".repeat(18)}${"🟩".repeat(32)}`,
 		);
 		expect(visualLines.slice(1)).toEqual([
-			"🟥 system prompt      12.5%",
-			"🟪 tool desc           6.3%",
-			"🟫 compacted history   3.1%",
-			"🟦 message            28.1%",
-			"🟩 free               50.0%",
+			"🟥 `system prompt     12.5%`",
+			"🟪 `tool desc          6.3%`",
+			"🟫 `compacted history  3.1%`",
+			"🟦 `message           28.1%`",
+			"🟩 `free              50.0%`",
 		]);
 		expect(botStatusFields(view).find((field) => field.key === "speed")?.value).toBe(
 			"20.0 tok/s · send 200 ms · think 1.00 s",

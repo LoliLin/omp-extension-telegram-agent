@@ -161,12 +161,14 @@ describe("Telegram rich control status", () => {
 		expect(result.richText).toContain("reasoning high");
 		expect(result.richText).toContain("cooldown 2,000 ms");
 		expect(result.richText).toContain("当前上下文**：777 / 128,000 (0.6%)");
-		expect(result.richText).toContain("- **上下文构成**：\n```text\n");
-		expect(result.richText).toContain("\n🟥 system prompt");
+
+		expect(result.richText).toContain("- **上下文构成**：\n");
+		expect(result.richText).toContain("🟥 `system prompt");
 		expect(result.richText).toContain("↑miss 250 · ↓output 120 · R 700 · W 50 · reasoning 30");
 		expect(result.richText).toContain("prompt 1,000");
 		expect(result.richText).toContain("CH 70.0%");
 		expect(result.richText).not.toContain("Bot B");
+		expect(result.richText).not.toContain("```text\n");
 		expect(result.richText).toContain("avg 1.25 s");
 		expect(result.richText).toContain("$0.1250");
 		expect(result.richText!.length).toBeLessThanOrEqual(3500);
