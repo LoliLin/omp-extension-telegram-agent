@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { BotConfig } from "../src/config.ts";
 import { openDb } from "../src/db/db.ts";
+import { restoreLastCompaction } from "../src/agent/runtime.ts";
 import { BotApi, TelegramApiError } from "../src/telegram/api.ts";
 import { TelegramTypingLease } from "../src/telegram/activity.ts";
 import {
@@ -297,5 +298,33 @@ describe("Telegram rich control status", () => {
 			),
 		).rejects.toBeInstanceOf(SentMessagePersistenceError);
 		expect(richCalls).toBe(1);
+	});
+});
+
+describe("restoreLastCompaction", () => {
+	test("returns null when no compaction events exist", () => {
+		expect(restoreLastCompaction(db, "A")).toBeNull();
+	});
+
+	test("restores the latest successful compaction timestamp after restart", () => {
+		db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('A', 1000, 'compaction', '{}')").run();
+		db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('A', 2000, 'compaction', '{}')").run();
+		expect(restoreLastCompaction(db, "A")).toEqual({ at: 2000, outcome: "ok" });
+	});
+
+	test("maps the latest compaction failure to outcome failed", () => {
+		db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('A', 1000, 'compaction', '{}')").run();
+		db.query(
+			'INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES (\'A\', 3000, \'error\', \'{"stage":"compaction","reason":"manual"}\')',
+		).run();
+		expect(restoreLastCompaction(db, "A")).toEqual({ at: 3000, outcome: "failed" });
+	});
+
+	test("ignores compaction events from other bots and unrelated errors", () => {
+		db.query("INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('B', 9000, 'compaction', '{}')").run();
+		db.query(
+			"INSERT INTO agent_events (bot_id, ts, kind, payload) VALUES ('A', 500, 'error', '{\"stage\":\"send\"}')",
+		).run();
+		expect(restoreLastCompaction(db, "A")).toBeNull();
 	});
 });

@@ -154,6 +154,19 @@ function rawTelegramMessageId(raw: Record<string, unknown>): number | null {
 	return typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+/** Latest compaction outcome for /status: restored from agent_events so it survives restarts. */
+export function restoreLastCompaction(db: Database, botId: string): RuntimeControlSnapshot["lastCompact"] {
+	const row = db
+		.query(
+			`SELECT ts, kind FROM agent_events
+			 WHERE bot_id = ? AND (kind = 'compaction' OR (kind = 'error' AND json_extract(payload, '$.stage') = 'compaction'))
+			 ORDER BY ts DESC LIMIT 1`,
+		)
+		.get(botId) as { ts: number; kind: string } | null;
+	if (!row) return null;
+	return { at: row.ts, outcome: row.kind === "compaction" ? "ok" : "failed" };
+}
+
 function parseStoredMessageHashes(value: string | null): string[] | null {
 	if (!value) return null;
 	try {
@@ -273,6 +286,7 @@ export class BotRuntime {
 		);
 		this.epoch = Number(getBotState(db, bot.id, EPOCH_KEY) ?? "1");
 		this.visibleMessageIds = new Set(listVisibleMessageIds(db, bot.id, chatId, this.epoch));
+		this.lastControlCompact = restoreLastCompaction(db, bot.id);
 	}
 
 	get botUserId(): number {
@@ -743,6 +757,7 @@ export class BotRuntime {
 		if (event.aborted || !event.result) {
 			const category = classifyPiProviderFailure(event.errorMessage ?? "compaction failed");
 			this.recordEvent("error", { stage: "compaction", reason: event.reason, aborted: event.aborted, category });
+			this.lastControlCompact = { at: Date.now(), outcome: "failed" };
 			log.error("agent_runtime", "compaction_failed", {
 				bot_id: this.bot.id,
 				reason: event.reason,
@@ -763,6 +778,7 @@ export class BotRuntime {
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		replaceVisibleMessageIds(this.db, this.bot.id, chatId, this.epoch, kept);
 		this.recordEvent("compaction", { epoch: this.epoch, kept: kept.length });
+		this.lastControlCompact = { at: Date.now(), outcome: "ok" };
 		log.info("agent_runtime", "compaction_committed", { bot_id: this.bot.id, epoch: this.epoch, kept: kept.length });
 		try {
 			this.mediaPruneSink?.();
