@@ -1,0 +1,8 @@
+{
+	"name": "pi-litellm-mizore",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Pi provider extension: LiteLLM proxy at https://litellm.mizore.blog/v1",
+	"main": "index.ts"
+}
