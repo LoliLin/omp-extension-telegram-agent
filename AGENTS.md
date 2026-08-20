@@ -22,6 +22,7 @@
 - `docs/engineering/documentation-guide.md` — 文档写作规范
 - `docs/engineering/code-review-2608.md` — 2026-08 全面 review 结论与 Pi 能力审计
 - `docs/engineering/code-review-2608-2.md` — 2026-08-13 四路并行 review:误报记录、修复决策与未采纳清单
+- `docs/engineering/code-review-2608-3.md` — 2026-08-20 六区并行 review:造轮子 / hack / 过度防御 / 冗余清理
 - `docs/runbooks/daemon.md` — daemon 运维
 - `docs/user-guide/` — 双语用户指南
 
@@ -78,7 +79,7 @@
 - `.env` 是 `key: value` 冒号格式，由 `src/config.ts` 自解析，不是 dotenv 的 `KEY=value`。
 - Pi 四包精确锁定 registry `0.84.1`；升级必须同一原子提交更新 manifest、lock 并做兼容性验证。
 - sticker / alias 的 short_id 用 rowid 分配，不用 COUNT+1（并发 / 删除下撞号）。
-- `streamFunction` 猴补丁（`src/agent/runtime.ts`）是唯一的 Pi 私有缝，升级 Pi 时必须验证（见 `docs/engineering/code-review-2608.md`）。
+- `streamFunction` 包装（`src/agent/runtime.ts`）是 Pi 的官方注入形态（`Agent.streamFunction` 是公开可变字段，函数包函数注入 `cacheRetention`）；`createAgentSession()` 不接受 streamFn 选项，只能事后覆盖。升级 Pi 时仍必须验证该包装（见 `docs/engineering/code-review-2608.md`）。
 
 ## 9. 指南更新规则
 
