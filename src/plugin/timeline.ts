@@ -106,7 +106,8 @@ interface CachedMediaReadyUpdate {
 	expiresAt: number;
 }
 
-function itemKey(item: TimelineItem): string {
+/** Dedupe key shared by the timeline client and the feed renderer. */
+export function itemKey(item: TimelineItem): string {
 	if (item.kind === "msg") return `m:${item.chatId}:${item.messageId}`;
 	return item.evtId != null ? `e:${item.evtId}` : `e?:${item.botId}:${item.ts}:${item.evtKind}:${item.payload}`;
 }
@@ -143,7 +144,6 @@ export class TimelineClient implements TimelinePort {
 		private readonly sockPath: string,
 		readonly filter: string | null,
 		private readonly hooks: TimelineHooks,
-		private readonly sendAckTimeoutMs = SEND_ACK_TIMEOUT_MS,
 	) {}
 
 	get isConnected(): boolean {
@@ -245,7 +245,7 @@ export class TimelineClient implements TimelinePort {
 						"Telegram send acknowledgement timed out; check the group before retrying",
 					),
 				);
-			}, this.sendAckTimeoutMs);
+			}, SEND_ACK_TIMEOUT_MS);
 			this.pendingSends.set(requestId, { botId, resolve, timer });
 			try {
 				this.socket!.write(encodeFrame({ type: "send_message", requestId, botId, text }));
@@ -420,39 +420,26 @@ export class TimelineClient implements TimelinePort {
 			const live = [...this.pendingUsage.values()]
 				.filter((run) => run.botId === botId && run.id > this.baselineLastId)
 				.sort((left, right) => left.id - right.id);
-			const merged: BotStats = {
-				...baseline,
-				cacheWrite: baseline.cacheWrite ?? 0,
-				estimatedCacheRuns: baseline.estimatedCacheRuns ?? 0,
-				reasoningTokens: baseline.reasoningTokens ?? 0,
-				speedOutputTokens: baseline.speedOutputTokens ?? baseline.outputTokens,
-				totalThinkingMs: baseline.totalThinkingMs ?? 0,
-				thinkingSamples: baseline.thinkingSamples ?? 0,
-				totalSendMs: baseline.totalSendMs ?? 0,
-				sendSamples: baseline.sendSamples ?? 0,
-				totalLatencyMs: baseline.totalLatencyMs ?? 0,
-				latencySamples: baseline.latencySamples ?? 0,
-				firstRunTs: baseline.firstRunTs ?? baseline.last?.ts ?? null,
-			};
+			const merged: BotStats = { ...baseline };
 			for (const run of live) {
 				merged.runs++;
 				merged.contextTokens += run.contextTokens;
 				merged.cacheRead += run.cacheRead;
-				merged.cacheWrite! += run.cacheWrite ?? 0;
-				if (run.cacheEstimated) merged.estimatedCacheRuns!++;
+				merged.cacheWrite += run.cacheWrite;
+				if (run.cacheEstimated) merged.estimatedCacheRuns++;
 				merged.cacheMiss += run.cacheMiss;
 				merged.outputTokens += run.outputTokens;
-				if (!run.compaction) merged.speedOutputTokens! += run.outputTokens;
-				merged.reasoningTokens! += run.reasoningTokens ?? 0;
+				if (!run.compaction) merged.speedOutputTokens += run.outputTokens;
+				merged.reasoningTokens += run.reasoningTokens;
 				if (!run.compaction) {
-					merged.totalThinkingMs! += run.thinkingMs ?? 0;
-					merged.thinkingSamples!++;
+					merged.totalThinkingMs += run.thinkingMs ?? 0;
+					merged.thinkingSamples++;
 				}
-				merged.totalSendMs! += run.sendMs ?? 0;
-				merged.sendSamples! += run.sendSamples ?? 0;
+				merged.totalSendMs += run.sendMs ?? 0;
+				merged.sendSamples += run.sendSamples ?? 0;
 				if (run.latencyMs != null) {
-					merged.totalLatencyMs! += run.latencyMs;
-					merged.latencySamples!++;
+					merged.totalLatencyMs += run.latencyMs;
+					merged.latencySamples++;
 				}
 				merged.cost += run.cost;
 				merged.epoch = Math.max(merged.epoch, run.epoch);

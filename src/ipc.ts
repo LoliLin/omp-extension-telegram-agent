@@ -39,7 +39,7 @@ export interface MsgItem {
 export interface EvtItem {
 	kind: "evt";
 	ts: number;
-	/** agent_events.id; absent on old daemons (dedupe falls back to key+payload). */
+	/** agent_events.id; absent on live event pushes, which are broadcast before the row id is known. */
 	evtId?: number;
 	botId: string;
 	botName: string;
@@ -65,16 +65,16 @@ export interface UsageRun {
 	epoch: number;
 	contextTokens: number;
 	cacheRead: number;
-	/** Additive in REQ-UI-0009; absent from old daemons. */
-	cacheWrite?: number;
+	cacheWrite: number;
 	cacheMiss: number;
-	/** True when cacheRead/cacheMiss are a local structural prefix estimate. */
+	/** True when cacheRead/cacheMiss are a local structural prefix estimate. Absent on auxiliary compaction runs. */
 	cacheEstimated?: boolean;
 	outputTokens: number;
-	/** Additive detail fields; absent from old daemons. */
-	reasoningTokens?: number;
-	latencyMs?: number | null;
+	reasoningTokens: number;
+	latencyMs: number | null;
+	/** Detail fields; absent on auxiliary compaction runs. */
 	thinkingMs?: number;
+	/** Populated once the Telegram send for this run completes. */
 	sendMs?: number;
 	sendSamples?: number;
 	contextBreakdown?: { system: number; tools: number; compactedHistory: number; messages: number };
@@ -88,23 +88,23 @@ export interface BotStats {
 	runs: number;
 	contextTokens: number;
 	cacheRead: number;
-	/** Lifetime cache-write total; absent from old daemons. */
-	cacheWrite?: number;
+	/** Lifetime cache-write total. */
+	cacheWrite: number;
 	cacheMiss: number;
 	/** Number of retained runs using local structural cache estimates. */
-	estimatedCacheRuns?: number;
+	estimatedCacheRuns: number;
 	outputTokens: number;
 	/** Main-conversation output used for speed; excludes auxiliary compaction. */
-	speedOutputTokens?: number;
-	/** Lifetime detail totals; absent from old daemons. */
-	reasoningTokens?: number;
-	totalLatencyMs?: number;
-	latencySamples?: number;
-	totalThinkingMs?: number;
-	thinkingSamples?: number;
-	totalSendMs?: number;
-	sendSamples?: number;
-	firstRunTs?: number | null;
+	speedOutputTokens: number;
+	/** Lifetime detail totals. */
+	reasoningTokens: number;
+	totalLatencyMs: number;
+	latencySamples: number;
+	totalThinkingMs: number;
+	thinkingSamples: number;
+	totalSendMs: number;
+	sendSamples: number;
+	firstRunTs: number | null;
 	cost: number;
 	epoch: number;
 	/** Latest main-conversation response (`compaction = 0`). */

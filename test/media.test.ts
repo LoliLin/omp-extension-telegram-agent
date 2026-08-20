@@ -1075,8 +1075,11 @@ describe("Pi attach media presentation", () => {
 			epoch: 0,
 			contextTokens: 0,
 			cacheRead: 0,
+			cacheWrite: 0,
 			cacheMiss: 0,
 			outputTokens: 0,
+			reasoningTokens: 0,
+			latencyMs: null,
 			cost: 0,
 		};
 		try {

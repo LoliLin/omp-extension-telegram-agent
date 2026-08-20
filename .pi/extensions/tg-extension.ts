@@ -26,11 +26,12 @@ import type {
 	RuntimeControlSnapshot,
 	TimelineItem,
 } from "../../src/ipc.ts";
-import { runNativeConfigWizard, type PiModelPreflight } from "../../src/onboarding/config-wizard.ts";
+import { runNativeConfigWizard } from "../../src/onboarding/config-wizard.ts";
 import { buildBotStatusView, formatUsdCost, renderBotStatusPlain } from "../../src/observability/status.ts";
 import { summarizeBotUsage } from "../../src/observability/usage.ts";
 import { sanitize } from "../../src/sanitize.ts";
 import {
+	itemKey,
 	mediaFileRevision,
 	readMediaImage,
 	TimelineClient,
@@ -68,7 +69,6 @@ export interface ProcessRunResult {
 	stdout: string;
 	stderr: string;
 }
-type ProcessRunner = (command: string, args: readonly string[], options: { cwd: string }) => Promise<ProcessRunResult>;
 type FeedEntry = { instanceId: string; filter: string | null };
 type ComposeIdentity = Pick<BotConfig, "id" | "name">;
 type ComposeMode = { kind: "scope" } | { kind: "bot"; identity: ComposeIdentity };
@@ -84,11 +84,6 @@ type StatusHost = {
 	thinkingLevel?: ExtensionContext["thinkingLevel"];
 };
 
-export type MediaConverter = (
-	base64Data: string,
-	mimeType: string,
-) => Promise<{ data: string; mimeType: string } | null>;
-
 type MediaReadyListener = (filename: string) => void;
 type MediaCacheState = { kind: "ready"; image: MediaImage; base64Bytes: number } | { kind: "failed"; base64Bytes: 0 };
 
@@ -97,32 +92,11 @@ interface PendingMediaConversion {
 	promise: Promise<void>;
 }
 
-export interface NativeMediaCacheLimits {
-	maxEntries?: number;
-	maxTotalBase64Bytes?: number;
-	maxItemBase64Bytes?: number;
-	maxPending?: number;
-}
-
 /** Pi-owned image rendering with Kitty-only async PNG preparation and bounded local state. */
 export class NativeMediaCache {
 	private readonly states = new Map<string, MediaCacheState>();
 	private readonly pending = new Map<string, PendingMediaConversion>();
 	private totalBytesValue = 0;
-	readonly limits: Required<NativeMediaCacheLimits>;
-
-	constructor(
-		private readonly converter: MediaConverter = convertToPng,
-		private readonly capabilities: () => Tui.TerminalCapabilities = () => Tui.getCapabilities(),
-		limits: NativeMediaCacheLimits = {},
-	) {
-		this.limits = {
-			maxEntries: limits.maxEntries ?? MEDIA_CACHE_MAX_ENTRIES,
-			maxTotalBase64Bytes: limits.maxTotalBase64Bytes ?? MEDIA_CACHE_MAX_BASE64_BYTES,
-			maxItemBase64Bytes: limits.maxItemBase64Bytes ?? MEDIA_CACHE_MAX_ITEM_BASE64_BYTES,
-			maxPending: limits.maxPending ?? MEDIA_CONVERSION_MAX_PENDING,
-		};
-	}
 
 	get size(): number {
 		return this.states.size;
@@ -140,7 +114,7 @@ export class NativeMediaCache {
 		if (source.mime === "image/png") return source;
 		let protocol: Tui.ImageProtocol;
 		try {
-			protocol = this.capabilities().images;
+			protocol = Tui.getCapabilities().images;
 		} catch {
 			return null;
 		}
@@ -153,7 +127,7 @@ export class NativeMediaCache {
 			if (listener) inFlight.listeners.add(listener);
 			return null;
 		}
-		if (this.pending.size >= this.limits.maxPending) {
+		if (this.pending.size >= MEDIA_CONVERSION_MAX_PENDING) {
 			this.remember(source.revision, { kind: "failed", base64Bytes: 0 });
 			return null;
 		}
@@ -173,7 +147,7 @@ export class NativeMediaCache {
 	private async prepare(source: MediaImage, entry: PendingMediaConversion): Promise<void> {
 		let shouldNotify = false;
 		try {
-			const converted = await this.converter(source.base64, source.mime);
+			const converted = await convertToPng(source.base64, source.mime);
 			if (mediaFileRevision(source.filename) !== source.revision) {
 				shouldNotify = true;
 				return;
@@ -207,7 +181,12 @@ export class NativeMediaCache {
 	private isValidPng(
 		value: { data: string; mimeType: string } | null,
 	): value is { data: string; mimeType: "image/png" } {
-		if (!value || value.mimeType !== "image/png" || !value.data || value.data.length > this.limits.maxItemBase64Bytes) {
+		if (
+			!value ||
+			value.mimeType !== "image/png" ||
+			!value.data ||
+			value.data.length > MEDIA_CACHE_MAX_ITEM_BASE64_BYTES
+		) {
 			return false;
 		}
 		const bytes = Buffer.from(value.data, "base64");
@@ -240,7 +219,7 @@ export class NativeMediaCache {
 		this.states.delete(key);
 		this.states.set(key, state);
 		this.totalBytesValue += state.base64Bytes;
-		while (this.states.size > this.limits.maxEntries || this.totalBytesValue > this.limits.maxTotalBase64Bytes) {
+		while (this.states.size > MEDIA_CACHE_MAX_ENTRIES || this.totalBytesValue > MEDIA_CACHE_MAX_BASE64_BYTES) {
 			const oldest = this.states.keys().next().value as string | undefined;
 			if (!oldest) break;
 			const evicted = this.states.get(oldest);
@@ -438,12 +417,6 @@ export function parseTgArguments(
 export interface TelegramExtensionOptions {
 	rootDir?: string;
 	hostVersion?: string;
-	timelineFactory?: TimelineFactory;
-	processRunner?: ProcessRunner;
-	idFactory?: () => string;
-	requestIdFactory?: () => string;
-	mediaCache?: NativeMediaCache;
-	piModelPreflight?: PiModelPreflight;
 }
 
 export interface TelegramComposeIndicator {
@@ -579,6 +552,15 @@ export function telegramFooterUsage(
 		cacheMiss: 0,
 		estimatedCacheRuns: 0,
 		outputTokens: 0,
+		speedOutputTokens: 0,
+		reasoningTokens: 0,
+		totalLatencyMs: 0,
+		latencySamples: 0,
+		totalThinkingMs: 0,
+		thinkingSamples: 0,
+		totalSendMs: 0,
+		sendSamples: 0,
+		firstRunTs: null,
 		cost: 0,
 		epoch: 0,
 		last: null,
@@ -588,9 +570,9 @@ export function telegramFooterUsage(
 		totals.runs += stats.runs;
 		totals.contextTokens += stats.contextTokens;
 		totals.cacheRead += stats.cacheRead;
-		totals.cacheWrite = (totals.cacheWrite ?? 0) + (stats.cacheWrite ?? 0);
+		totals.cacheWrite += stats.cacheWrite;
 		totals.cacheMiss += stats.cacheMiss;
-		totals.estimatedCacheRuns = (totals.estimatedCacheRuns ?? 0) + (stats.estimatedCacheRuns ?? 0);
+		totals.estimatedCacheRuns += stats.estimatedCacheRuns;
 		totals.outputTokens += stats.outputTokens;
 		totals.cost += stats.cost;
 		if (
@@ -1087,7 +1069,7 @@ export class TelegramFeed extends Tui.Container {
 	}
 
 	private rememberItem(item: TimelineItem): boolean {
-		const key = this.itemKey(item);
+		const key = itemKey(item);
 		if (this.itemKeys.has(key)) return false;
 		this.itemKeys.add(key);
 		return true;
@@ -1102,7 +1084,7 @@ export class TelegramFeed extends Tui.Container {
 				this.content.addChild(new Tui.Text(this.theme.fg("dim", `──────── ${day} ────────`), 1, 0));
 			const slot = new Tui.Container();
 			slot.addChild(itemComponent(item, this.theme, this.mediaResolver, this.toolHost));
-			this.cardSlots.set(this.itemKey(item), slot);
+			this.cardSlots.set(itemKey(item), slot);
 			this.content.addChild(slot);
 			this.content.addChild(new Tui.Spacer(1));
 			previousDay = day;
@@ -1115,16 +1097,11 @@ export class TelegramFeed extends Tui.Container {
 		this.appendItems(this.items);
 	}
 
-	private itemKey(item: TimelineItem): string {
-		if (item.kind === "msg") return `m:${item.chatId}:${item.messageId}`;
-		return item.evtId != null ? `e:${item.evtId}` : `e?:${item.botId}:${item.ts}:${item.evtKind}:${item.payload}`;
-	}
-
 	private refreshMedia(filename: string): void {
 		let refreshed = false;
 		for (const item of this.items) {
 			if (item.kind !== "msg" || item.mediaPath !== filename) continue;
-			const slot = this.cardSlots.get(this.itemKey(item));
+			const slot = this.cardSlots.get(itemKey(item));
 			if (!slot) continue;
 			slot.clear();
 			slot.addChild(itemComponent(item, this.theme, this.mediaResolver, this.toolHost));
@@ -1140,7 +1117,7 @@ export class TelegramFeed extends Tui.Container {
 			if (item.kind !== "msg" || item.fileUniqueId !== fileUniqueId || item.mediaPath === mediaPath) continue;
 			const updated = { ...item, mediaPath };
 			this.items[index] = updated;
-			const slot = this.cardSlots.get(this.itemKey(updated));
+			const slot = this.cardSlots.get(itemKey(updated));
 			if (!slot) continue;
 			slot.clear();
 			slot.addChild(itemComponent(updated, this.theme, this.mediaResolver, this.toolHost));
@@ -1246,13 +1223,9 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 	const rootDir = options.rootDir ?? process.cwd();
 	const hostVersion = options.hostVersion ?? VERSION;
 	const supported = supportsPiVersion(hostVersion);
-	const factory =
-		options.timelineFactory ??
-		((filter, hooks) => new TimelineClient(join(rootDir, "data", "daemon.sock"), filter, hooks));
-	const mediaCache = options.mediaCache ?? new NativeMediaCache();
-	const runProcess = options.processRunner ?? runChildProcess;
-	const makeId = options.idFactory ?? randomUUID;
-	const makeRequestId = options.requestIdFactory ?? randomUUID;
+	const factory: TimelineFactory = (filter, hooks) =>
+		new TimelineClient(join(rootDir, "data", "daemon.sock"), filter, hooks);
+	const mediaCache = new NativeMediaCache();
 	const feeds = new Map<string, TelegramFeed>();
 	let pending: { data: FeedEntry; changed: (event: TimelineEvent, feed: TelegramFeed) => void } | null = null;
 	let active: TelegramFeed | null = null;
@@ -1413,7 +1386,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		active?.detach("replaced by a new /tg attach");
 		clearFeedUi(ctx.ui);
 		mountFeedUi(filter, ctx);
-		const data = { instanceId: makeId(), filter };
+		const data = { instanceId: randomUUID(), filter };
 		pending = {
 			data,
 			changed: (event, feed) => {
@@ -1543,7 +1516,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				return { action: "handled" };
 			}
 			showComposeIndicator(ctx.ui, { kind: "sending", identity });
-			const result = await feed.client.sendText(identity.id, original, makeRequestId());
+			const result = await feed.client.sendText(identity.id, original, randomUUID());
 			if (result.ok) {
 				ctx.ui.notify(`Telegram sent as ${composeLabel(identity)} · #${result.messageId}`, "info");
 			} else {
@@ -1600,7 +1573,6 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				try {
 					const result = await runNativeConfigWizard(ctx.ui, {
 						rootDir,
-						preflightPiModel: options.piModelPreflight,
 						restartDaemon: async () => {
 							closeCompose(ctx.ui);
 							active?.detach("configuration changed; waiting for daemon readiness");
@@ -1609,7 +1581,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 							ctx.ui.setStatus("telegram-config", "TELEGRAM · RESTARTING");
 							let processResult: ProcessRunResult;
 							try {
-								processResult = await runProcess("bun", ["run", "src/main.ts", "restart"], { cwd: rootDir });
+								processResult = await runChildProcess("bun", ["run", "src/main.ts", "restart"], { cwd: rootDir });
 							} catch {
 								return { ready: false, diagnostic: "failed to run the controlled daemon restart" };
 							}
@@ -1736,7 +1708,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				}
 				let result: ProcessRunResult;
 				try {
-					result = await runProcess("bun", ["run", "src/main.ts", command], { cwd: rootDir });
+					result = await runChildProcess("bun", ["run", "src/main.ts", command], { cwd: rootDir });
 				} catch (error) {
 					result = { status: null, stdout: "", stderr: `failed to run daemon command: ${String(error)}` };
 				}
