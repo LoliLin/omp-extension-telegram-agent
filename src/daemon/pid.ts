@@ -17,7 +17,7 @@ import {
 	rmSync,
 	mkdirSync,
 } from "node:fs";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { errorCategory, log } from "../observability/log.ts";
 
 export const PID_PATH = join(process.cwd(), "data", "daemon.pid");
@@ -108,7 +108,14 @@ export function isOurDaemon(pid: number, rootDir: string = process.cwd()): boole
 	const entry = daemonEntry(argv);
 	if (!entry) return false;
 	const root = resolve(rootDir);
-	if (isAbsolute(entry) && resolve(entry) === join(root, "src/daemon/index.ts")) return true;
+	if (isAbsolute(entry)) {
+		// The daemon entry ships with the plugin install dir, not the workdir.
+		// POSIX additionally requires the process cwd to be the workdir; Windows
+		// exposes no cwd, so the daemon-entry shape plus the pid-file lock stand in.
+		if (!entry.endsWith(`${sep}daemon${sep}index.ts`) && !entry.endsWith("/daemon/index.ts")) return false;
+		if (process.platform === "win32") return true;
+		return processCwd(pid) === root;
+	}
 	const cwd = processCwd(pid);
 	return cwd != null && resolve(cwd) === root && resolve(cwd, entry).startsWith(`${root}/`);
 }
