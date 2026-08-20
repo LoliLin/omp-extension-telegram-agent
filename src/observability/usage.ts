@@ -41,7 +41,7 @@ export interface BotUsageSummary {
 	context: UsageContextSummary;
 }
 
-export function summarizeUsageContext(
+function summarizeUsageContext(
 	last: UsageRun | null,
 	contextWindow: number,
 	currentTokens?: number | null,

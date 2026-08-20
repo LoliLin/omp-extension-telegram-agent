@@ -4,11 +4,11 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFields = Readonly<Record<string, unknown>>;
 
 export const LOG_SCHEMA_VERSION = 1;
-export const MAX_LOG_FIELDS = 24;
-export const MAX_LOG_STRING = 256;
-export const MAX_LOG_LINE_BYTES = 4096;
-export const DEFAULT_LOG_MAX_BYTES = 8 * 1024 * 1024;
-export const DEFAULT_LOG_GENERATIONS = 3;
+const MAX_LOG_FIELDS = 24;
+const MAX_LOG_STRING = 256;
+const MAX_LOG_LINE_BYTES = 4096;
+const DEFAULT_LOG_MAX_BYTES = 8 * 1024 * 1024;
+const DEFAULT_LOG_GENERATIONS = 3;
 
 const SENSITIVE_KEY =
 	/(?:^|_)(?:token|secret|password|authorization|cookie|api[_-]?key|prompt|content|body|response|query|url|path|stack|persona)(?:$|_)/i;
@@ -57,7 +57,7 @@ function safeScalar(key: string, value: unknown): string | number | boolean | nu
 	return undefined;
 }
 
-export function sanitizeLogFields(fields: LogFields = {}): Record<string, string | number | boolean | null> {
+function sanitizeLogFields(fields: LogFields = {}): Record<string, string | number | boolean | null> {
 	const output: Record<string, string | number | boolean | null> = {};
 	for (const [rawKey, value] of Object.entries(fields).slice(0, MAX_LOG_FIELDS)) {
 		const key = safeName(rawKey, "field").slice(0, 48);
@@ -67,7 +67,7 @@ export function sanitizeLogFields(fields: LogFields = {}): Record<string, string
 	return output;
 }
 
-export function formatLogRecord(
+function formatLogRecord(
 	level: LogLevel,
 	component: string,
 	event: string,
