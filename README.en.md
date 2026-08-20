@@ -22,6 +22,8 @@ You need:
 
 Install the plugin (for local development, `omp plugin link <repo-path>`):
 
+Configuration, `.env`, personas, and `data/` live in the workdir `~/.omp/agent/telegram/` by default (override with the `TELEGRAM_AGENT_DIR` environment variable); the public persona templates ship with the plugin, not the workdir.
+
 ```bash
 omp install <repository-url>
 ```

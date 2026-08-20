@@ -45,6 +45,8 @@ export interface DaemonReadiness {
 export interface ConfigWizardDependencies {
 	rootDir: string;
 	restartDaemon(): Promise<DaemonReadiness>;
+	/** Public persona templates ship with the plugin, not the workdir. */
+	personaTemplatesDir?: string;
 	/** Test seam; production resolves and authenticates Pi's merged default model locally. */
 	preflightPiModel?: PiModelPreflight;
 }
@@ -168,7 +170,7 @@ export async function runNativeConfigWizard(
 
 	let collected: FirstRunDraft | null;
 	try {
-		collected = await collectFirstRunDraft(ui, rootDir);
+		collected = await collectFirstRunDraft(ui, rootDir, dependencies.personaTemplatesDir);
 	} catch (error) {
 		ui.notify(
 			formatSafeFailure(
@@ -218,13 +220,14 @@ export async function runNativeConfigWizard(
 	}
 }
 
-async function collectFirstRunDraft(ui: ConfigWizardUI, rootDir: string): Promise<FirstRunDraft | null> {
+async function collectFirstRunDraft(ui: ConfigWizardUI, rootDir: string, templatesDirOverride?: string): Promise<FirstRunDraft | null> {
 	const templateChoice = await ui.select("Choose a public persona template", [WIZARD_TEMPLATE_ZH, WIZARD_TEMPLATE_EN]);
 	if (!templateChoice) return null;
 	const templateName = templateChoice === WIZARD_TEMPLATE_ZH ? "template.zh.md" : "template.en.md";
 	let personaText: string;
+	const templatesDir = resolve(templatesDirOverride ?? join(rootDir, "personas"));
 	try {
-		personaText = readFileSync(join(rootDir, "personas", templateName), "utf8");
+		personaText = readFileSync(join(templatesDir, templateName), "utf8");
 	} catch {
 		throw new OnboardingWriteError(`public persona template is unavailable: personas/${templateName}`);
 	}

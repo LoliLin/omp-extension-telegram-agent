@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
 	AssistantMessageComponent,
+	getAgentDir,
 	ToolExecutionComponent,
 	VERSION,
 	type ExtensionAPI,
@@ -1225,7 +1226,10 @@ function detachedEntry(data: FeedEntry, theme: Theme, supported: boolean): Tui.C
 }
 
 export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExtensionOptions = {}): void {
-	const rootDir = options.rootDir ?? process.cwd();
+	// The plugin's code lives in the omp plugin install dir; the workdir (config,
+	// .env, personas, data/) is separate so plugin upgrades never touch it.
+	const pluginRoot = resolve(import.meta.dir, "..", "..");
+	const rootDir = options.rootDir ?? process.env.TELEGRAM_AGENT_DIR ?? join(getAgentDir(), "telegram");
 	const hostVersion = options.hostVersion ?? VERSION;
 	const supported = supportsPiVersion(hostVersion);
 	const factory: TimelineFactory = (filter, hooks) =>
@@ -1574,6 +1578,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				try {
 					const result = await runNativeConfigWizard(ctx.ui, {
 						rootDir,
+						personaTemplatesDir: join(pluginRoot, "personas"),
 						restartDaemon: async () => {
 							closeCompose(ctx.ui);
 							active?.detach("configuration changed; waiting for daemon readiness");
@@ -1582,7 +1587,9 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 							ctx.ui.setStatus("telegram-config", "TELEGRAM · RESTARTING");
 							let processResult: ProcessRunResult;
 							try {
-								processResult = await runChildProcess("bun", ["run", "src/main.ts", "restart"], { cwd: rootDir });
+								processResult = await runChildProcess("bun", ["run", join(pluginRoot, "src", "main.ts"), "restart"], {
+									cwd: rootDir,
+								});
 							} catch {
 								return { ready: false, diagnostic: "failed to run the controlled daemon restart" };
 							}
@@ -1709,7 +1716,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 				}
 				let result: ProcessRunResult;
 				try {
-					result = await runChildProcess("bun", ["run", "src/main.ts", command], { cwd: rootDir });
+					result = await runChildProcess("bun", ["run", join(pluginRoot, "src", "main.ts"), command], { cwd: rootDir });
 				} catch (error) {
 					result = { status: null, stdout: "", stderr: `failed to run daemon command: ${String(error)}` };
 				}

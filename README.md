@@ -22,6 +22,8 @@
 
 安装插件（本地开发可用 `omp plugin link <本仓库路径>`）：
 
+配置、`.env`、persona 与 `data/` 默认放在工作目录 `~/.omp/agent/telegram/`（可用环境变量 `TELEGRAM_AGENT_DIR` 覆盖）；persona 模板随插件分发，不随配置修改。
+
 ```bash
 omp install <repository-url>
 ```
