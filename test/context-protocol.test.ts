@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
 import {
 	buildContextFingerprint,
 	canResumeContextSession,
@@ -89,18 +89,31 @@ describe("Pi context protocol", () => {
 	});
 
 	test("rejects a model-specific reasoning level that Pi would silently clamp", async () => {
-		const catalog = await ModelRuntime.create();
-		const model = catalog.getModel("deepseek", "deepseek-v4-flash");
-		expect(model).toBeDefined();
+		// Fixture model keeps this test hermetic: reasoning capabilities must not depend on the
+		// ambient Pi catalog in ~/.pi, which is absent on CI runners. supported levels are a pure
+		// function of reasoning + thinkingLevelMap (pi-ai getSupportedThinkingLevels).
+		const model: Model<"openai-completions"> = {
+			id: "fixture-reasoning-model",
+			name: "Fixture Reasoning Model",
+			api: "openai-completions",
+			provider: "fixture",
+			baseUrl: "http://127.0.0.1:1/v1",
+			reasoning: true,
+			thinkingLevelMap: { minimal: null, medium: null, max: "max" },
+			input: ["text"],
+			cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 4096,
+			maxTokens: 1024,
+		};
 		const runtime = {
 			getModel: (provider: string, modelId: string) =>
-				provider === "deepseek" && modelId === "deepseek-v4-flash" ? model : undefined,
+				provider === "fixture" && modelId === "fixture-reasoning-model" ? model : undefined,
 			hasConfiguredAuth: () => true,
 		};
 
-		expect(inspectModelReasoning(model!, "medium")).toEqual({
-			provider: "deepseek",
-			model: "deepseek-v4-flash",
+		expect(inspectModelReasoning(model, "medium")).toEqual({
+			provider: "fixture",
+			model: "fixture-reasoning-model",
 			requested: "medium",
 			effective: "high",
 			supported: ["off", "low", "high", "max"],
@@ -109,8 +122,8 @@ describe("Pi context protocol", () => {
 		await expect(
 			configureBotModelRuntime(
 				{
-					provider: "deepseek",
-					model: "deepseek-v4-flash",
+					provider: "fixture",
+					model: "fixture-reasoning-model",
 					thinkingLevel: "medium",
 					purpose: "bot:A",
 				},
@@ -123,7 +136,7 @@ describe("Pi context protocol", () => {
 		});
 		expect(
 			await configureBotModelRuntime(
-				{ provider: "deepseek", model: "deepseek-v4-flash", thinkingLevel: "high" },
+				{ provider: "fixture", model: "fixture-reasoning-model", thinkingLevel: "high" },
 				runtime,
 			),
 		).toBe(runtime);
