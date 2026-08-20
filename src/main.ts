@@ -2,10 +2,25 @@
 
 import { join } from "node:path";
 import { DaemonController, type DaemonControlResult } from "./daemon/control.ts";
-import { loadConfig } from "./config.ts";
+import { loadConfig, parseEnvFile } from "./config.ts";
 import { inspectVideoTranscoder, videoTranscoderAdvisory } from "./media/video-frames.ts";
 
 const rootDir = process.cwd();
+
+// Telegram is unreachable without a proxy in many networks. Bun's fetch honors
+// the standard proxy environment variables, so surface a proxy declared in the
+// project .env (e.g. `https_proxy: http://127.0.0.1:7890`) to the daemon and
+// its children without requiring a shell-level environment change.
+for (const key of ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"] as const) {
+	if (process.env[key] !== undefined) continue;
+	try {
+		const value = parseEnvFile(join(rootDir, ".env"))[key];
+		if (value) process.env[key] = value;
+	} catch {
+		// A missing/unreadable .env is a config error reported by loadConfig below.
+	}
+}
+
 const cmd = process.argv[2];
 
 function report(result: DaemonControlResult): void {

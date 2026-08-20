@@ -133,7 +133,7 @@ export function mergeEnvSource(source: string, updates: Readonly<Record<string, 
 function renderFirstRunConfig(draft: NormalizedDraft, modelSelection?: { provider: string; model: string }): string {
 	const value = (input: string | number) => JSON.stringify(input);
 	const pinnedModel = modelSelection
-		? `\tprovider: ${value(modelSelection.provider)},\n\tmodel: ${value(modelSelection.model)},\n`
+		? `\tprovider: ${value(modelSelection.provider)},\n\tmodel: ${value(modelSelection.model)},\n\tcompaction_model: ${value(`${modelSelection.provider}/${modelSelection.model}:low`)},\n`
 		: "";
 	// No `defineConfig` import: the config lives in the plugin workdir, which is not
 	// co-located with src/, so a relative import could not resolve. defineConfig is
