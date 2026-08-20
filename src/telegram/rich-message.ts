@@ -26,29 +26,22 @@ interface ProjectionState {
 	nodes: number;
 	blocks: number;
 	truncated: boolean;
-	seen: WeakSet<object>;
 }
 
 function objectValue(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function takeCodePoints(value: string, limit: number): { text: string; complete: boolean } {
-	if (limit <= 0) return { text: "", complete: value.length === 0 };
+function takeCodePoints(value: string, limit: number): { text: string; length: number; complete: boolean } {
+	if (limit <= 0) return { text: "", length: 0, complete: value.length === 0 };
 	let count = 0;
 	let end = 0;
 	for (const character of value) {
-		if (count >= limit) return { text: value.slice(0, end), complete: false };
+		if (count >= limit) return { text: value.slice(0, end), length: count, complete: false };
 		end += character.length;
 		count++;
 	}
-	return { text: value, complete: true };
-}
-
-function codePointLength(value: string): number {
-	let length = 0;
-	for (const _character of value) length++;
-	return length;
+	return { text: value, length: count, complete: true };
 }
 
 function boundedString(value: string, state: ProjectionState): string {
@@ -68,7 +61,7 @@ function joinLimited(values: Iterable<string>, separator: string, state: Project
 			const remaining = RICH_MESSAGE_MAX_CHARS - length;
 			const taken = takeCodePoints(part, remaining);
 			output += taken.text;
-			length += codePointLength(taken.text);
+			length += taken.length;
 			if (!taken.complete) {
 				state.truncated = true;
 				return output;
@@ -78,7 +71,7 @@ function joinLimited(values: Iterable<string>, separator: string, state: Project
 	return output;
 }
 
-function enter(value: object, depth: number, state: ProjectionState, block = false): boolean {
+function enter(depth: number, state: ProjectionState, block = false): boolean {
 	if (depth > RICH_MESSAGE_MAX_DEPTH) {
 		state.truncated = true;
 		return false;
@@ -95,11 +88,6 @@ function enter(value: object, depth: number, state: ProjectionState, block = fal
 			return false;
 		}
 	}
-	if (state.seen.has(value)) {
-		state.truncated = true;
-		return false;
-	}
-	state.seen.add(value);
 	return true;
 }
 
@@ -107,10 +95,10 @@ function renderInline(value: unknown, depth: number, state: ProjectionState): st
 	if (typeof value === "string") return boundedString(value, state);
 	if (value == null || typeof value === "boolean" || typeof value === "number") return "";
 	if (Array.isArray(value)) {
-		if (!enter(value, depth, state)) return "";
+		if (!enter(depth, state)) return "";
 		return joinLimited(renderInlineItems(value, depth + 1, state), "", state);
 	}
-	if (!objectValue(value) || !enter(value, depth, state)) return "";
+	if (!objectValue(value) || !enter(depth, state)) return "";
 	if ("text" in value) return renderInline(value.text, depth + 1, state);
 	if (typeof value.expression === "string") return boundedString(value.expression, state);
 	if (typeof value.alternative_text === "string") return boundedString(value.alternative_text, state);
@@ -126,7 +114,7 @@ function* renderInlineItems(values: readonly unknown[], depth: number, state: Pr
 
 function renderCaption(value: unknown, depth: number, state: ProjectionState): string {
 	if (!objectValue(value)) return renderInline(value, depth, state);
-	if (!enter(value, depth, state)) return "";
+	if (!enter(depth, state)) return "";
 	return joinLimited(
 		[renderInline(value.text, depth + 1, state), renderInline(value.credit, depth + 1, state)],
 		" — ",
@@ -143,7 +131,7 @@ function prefixLines(value: string, prefix: string): string {
 
 function renderBlocks(value: unknown, depth: number, state: ProjectionState): string {
 	if (!Array.isArray(value)) return renderBlock(value, depth, state);
-	if (!enter(value, depth, state)) return "";
+	if (!enter(depth, state)) return "";
 	return joinLimited(renderBlockItems(value, depth + 1, state), "\n", state);
 }
 
@@ -164,7 +152,7 @@ function* renderListItems(values: readonly unknown[], depth: number, state: Proj
 function* renderTableCells(values: readonly unknown[], depth: number, state: ProjectionState): Generator<string> {
 	for (const value of values) {
 		if (state.truncated) return;
-		if (!objectValue(value) || !enter(value, depth, state)) continue;
+		if (!objectValue(value) || !enter(depth, state)) continue;
 		yield renderInline(value.text, depth + 1, state)
 			.replace(/\n+/g, " ")
 			.trim();
@@ -172,7 +160,7 @@ function* renderTableCells(values: readonly unknown[], depth: number, state: Pro
 }
 
 function renderListItem(value: unknown, depth: number, state: ProjectionState): string {
-	if (!objectValue(value) || !enter(value, depth, state)) return "";
+	if (!objectValue(value) || !enter(depth, state)) return "";
 	const body = renderBlocks(value.blocks, depth + 1, state);
 	const rawLabel = typeof value.label === "string" && value.label.trim() ? value.label.trim() : "-";
 	const labelResult = takeCodePoints(rawLabel, 64);
@@ -193,10 +181,10 @@ function* renderListLines(body: string, prefix: string): Generator<string> {
 }
 
 function* renderTableRows(value: Record<string, unknown>, depth: number, state: ProjectionState): Generator<string> {
-	if (Array.isArray(value.cells) && enter(value.cells, depth, state)) {
+	if (Array.isArray(value.cells) && enter(depth, state)) {
 		for (const row of value.cells) {
 			if (state.truncated) return;
-			if (!Array.isArray(row) || !enter(row, depth + 1, state)) continue;
+			if (!Array.isArray(row) || !enter(depth + 1, state)) continue;
 			yield joinLimited(renderTableCells(row, depth + 2, state), " | ", state);
 		}
 	}
@@ -215,7 +203,7 @@ const MEDIA_BLOCK_TYPES = new Set(["animation", "audio", "photo", "video", "voic
 
 function renderBlock(value: unknown, depth: number, state: ProjectionState): string {
 	if (typeof value === "string" || Array.isArray(value)) return renderInline(value, depth, state);
-	if (!objectValue(value) || !enter(value, depth, state, true)) return "";
+	if (!objectValue(value) || !enter(depth, state, true)) return "";
 	const type = typeof value.type === "string" ? value.type : "";
 	switch (type) {
 		case "paragraph":
@@ -300,13 +288,13 @@ function renderUnknown(
 
 /** Project a Telegram RichMessage into stable plain text without exposing metadata. */
 export function projectRichMessage(value: unknown): RichProjection {
-	const state: ProjectionState = { nodes: 0, blocks: 0, truncated: false, seen: new WeakSet() };
+	const state: ProjectionState = { nodes: 0, blocks: 0, truncated: false };
 	let text: string;
 	if (objectValue(value) && Array.isArray(value.blocks)) {
-		if (!enter(value, 0, state)) text = "";
+		if (!enter(0, state)) text = "";
 		else text = renderBlocks(value.blocks, 1, state);
 	} else if (objectValue(value)) {
-		if (!enter(value, 0, state)) text = "";
+		if (!enter(0, state)) text = "";
 		else text = renderUnknown(value, 1, state, "\n");
 	} else {
 		text = "";
@@ -315,7 +303,8 @@ export function projectRichMessage(value: unknown): RichProjection {
 	if (!text && !state.truncated) text = RICH_MESSAGE_UNAVAILABLE;
 	if (state.truncated) {
 		const separator = text ? "\n" : "";
-		const contentLimit = RICH_MESSAGE_MAX_CHARS - codePointLength(separator) - codePointLength(RICH_MESSAGE_TRUNCATED);
+		// separator and RICH_MESSAGE_TRUNCATED are single-code-unit ASCII, so length == code points
+		const contentLimit = RICH_MESSAGE_MAX_CHARS - separator.length - RICH_MESSAGE_TRUNCATED.length;
 		text = `${takeCodePoints(text, contentLimit).text}${separator}${RICH_MESSAGE_TRUNCATED}`;
 	}
 	return { text, truncated: state.truncated, nodes: state.nodes, blocks: state.blocks };

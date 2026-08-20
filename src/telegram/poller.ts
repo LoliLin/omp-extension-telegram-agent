@@ -21,7 +21,7 @@ export class Poller {
 	private onMessage: MessageHandler | null;
 	private replyBotTargets: ReadonlyMap<number, string> | undefined;
 	private stopped = false;
-	running = false;
+	private readonly abort = new AbortController();
 
 	constructor(
 		db: Database,
@@ -45,32 +45,32 @@ export class Poller {
 
 	stop(): void {
 		this.stopped = true;
+		this.abort.abort();
 	}
 
 	async run(): Promise<void> {
-		this.running = true;
 		let backoffMs = 1000;
 		let ingestFailures = 0;
 		while (!this.stopped) {
 			let updates: unknown[];
 			try {
-				updates = await this.api.getUpdates(this.offset(), POLL_TIMEOUT_SEC);
+				updates = await this.api.getUpdates(this.offset(), POLL_TIMEOUT_SEC, this.abort.signal);
 				backoffMs = 1000;
 			} catch (err) {
+				// an abort rejection is the normal stop path, not an error
 				if (this.stopped) break;
 				if (err instanceof TelegramApiError && (err.code === 401 || err.code === 404)) {
 					// auth-level failure: token invalid/revoked. Retry would never succeed — fail loudly.
 					log.error("telegram_poller", "auth_failed", { bot_id: this.botId, telegram_code: err.code, fatal: true });
-					this.running = false;
 					throw err;
 				}
 				if (err instanceof TelegramApiError && err.retryAfter) {
-					await sleep(err.retryAfter * 1000);
+					await this.sleep(err.retryAfter * 1000);
 					continue;
 				}
 				if (err instanceof TelegramApiError && err.code === 409) {
 					log.error("telegram_poller", "poll_conflict", { bot_id: this.botId, telegram_code: 409, retry_ms: 30_000 });
-					await sleep(30_000);
+					await this.sleep(30_000);
 					continue;
 				}
 				log.error("telegram_poller", "poll_failed", {
@@ -78,7 +78,7 @@ export class Poller {
 					category: errorCategory(err),
 					retry_ms: backoffMs,
 				});
-				await sleep(backoffMs);
+				await this.sleep(backoffMs);
 				backoffMs = Math.min(backoffMs * 2, 60_000);
 				continue;
 			}
@@ -129,14 +129,25 @@ export class Poller {
 				}
 			}
 			if (batchFailed) {
-				await sleep(backoffMs);
+				await this.sleep(backoffMs);
 				backoffMs = Math.min(backoffMs * 2, 60_000);
 			}
 		}
-		this.running = false;
 	}
-}
 
-function sleep(ms: number): Promise<void> {
-	return new Promise((r) => setTimeout(r, ms));
+	/** Backoff that aborts early on stop() so shutdown never waits out a sleep. */
+	private sleep(ms: number): Promise<void> {
+		if (this.abort.signal.aborted) return Promise.resolve();
+		return new Promise((resolve) => {
+			const timer = setTimeout(resolve, ms);
+			this.abort.signal.addEventListener(
+				"abort",
+				() => {
+					clearTimeout(timer);
+					resolve();
+				},
+				{ once: true },
+			);
+		});
+	}
 }

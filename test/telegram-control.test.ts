@@ -190,7 +190,6 @@ describe("Telegram rich control status", () => {
 			replyBotId: "A",
 			text: PLAIN_FALLBACK,
 			richText: RICH_MARKDOWN,
-			duplicate: false,
 		};
 		const coordinator = new TelegramControlCoordinator(
 			db,

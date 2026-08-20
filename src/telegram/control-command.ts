@@ -66,7 +66,6 @@ export interface TelegramControlResult {
 	text: string | null;
 	/** Telegram InputRichMessage Markdown; text remains the independent safe fallback projection. */
 	richText?: string;
-	duplicate: boolean;
 }
 
 interface ControlExecutionResult {
@@ -187,34 +186,34 @@ export class TelegramControlCommandService {
 	async handle(command: ParsedTelegramControlCommand): Promise<TelegramControlResult> {
 		const claimed = this.claim(command);
 		this.consumeEveryRuntime(command.messageId);
-		if (!claimed) return this.result(command, null, true);
+		if (!claimed) return this.result(command, null);
 		const startedAt = this.now();
 		if (command.edited) {
 			this.audit(command, false, "ignored_edit", startedAt);
-			return this.result(command, null, false);
+			return this.result(command, null);
 		}
 		if (!isHuman(command.sender)) {
 			this.audit(command, false, "rejected_sender", startedAt);
-			return this.result(command, null, false);
+			return this.result(command, null);
 		}
 
 		const mutation = isMutation(command.action);
 		const authorized = !mutation || this.isAdmin(command.sender);
 		if (!authorized) {
 			this.audit(command, false, "permission_denied", startedAt);
-			return this.result(command, "权限不足：此操作仅限 telegram_admins 白名单。", false);
+			return this.result(command, "权限不足：此操作仅限 telegram_admins 白名单。");
 		}
 
 		if (mutation) {
 			return await this.enqueueMutation(async () => {
 				const executed = await this.execute(command);
 				this.audit(command, true, executed.outcome, startedAt);
-				return this.result(command, executed.text, false, executed.richText);
+				return this.result(command, executed.text, executed.richText);
 			});
 		}
 		const executed = await this.execute(command);
 		this.audit(command, true, executed.outcome, startedAt);
-		return this.result(command, executed.text, false, executed.richText);
+		return this.result(command, executed.text, executed.richText);
 	}
 
 	/** Persist and expose a sent control reply so it remains outside every future provider epoch. */
@@ -271,8 +270,8 @@ export class TelegramControlCommandService {
 		const snapshot = this.runtimes.get(bot.id)?.controlSnapshot();
 		const view = buildBotStatusView(bot, loadBotStats(this.db, bot.id), snapshot);
 		return {
-			text: boundedReply(renderBotStatusPlain(view)),
-			richText: boundedRichStatus([statusRichSection(view)]),
+			text: renderBotStatusPlain(view),
+			richText: boundedRichStatus(statusRichSection(view)),
 			outcome: "ok",
 		};
 	}
@@ -350,19 +349,13 @@ export class TelegramControlCommandService {
 		);
 	}
 
-	private result(
-		command: ParsedTelegramControlCommand,
-		text: string | null,
-		duplicate: boolean,
-		richText?: string,
-	): TelegramControlResult {
+	private result(command: ParsedTelegramControlCommand, text: string | null, richText?: string): TelegramControlResult {
 		return {
 			chatId: command.chatId,
 			replyToMessageId: command.messageId,
 			replyBotId: command.replyBotId,
 			text: text == null ? null : boundedReply(text),
-			...(richText && richText.length <= MAX_REPLY_CHARS ? { richText } : {}),
-			duplicate,
+			...(richText ? { richText } : {}),
 		};
 	}
 
@@ -441,18 +434,8 @@ function statusRichSection(view: BotStatusView): string {
 	].join("\n");
 }
 
-function boundedRichStatus(sections: readonly string[]): string {
-	let output = "# Telegram Agent 状态";
-	for (const section of sections) {
-		const candidate = `${output}\n\n${section}`;
-		if (candidate.length > MAX_REPLY_CHARS) {
-			const omitted = "\n\n_其余 bot 已省略。_";
-			if (output.length + omitted.length <= MAX_REPLY_CHARS) output += omitted;
-			break;
-		}
-		output = candidate;
-	}
-	return output;
+function boundedRichStatus(section: string): string {
+	return boundedReply(`# Telegram Agent 状态\n\n${section}`);
 }
 
 const USAGE_TEXT = [

@@ -72,7 +72,7 @@ export class BotApi {
 		return this.call("getMe");
 	}
 
-	getUpdates(offset: number, timeoutSec: number): Promise<unknown[]> {
+	getUpdates(offset: number, timeoutSec: number, signal?: AbortSignal): Promise<unknown[]> {
 		return this.call(
 			"getUpdates",
 			{
@@ -81,6 +81,7 @@ export class BotApi {
 				allowed_updates: ["message", "edited_message"],
 			},
 			timeoutSec * 1000 + LONG_POLL_GRACE_MS,
+			signal,
 		);
 	}
 
