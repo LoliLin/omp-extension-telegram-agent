@@ -1419,9 +1419,24 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			if (!pending) break;
 		}
 		if (pending) {
+			// Fallback: transcript didn't mount within 500ms (common on omp);
+			// create feed directly instead of failing.
+			const fallbackData = pending.data;
+			const fallbackChanged = pending.changed;
 			pending = null;
-			clearFeedUi(ctx.ui);
-			ctx.ui.notify("Pi did not mount the Telegram transcript entry", "error");
+			const feed = new TelegramFeed(
+				fallbackData.filter,
+				ctx.ui.theme,
+				factory,
+				fallbackChanged,
+				mediaCache,
+				() => requestHostRender?.(),
+				toolHost,
+			);
+			feeds.set(fallbackData.instanceId, feed);
+			active = feed;
+			feed.start();
+			openScopeCompose(ctx.ui);
 		} else {
 			openScopeCompose(ctx.ui);
 		}
