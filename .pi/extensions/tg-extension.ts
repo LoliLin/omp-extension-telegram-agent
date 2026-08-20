@@ -1413,8 +1413,11 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			},
 		};
 		pi.appendEntry<FeedEntry>(ENTRY_TYPE, data);
-		// omp's transcript rebuild is async; give it a tick to mount
-		await new Promise<void>((resolve) => setTimeout(resolve, 100));
+		// omp rebuilds transcript async; poll until the renderer clears pending
+		for (let waited = 0; waited < 500; waited += 50) {
+			await new Promise<void>((resolve) => setTimeout(resolve, 50));
+			if (!pending) break;
+		}
 		if (pending) {
 			pending = null;
 			clearFeedUi(ctx.ui);
