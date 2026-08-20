@@ -50,10 +50,10 @@ export class IpcServer {
 	private botUserIds: Map<string, number>;
 	private mediaDir: string;
 	private listeners = new Set<SocketLike>();
-	private decoders = new WeakMap<object, FrameDecoder>();
-	private outQueues = new WeakMap<object, OutQueue>();
+	private decoders = new Map<object, FrameDecoder>();
+	private outQueues = new Map<object, OutQueue>();
 	/** Per-listener bot filter from hello (REQ-UI-0002); null = global view. */
-	private filters = new WeakMap<object, string | null>();
+	private filters = new Map<object, string | null>();
 	private encoder = new TextEncoder();
 	private server: ReturnType<typeof Bun.listen> | null = null;
 
@@ -79,6 +79,7 @@ export class IpcServer {
 		this.listeners.delete(socket);
 		this.decoders.delete(socket);
 		this.outQueues.delete(socket);
+		this.filters.delete(socket);
 		try {
 			socket.end();
 		} catch {
@@ -167,6 +168,7 @@ export class IpcServer {
 					this.listeners.delete(socket);
 					this.outQueues.delete(socket);
 					this.decoders.delete(socket);
+					this.filters.delete(socket);
 				},
 				error: (_socket, err) => {
 					log.error("ipc", "socket_failed", { category: errorCategory(err) });
@@ -209,7 +211,7 @@ export class IpcServer {
 
 	/** Push one shared media description to every live transcript (REQ-UI-0006). */
 	broadcastVision(update: VisionUpdate): void {
-		if (this.listeners.size === 0 || !update.fileUniqueId || !update.text.trim()) return;
+		if (this.listeners.size === 0) return;
 		const frame = encodeFrame({ type: "vision_update", ...update } satisfies ServerMessage);
 		for (const socket of this.listeners) {
 			if (this.filters.has(socket)) this.writeFrame(socket, frame);
@@ -218,7 +220,7 @@ export class IpcServer {
 
 	/** Push one owner-only local media path to every live transcript (REQ-UI-0014). */
 	broadcastMediaReady(update: MediaReadyUpdate): void {
-		if (this.listeners.size === 0 || !update.fileUniqueId || !update.mediaPath) return;
+		if (this.listeners.size === 0) return;
 		const frame = encodeFrame({ type: "media_ready", ...update } satisfies ServerMessage);
 		for (const socket of this.listeners) {
 			if (this.filters.has(socket)) this.writeFrame(socket, frame);

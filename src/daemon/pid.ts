@@ -3,9 +3,20 @@
 // startup, before any slow init, so a double `start` cannot race two daemons onto the
 // same token. `stop`/`status` verify the pid belongs to OUR daemon (cmdline check) so a
 // recycled OS pid is never killed.
+// Ownership reads /proc/<pid>/cmdline (NUL-separated argv) and /proc/<pid>/cwd — unlike
+// parsing `ps` output this stays correct when the project path contains spaces.
 
-import { openSync, closeSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import {
+	openSync,
+	closeSync,
+	readFileSync,
+	readdirSync,
+	readlinkSync,
+	writeFileSync,
+	existsSync,
+	rmSync,
+	mkdirSync,
+} from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { errorCategory, log } from "../observability/log.ts";
 
@@ -26,9 +37,11 @@ export function pidAlive(pid: number): boolean {
 	}
 }
 
-function processCommand(pid: number): string | null {
+function processArgv(pid: number): string[] | null {
 	try {
-		return execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 3000 }).trim();
+		return readFileSync(`/proc/${pid}/cmdline`, "utf8")
+			.split("\0")
+			.filter((arg) => arg.length > 0);
 	} catch {
 		return null;
 	}
@@ -36,48 +49,32 @@ function processCommand(pid: number): string | null {
 
 function processCwd(pid: number): string | null {
 	try {
-		const output = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
-			encoding: "utf8",
-			timeout: 3000,
-		});
-		return (
-			output
-				.split("\n")
-				.find((line) => line.startsWith("n"))
-				?.slice(1) ?? null
-		);
+		return readlinkSync(`/proc/${pid}/cwd`);
 	} catch {
 		return null;
 	}
 }
 
-function daemonEntry(command: string): string | null {
-	const args = command.trim().split(/\s+/);
+function daemonEntry(args: string[]): string | null {
 	if (basename(args[0] ?? "") !== "bun") return null;
 	const runOffset = args[1] === "run" ? 2 : 1;
 	const entry = args[runOffset];
 	if (!entry) return null;
-	const unquoted = entry.replace(/^["']|["']$/g, "");
-	if (/(?:^|\/)daemon\/index(?:\.ts)?$/.test(unquoted)) return unquoted;
+	if (/(?:^|\/)daemon\/index(?:\.ts)?$/.test(entry)) return entry;
 	if (
-		/(?:^|\/)main(?:\.ts)?$/.test(unquoted) &&
+		/(?:^|\/)main(?:\.ts)?$/.test(entry) &&
 		args[runOffset + 1] === "start" &&
 		args.slice(runOffset + 2).includes("--foreground")
 	)
-		return unquoted;
+		return entry;
 	return null;
-}
-
-/** Deterministic command-shape contract used by PID ownership and its regression tests. */
-export function isDaemonCommand(command: string): boolean {
-	return daemonEntry(command) != null;
 }
 
 /** True only for a daemon entry running from this repository; recycled/other-repo pids are refused. */
 export function isOurDaemon(pid: number, rootDir: string = process.cwd()): boolean {
-	const command = processCommand(pid);
-	if (!command) return false;
-	const entry = daemonEntry(command);
+	const argv = processArgv(pid);
+	if (!argv) return false;
+	const entry = daemonEntry(argv);
 	if (!entry) return false;
 	const root = resolve(rootDir);
 	if (isAbsolute(entry) && resolve(entry) === join(root, "src/daemon/index.ts")) return true;
@@ -87,17 +84,21 @@ export function isOurDaemon(pid: number, rootDir: string = process.cwd()): boole
 
 /** Enumerate every live daemon from this repository, including an orphan missing from daemon.pid. */
 export function listOurDaemons(rootDir: string = process.cwd()): number[] {
+	let procEntries: string[];
 	try {
-		const output = execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8", timeout: 3000 });
-		const candidates = output
-			.split("\n")
-			.filter((line) => daemonEntry(line.replace(/^\s*\d+\s+/, "")) != null)
-			.map((line) => Number(line.trim().match(/^(\d+)/)?.[1] ?? 0))
-			.filter((pid) => pid > 0 && pid !== process.pid);
-		return [...new Set(candidates.filter((pid) => pidAlive(pid) && isOurDaemon(pid, rootDir)))].sort((a, b) => a - b);
+		procEntries = readdirSync("/proc");
 	} catch {
 		return [];
 	}
+	const pids: number[] = [];
+	for (const name of procEntries) {
+		if (!/^\d+$/.test(name)) continue;
+		const pid = Number(name);
+		if (pid === process.pid) continue;
+		const argv = processArgv(pid);
+		if (argv != null && daemonEntry(argv) != null && isOurDaemon(pid, rootDir)) pids.push(pid);
+	}
+	return pids.sort((a, b) => a - b);
 }
 
 /**

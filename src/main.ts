@@ -1,6 +1,6 @@
 // CLI: start | restart | status | stop.
 
-import { DaemonController, createNodeDaemonControlPort, type DaemonControlResult } from "./daemon/control.ts";
+import { DaemonController, type DaemonControlResult } from "./daemon/control.ts";
 import { loadConfig } from "./config.ts";
 import { inspectVideoTranscoder, videoTranscoderAdvisory } from "./media/video-frames.ts";
 
@@ -24,7 +24,7 @@ function reportAdvisory(): void {
 	}
 }
 
-const controller = new DaemonController(createNodeDaemonControlPort(rootDir));
+const controller = new DaemonController(rootDir);
 
 switch (cmd) {
 	case "start": {

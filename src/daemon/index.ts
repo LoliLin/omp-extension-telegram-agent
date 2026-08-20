@@ -46,6 +46,7 @@ if (config.vision.enabled && (!videoTranscoder.ffmpeg || !videoTranscoder.ffprob
 		blocking: false,
 	});
 }
+// loadConfig already canonicalizes model references (config.ts), so values from config always parse.
 const visualModel = config.vision.enabled ? parsePiModelReference(config.auxiliaryVisualModel)! : null;
 const chatModels = config.bots.map((bot) => ({
 	provider: bot.provider,
@@ -151,11 +152,16 @@ function recordRouteMetric(metric: string, botId: string, messageId: number): vo
 
 // IPC server for TUI attach/detach
 let ipc!: IpcServer;
-const manualSend = new ManualSendService(db, Number(`-100${config.groupPeerId}`), botApis, ({ chatId, messageId }) => {
+/** Fetch the canonical message row and push it to attached TUIs; returns the row for follow-up side effects. */
+const broadcastMessageRow = (chatId: number, messageId: number): MessageRow | null => {
 	const row = db
 		.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
 		.get(chatId, messageId) as MessageRow | null;
 	if (row) ipc.broadcast(ipc.msgToItem(row));
+	return row;
+};
+const manualSend = new ManualSendService(db, Number(`-100${config.groupPeerId}`), botApis, ({ chatId, messageId }) => {
+	broadcastMessageRow(chatId, messageId);
 });
 ipc = new IpcServer(
 	db,
@@ -190,13 +196,8 @@ for (const [botId, rt] of runtimes) {
 	};
 	rt.sentMessageSink = (rawMsg) => {
 		const m = rawMsg as { chat: { id: number }; message_id: number };
-		const row = db
-			.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
-			.get(m.chat.id, m.message_id) as MessageRow | null;
-		if (row) {
-			ipc.broadcast(ipc.msgToItem(row));
-			mediaCache.scheduleMessage(botId, row);
-		}
+		const row = broadcastMessageRow(m.chat.id, m.message_id);
+		if (row) mediaCache.scheduleMessage(botId, row);
 	};
 	rt.usageSink = (run) => ipc.broadcastUsage(run);
 	rt.visionSink = (fileUniqueId, text) => ipc.broadcastVision({ fileUniqueId, text });
@@ -226,10 +227,7 @@ const telegramControlCoordinator = new TelegramControlCoordinator(
 	telegramControl,
 	botApis,
 	({ chatId, messageId }) => {
-		const row = db
-			.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
-			.get(chatId, messageId) as MessageRow | null;
-		if (row) ipc.broadcast(ipc.msgToItem(row));
+		broadcastMessageRow(chatId, messageId);
 	},
 );
 const controlTasks = new Set<Promise<unknown>>();
@@ -268,9 +266,10 @@ function route(result: IngestResult): void {
 	// that new fact actually changes the deterministic outcome into a direct reply.
 	if (result.kind === "enriched" && decision.reason !== "reply") return;
 	if (decision.target === "nobody") return;
-	const claimedDecision = decision as typeof decision & { target: string };
+	// TriggerTarget is `string | "nobody"`, which collapses to string; the early return above
+	// documents the nobody guard and claimRoutingDecision already accepts the decision as-is.
 	const routeVersion = result.routeVersion ?? 1;
-	if (!claimRoutingDecision(db, claimedDecision, routeVersion)) {
+	if (!claimRoutingDecision(db, decision, routeVersion)) {
 		log.info("routing", "duplicate_claim_suppressed", {
 			bot_id: decision.target,
 			message_id: row.message_id,
@@ -281,7 +280,7 @@ function route(result: IngestResult): void {
 	const dispatched = dispatchRoutingDecision(decision, runtimes);
 	finishRoutingClaim(
 		db,
-		claimedDecision,
+		decision,
 		routeVersion,
 		dispatched.outcome === "nobody" ? "missing_runtime" : dispatched.outcome,
 	);
@@ -320,14 +319,9 @@ const pollers = composePollers(
 		if (command) runTelegramControl(command);
 		else route(result);
 		if (result.chatId != null && result.messageId != null) {
-			const row = db
-				.query("SELECT * FROM messages WHERE chat_id = ? AND message_id = ?")
-				.get(result.chatId, result.messageId) as MessageRow | null;
-			if (row) {
-				ipc.broadcast(ipc.msgToItem(row));
-				// Poller offset + canonical row are durable before this non-blocking side effect.
-				mediaCache.scheduleMessage(botId, row);
-			}
+			const row = broadcastMessageRow(result.chatId, result.messageId);
+			// Poller offset + canonical row are durable before this non-blocking side effect.
+			if (row) mediaCache.scheduleMessage(botId, row);
 		}
 	},
 	replyBotTargets,
@@ -365,8 +359,9 @@ async function shutdown(signal: string) {
 	}
 	ipc.stop();
 	releasePidLock(pidFd, config.dataDir);
-	// give pollers a moment to exit their loops
-	await new Promise((r) => setTimeout(r, 500));
+	// wait for the poller loops to actually exit; stop() aborts any in-flight long
+	// poll or backoff sleep, so this returns promptly inside the hard shutdown bound
+	await Promise.allSettled([pollerRuns]);
 	db.close();
 	clearTimeout(hardTimer);
 	process.exit(0);
@@ -375,4 +370,5 @@ process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 
 log.info("daemon", "ready", { pid: process.pid, group_peer_id: config.groupPeerId, bot_count: config.bots.length });
-await Promise.all(pollers.map((p) => p.run()));
+const pollerRuns = Promise.all(pollers.map((p) => p.run()));
+await pollerRuns;
