@@ -10,7 +10,9 @@ export const DEFAULT_TOOL_FOLLOWUP_RESERVE = 6_144;
 export const DEFAULT_REASONING_RESERVE = 4_096;
 export const DEFAULT_SAFETY_MARGIN = 2_048;
 
-/** UTF-8 bytes/2 is deliberately conservative for ASCII, code, CJK, URLs, and emoji. */
+/** UTF-8 bytes/2 is deliberately conservative for ASCII, code, CJK, URLs, and emoji.
+ * Hard budget upper bound; the diagnostic payload estimate is tokenEstimate in
+ * extensions/cache-observer.ts (kept separate: different semantics). */
 export function estimateProviderTokensUpperBound(text: string): number {
 	return Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 2));
 }

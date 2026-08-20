@@ -22,7 +22,7 @@ import {
 import { EFFECTIVE_CONTEXT_WINDOW, MIN_COMPACTION_RESERVE, type AppConfig, type BotConfig } from "../config.ts";
 import { getBotState, setBotState } from "../db/db.ts";
 import { BotApi, TelegramApiError } from "../telegram/api.ts";
-import { TelegramTypingLease, type ActivityScheduler } from "../telegram/activity.ts";
+import { TelegramTypingLease } from "../telegram/activity.ts";
 import {
 	classifyTelegramCreateFailure,
 	localFailureCategory,
@@ -249,7 +249,6 @@ export class BotRuntime {
 		modelRuntime: ModelRuntime,
 		options: {
 			monotonicNow?: () => number;
-			activityScheduler?: ActivityScheduler;
 			chatActionSender?: (signal: AbortSignal) => Promise<unknown>;
 			api?: BotApi;
 			botApis?: ReadonlyMap<string, MediaDownloadApi>;
@@ -272,7 +271,6 @@ export class BotRuntime {
 		this.typingLease = new TelegramTypingLease(
 			options.chatActionSender ?? ((signal) => this.api.sendChatAction(chatId, signal)),
 			{
-				scheduler: options.activityScheduler,
 				onFailure: (error) => {
 					const category =
 						error instanceof TelegramApiError
@@ -796,10 +794,10 @@ export class BotRuntime {
 	): Promise<{ cancel: true } | { compaction: CompactionResult }> {
 		const prep = event.preparation;
 		const gen = await this.generateCompactionSummary(prep);
-		if (!gen) {
+		if (!("summary" in gen)) {
 			// NOTE: the SDK swallows extension handler exceptions and would silently fall back
 			// to the default summarizer, so refusal goes through cancel -> compaction_end { aborted: true }.
-			this.recordEvent("error", { stage: "compaction", error: "empty summary" });
+			this.recordEvent("error", { stage: "compaction", error: gen.failure });
 			return { cancel: true };
 		}
 		const branchEntries = event.branchEntries ?? [];
@@ -826,10 +824,12 @@ export class BotRuntime {
 		};
 	}
 
-	/** Chat-oriented compaction summary via the aux model. Null when the model returns empty text. */
+	/** Chat-oriented compaction summary via the aux model. Failure names provider error/abort apart from empty text. */
 	private async generateCompactionSummary(
 		prep: SessionBeforeCompactEvent["preparation"],
-	): Promise<{ summary: string; usage: Awaited<ReturnType<ModelRuntime["completeSimple"]>>["usage"] } | null> {
+	): Promise<
+		{ summary: string; usage: Awaited<ReturnType<ModelRuntime["completeSimple"]>>["usage"] } | { failure: string }
+	> {
 		const conversation = serializeCompactionMessages(prep.messagesToSummarize);
 		const userText =
 			`<conversation>\n${conversation}\n</conversation>\n\n` +
@@ -845,8 +845,11 @@ export class BotRuntime {
 			{ cacheRetention: "none", maxTokens: 4096, reasoning: this.compactionReasoning },
 		);
 		this.recordCompactionUsage(result.usage, Date.now());
+		if (result.stopReason === "error" || result.stopReason === "aborted") {
+			return { failure: `summary generation ${result.stopReason}` };
+		}
 		const summary = contentText(result.content);
-		if (!summary.trim()) return null;
+		if (!summary.trim()) return { failure: "empty summary" };
 		return { summary, usage: result.usage };
 	}
 
@@ -1240,11 +1243,11 @@ export class BotRuntime {
 		}
 		const usage = this.session.getContextUsage();
 		const suffixBudget = availableSuffixBudget({
-			contextWindow: usage?.contextWindow ?? this.model?.contextWindow ?? 200_000,
+			contextWindow: usage?.contextWindow ?? this.model.contextWindow,
 			currentContextTokens: usage?.tokens ?? 0,
 			staticPrefixTokens: this.staticPrefixTokenEstimate,
 			maxSuffixTokens: this.bot.maxSuffixTokens,
-			outputReserve: Math.min(4096, this.model?.maxTokens ?? 4096),
+			outputReserve: Math.min(4096, this.model.maxTokens),
 			reasoningReserve: this.bot.reasoningEffort === "off" ? 0 : 4096,
 			toolFollowupReserve: this.bot.tools.search || this.bot.tools.runJs ? 6144 : 2048,
 		});
@@ -1407,6 +1410,7 @@ export class BotRuntime {
 		} catch (error) {
 			this.lastControlCompact = { at: Date.now(), outcome: "failed" };
 			const message = error instanceof Error ? error.message : String(error);
+			// Depends on Pi session.compact() error wording; re-check these strings when upgrading Pi.
 			return {
 				ok: false,
 				code: /Nothing to compact|Already compacted/.test(message) ? "nothing_to_compact" : "failed",
@@ -1617,7 +1621,7 @@ export class BotRuntime {
 				observation?.toolsHash ?? this.toolsHash,
 				observation ? JSON.stringify(observation.messageHashes) : null,
 				this.bot.provider,
-				this.model?.api ?? null,
+				this.model.api,
 				sessionIdHash,
 				this.bot.cacheRetention,
 				observation?.fullPayloadHash ?? null,

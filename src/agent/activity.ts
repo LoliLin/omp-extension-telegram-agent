@@ -68,7 +68,7 @@ export class AgentActivityCollector {
 
 	captureEvent(kind: string, payload: unknown): void {
 		if (!this.canAppend()) return;
-		const serialized = JSON.stringify(payload ?? null) ?? "null";
+		const serialized = JSON.stringify(payload ?? null);
 		const projected = take(serialized, AGENT_ACTIVITY_MAX_CHARS - this.chars);
 		const section: AgentActivityEventSection = { type: "event", kind, detail: projected.value };
 		this.sections.push(section);

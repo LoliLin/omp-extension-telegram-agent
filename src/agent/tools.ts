@@ -3,7 +3,7 @@
 // Any change here must bump CACHE_SCHEMA_VERSION and start a new context epoch;
 // test/cache.test.ts locks the schema hash.
 
-import { Type } from "typebox";
+import { Type } from "@earendil-works/pi-ai";
 import { sha256Short } from "./prompt.ts";
 
 export interface SendParams {

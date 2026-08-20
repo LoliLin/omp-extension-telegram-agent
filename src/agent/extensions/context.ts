@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { MessageEventKind } from "../../db/message-events.ts";
+import { SEND_NO_RETRY_ACK, SEND_SUCCESS_ACK } from "../tools.ts";
 
 export const TELEGRAM_CONTEXT_TYPE = "telegram_context_v2";
 export const TELEGRAM_CONTEXT_VERSION = 3;
@@ -63,7 +64,7 @@ export function projectTelegramContext(messages: AgentMessage[]): AgentMessage[]
 				? details.sent.filter((id): id is number => Number.isSafeInteger(id) && (id as number) > 0)
 				: [];
 			if (sent.length > 0) {
-				const ack = details?.outcome ? "no_retry" : "ok";
+				const ack = details?.outcome ? SEND_NO_RETRY_ACK : SEND_SUCCESS_ACK;
 				return {
 					...message,
 					content: [{ type: "text", text: `${ack} sent_message_ids=${sent.map((id) => `#${id}`).join(",")}` }],

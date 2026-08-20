@@ -1,3 +1,4 @@
+import { COMPACTION_SUMMARY_PREFIX } from "@earendil-works/pi-agent-core";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { createHmac } from "node:crypto";
 
@@ -17,12 +18,14 @@ export interface ProviderPayloadObservation {
 	};
 }
 
+// Diagnostic estimate for telemetry only; the hard budget upper bound is
+// estimateProviderTokensUpperBound in ../token-packer.ts (kept separate: different semantics).
 function tokenEstimate(value: unknown): number {
 	return Math.max(0, Math.round(Buffer.byteLength(canonicalJson(value), "utf8") / 2));
 }
 
 function containsCompactionSummary(value: unknown): boolean {
-	if (typeof value === "string") return value.includes("conversation history before this point was compacted");
+	if (typeof value === "string") return value.includes(COMPACTION_SUMMARY_PREFIX);
 	if (Array.isArray(value)) return value.some(containsCompactionSummary);
 	return Boolean(value && typeof value === "object" && Object.values(value).some(containsCompactionSummary));
 }

@@ -51,13 +51,13 @@ export class PiModelConfigurationError extends Error {
 		readonly model: string,
 		readonly reasoning?: ModelReasoningCapabilities,
 		readonly purpose?: string,
+		detail?: string,
 	) {
 		const target = `${provider}/${model}${purpose ? ` (${purpose})` : ""}`;
-		super(
-			reasoning
-				? `Pi model configuration invalid (${category}): ${target} requested ${reasoning.requested}; supported: ${reasoning.supported.join(", ")}. Use Pi /model, then restart.`
-				: `Pi model unavailable (${category}): ${target}. Use Pi /login and /model, then restart.`,
-		);
+		const base = reasoning
+			? `Pi model configuration invalid (${category}): ${target} requested ${reasoning.requested}; supported: ${reasoning.supported.join(", ")}. Use Pi /model, then restart.`
+			: `Pi model unavailable (${category}): ${target}. Use Pi /login and /model, then restart.`;
+		super(detail ? `${base} Cause: ${detail}` : base);
 		this.name = "PiModelConfigurationError";
 	}
 }
@@ -143,8 +143,17 @@ export async function createSharedModelRuntime(
 		if (selectedExtensionProviders.length > 0) {
 			await runtime.refresh({ allowNetwork: true, providers: selectedExtensionProviders });
 		}
-	} catch {
-		throw new PiModelConfigurationError("runtime_unavailable", "<startup>", "<startup>");
+	} catch (error) {
+		// Untrusted provider/extension failure text: attach only a bounded single-line message, never a stack.
+		const detail = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim().slice(0, 200);
+		throw new PiModelConfigurationError(
+			"runtime_unavailable",
+			"<startup>",
+			"<startup>",
+			undefined,
+			undefined,
+			detail || undefined,
+		);
 	}
 	for (const bot of bots) await configureBotModelRuntime(bot, runtime);
 	return runtime;
