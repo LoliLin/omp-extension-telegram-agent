@@ -168,7 +168,7 @@ export async function runNativeConfigWizard(
 	}
 	ui.notify(`Pi model ready: ${formatPiModel(piModel)}. Authentication remains in Pi.`, "info");
 
-	let collected: FirstRunDraft | null;
+	let collected: { draft: FirstRunDraft; zh: boolean } | null;
 	try {
 		collected = await collectFirstRunDraft(ui, rootDir, dependencies.personaTemplatesDir);
 	} catch (error) {
@@ -184,20 +184,26 @@ export async function runNativeConfigWizard(
 	}
 	if (!collected) return cancelled(ui);
 	const approved = await ui.confirm(
-		"Write Telegram configuration?",
+		collected.zh ? "写入 Telegram 配置？" : "Write Telegram configuration?",
 		[
-			`Bot: ${collected.bot.id} (${collected.bot.name})`,
-			`Pi model: ${formatPiModel(piModel)}`,
-			"Files: .env, telegram.config.ts, private persona",
+			`Bot: ${collected.draft.bot.id} (${collected.draft.bot.name})`,
+			`Model: ${formatPiModel(piModel)}`,
+			collected.zh
+				? "文件：.env、telegram.config.ts、私有 persona"
+				: "Files: .env, telegram.config.ts, private persona",
 			mode === "backup-replace"
-				? "Existing local files will be backed up first."
-				: "No existing local files will be overwritten.",
+				? collected.zh
+					? "已存在的本地文件会先备份。"
+					: "Existing local files will be backed up first."
+				: collected.zh
+					? "不会覆盖任何已存在的本地文件。"
+					: "No existing local files will be overwritten.",
 		].join("\n"),
 	);
 	if (!approved) return cancelled(ui);
 
 	try {
-		const result = writeFirstRunDeployment(rootDir, collected, {
+		const result = writeFirstRunDeployment(rootDir, collected.draft, {
 			mode,
 			modelSelection: { provider: piModel.provider, model: piModel.model },
 		});
@@ -220,10 +226,18 @@ export async function runNativeConfigWizard(
 	}
 }
 
-async function collectFirstRunDraft(ui: ConfigWizardUI, rootDir: string, templatesDirOverride?: string): Promise<FirstRunDraft | null> {
-	const templateChoice = await ui.select("Choose a public persona template", [WIZARD_TEMPLATE_ZH, WIZARD_TEMPLATE_EN]);
+async function collectFirstRunDraft(
+	ui: ConfigWizardUI,
+	rootDir: string,
+	templatesDirOverride?: string,
+): Promise<{ draft: FirstRunDraft; zh: boolean } | null> {
+	const templateChoice = await ui.select("Choose a public persona template / 选择 public persona 模板", [
+		WIZARD_TEMPLATE_ZH,
+		WIZARD_TEMPLATE_EN,
+	]);
 	if (!templateChoice) return null;
-	const templateName = templateChoice === WIZARD_TEMPLATE_ZH ? "template.zh.md" : "template.en.md";
+	const zh = templateChoice === WIZARD_TEMPLATE_ZH;
+	const templateName = zh ? "template.zh.md" : "template.en.md";
 	let personaText: string;
 	const templatesDir = resolve(templatesDirOverride ?? join(rootDir, "personas"));
 	try {
@@ -231,28 +245,49 @@ async function collectFirstRunDraft(ui: ConfigWizardUI, rootDir: string, templat
 	} catch {
 		throw new OnboardingWriteError(`public persona template is unavailable: personas/${templateName}`);
 	}
-	const groupPeerId = await input(ui, "Telegram supergroup id", "-1001234567890");
+	const groupPeerId = await input(
+		ui,
+		zh ? "Telegram 群 ID（supergroup，可填裸正数/负数/-100...）" : "Telegram supergroup id",
+		"-1001234567890",
+	);
 	if (groupPeerId == null) return null;
-	const botId = await input(ui, "Local bot id", "friend", "friend");
+	const botId = await input(
+		ui,
+		zh ? "本地 bot 标识（仅本机使用：字母/数字/下划线/连字符）" : "Local bot id",
+		"friend",
+		"friend",
+	);
 	if (botId == null) return null;
-	const botName = await input(ui, "Bot display name", "Mochi");
+	const botName = await input(
+		ui,
+		zh ? "群内显示名（可中文，会显示在群消息里）" : "Bot display name",
+		zh ? "小雨" : "Mochi",
+		zh ? "小雨" : "Mochi",
+	);
 	if (botName == null) return null;
-	const tokenEnv = await input(ui, "Name for the Telegram token in .env", "telegram_bot_token", "telegram_bot_token");
+	const tokenEnv = await input(
+		ui,
+		zh ? "Telegram token 的 .env 键名（字母开头，仅字母/数字/下划线）" : "Name for the Telegram token in .env",
+		"telegram_bot_token",
+		"telegram_bot_token",
+	);
 	if (tokenEnv == null) return null;
 	const token = await input(
 		ui,
-		"Telegram bot token (Pi native input is visible)",
-		"paste the BotFather token; it is written only to ignored .env",
+		zh ? "Telegram bot token（输入可见，只写入被忽略的 .env）" : "Telegram bot token (Pi native input is visible)",
+		zh ? "粘贴 BotFather 的 token" : "paste the BotFather token; it is written only to ignored .env",
 	);
 	if (token == null) return null;
 
-	personaText =
-		templateChoice === WIZARD_TEMPLATE_ZH
-			? personaText.replace("- 名字：请填写公开显示名。", `- 名字：${botName}`)
-			: personaText.replace("- Name: choose the public display name.", `- Name: ${botName}`);
+	personaText = zh
+		? personaText.replace("- 名字：请填写公开显示名。", `- 名字：${botName}`)
+		: personaText.replace("- Name: choose the public display name.", `- Name: ${botName}`);
 	return {
-		groupPeerId,
-		bot: { id: botId, name: botName, tokenEnv, token, personaText },
+		draft: {
+			groupPeerId,
+			bot: { id: botId, name: botName, tokenEnv, token, personaText },
+		},
+		zh,
 	};
 }
 
@@ -336,6 +371,15 @@ function formatPiModel(selection: PiModelSelection): string {
 	return `${safe(selection.provider)}/${safe(selection.model)}:${selection.thinkingLevel}`;
 }
 
+const FIELD_HINTS: Readonly<Record<string, string>> = {
+	"bot.token_env": "字母开头，仅字母/数字/下划线（如 telegram_bot_token）",
+	"bot.token": "BotFather token（数字:字母数字，形如 1234567890:AA...）",
+	"bot.id": "字母/数字/下划线/连字符",
+	"bot.name": "不能为空，≤64 字符",
+	"bot.persona": "persona 内容为空或过大",
+	group_peer_id: "需为合法的群数字 ID",
+};
+
 function formatSafeFailure(prefix: string, error: unknown, suffix: string): string {
 	let fields: string[] = [];
 	if (error instanceof OnboardingValidationError) fields = [...error.fields];
@@ -347,6 +391,11 @@ function formatSafeFailure(prefix: string, error: unknown, suffix: string): stri
 	} else if (error instanceof OnboardingWriteError) {
 		fields = [error.message.replace(/[\r\n]+/g, " ").slice(0, 240)];
 	}
-	const detail = fields.length > 0 ? ` Check: ${[...new Set(fields)].join(", ")}.` : "";
+	const detail =
+		fields.length > 0
+			? ` Check: ${[...new Set(fields)]
+					.map((field) => (FIELD_HINTS[field] ? `${field} (${FIELD_HINTS[field]})` : field))
+					.join(", ")}.`
+			: "";
 	return `${prefix}.${detail} ${suffix}`;
 }

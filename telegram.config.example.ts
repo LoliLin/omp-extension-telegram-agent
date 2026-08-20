@@ -1,9 +1,13 @@
-// The single config file for this project (non-secret). Secrets live in .env; this file
-// only names the .env keys. Apply changes with `bun run restart`; tuning from the group
-// chat (`/set routing_p 0.5`, admin only) writes back into this file.
-import { defineConfig } from "./src/config.ts";
+// The single config file (non-secret). Secrets live in .env; this file only names the
+// .env keys. Apply changes with `/tg restart`; tuning from the group chat (`/set
+// routing_p 0.5`, admin only) writes back into this file.
+//
+// As an omp plugin the config lives in the workdir (~/.omp/agent/telegram/), separate
+// from the plugin code, so it must not import from ./src. defineConfig in src/config.ts
+// is an identity helper for editor types only; when editing inside a source checkout you
+// may wrap the object with it for type hints.
 
-export default defineConfig({
+export default {
 	// ===== Required =====
 
 	// Target Telegram supergroup id. Bare, negative, and -100-prefixed forms are accepted.
@@ -79,4 +83,4 @@ export default defineConfig({
 			},
 		},
 	],
-});
+};

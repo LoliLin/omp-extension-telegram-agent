@@ -135,9 +135,10 @@ function renderFirstRunConfig(draft: NormalizedDraft, modelSelection?: { provide
 	const pinnedModel = modelSelection
 		? `\tprovider: ${value(modelSelection.provider)},\n\tmodel: ${value(modelSelection.model)},\n`
 		: "";
-	return `import { defineConfig } from "./src/config.ts";
-
-export default defineConfig({
+	// No `defineConfig` import: the config lives in the plugin workdir, which is not
+	// co-located with src/, so a relative import could not resolve. defineConfig is
+	// an identity helper anyway, so the plain object is the runtime-identical form.
+	return `export default {
 	group_peer_id: ${value(draft.groupPeerIdNumber)},
 ${pinnedModel}	bots: [{
 		id: ${value(draft.bot.id)},
@@ -145,7 +146,7 @@ ${pinnedModel}	bots: [{
 		token_env: ${value(draft.bot.tokenEnv)},
 		persona_path: ${value(draft.personaRelativePath)},
 	}],
-});
+};
 `;
 }
 
