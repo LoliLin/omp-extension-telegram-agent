@@ -149,7 +149,7 @@ function listWindowsOurDaemons(rootDir: string): number[] {
 				"-NoProfile",
 				"-NonInteractive",
 				"-Command",
-				'[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
+				'[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "Name = \'bun.exe\'" | ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
 			],
 		});
 		if (result.exitCode !== 0) return [];
@@ -162,7 +162,7 @@ function listWindowsOurDaemons(rootDir: string): number[] {
 			const command = line.slice(tab + 1);
 			if (!Number.isInteger(pid) || pid === process.pid) continue;
 			const entry = daemonEntry([command]);
-			if (entry && isAbsolute(entry) && resolve(entry) === join(root, "src/daemon/index.ts")) pids.push(pid);
+			if (entry) pids.push(pid);
 		}
 		return pids.sort((a, b) => a - b);
 	} catch {
