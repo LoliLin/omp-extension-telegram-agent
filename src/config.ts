@@ -440,8 +440,12 @@ export function loadBotConfig(rootDir: string, env: Record<string, string>, conf
 			}
 			for (const key of ["foreground_media_limit", "concurrency"] as const) {
 				const value = vision[key];
-				if (value !== undefined && (!Number.isSafeInteger(value) || (value as number) < 0)) {
-					errors.push(`[config] vision.${key}: expected non-negative integer, got ${JSON.stringify(value)}`);
+				const min = key === "concurrency" ? 1 : 0;
+				if (
+					value !== undefined &&
+					(!Number.isSafeInteger(value) || (value as number) < min || (value as number) > 16)
+				) {
+					errors.push(`[config] vision.${key}: expected integer in [${min}, 16], got ${JSON.stringify(value)}`);
 				}
 			}
 		}
@@ -723,11 +727,10 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 		: (env[tinyfishKeyEnv] ?? "");
 
 	const visionRaw = raw.vision && typeof raw.vision === "object" ? (raw.vision as Record<string, unknown>) : {};
-	const visionNumber = (key: string, fallback: number, max: number): number => {
+	// loadBotConfig already rejected out-of-range values; absent keys take defaults.
+	const visionNumber = (key: string, fallback: number): number => {
 		const value = visionRaw[key];
-		return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= max
-			? (value as number)
-			: fallback;
+		return typeof value === "number" ? value : fallback;
 	};
 	const retention: RetentionConfig = {
 		telemetryDays: num("telemetry_retention_days", 90, 1, 3650),
@@ -748,8 +751,8 @@ export function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Ap
 				: DEFAULT_AUXILIARY_VISUAL_MODEL,
 		vision: {
 			enabled: visionRaw.enabled === true,
-			foregroundMediaLimit: visionNumber("foreground_media_limit", 2, 16),
-			concurrency: Math.max(1, visionNumber("concurrency", 2, 16)),
+			foregroundMediaLimit: visionNumber("foreground_media_limit", 2),
+			concurrency: visionNumber("concurrency", 2),
 		},
 		retention,
 		routerSecret: env[routerSecretEnv] || null,
