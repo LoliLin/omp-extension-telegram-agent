@@ -43,25 +43,19 @@ export interface CommandResult {
 	stderr: string;
 }
 
-export interface CommandRunner {
-	run(command: readonly string[], cwd: string): Promise<CommandResult>;
+async function run(command: readonly string[], cwd: string): Promise<CommandResult> {
+	const child = Bun.spawn([...command], {
+		cwd,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [exitCode, stdout, stderr] = await Promise.all([
+		child.exited,
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+	]);
+	return { exitCode, stdout, stderr };
 }
-
-const defaultRunner: CommandRunner = {
-	async run(command, cwd) {
-		const child = Bun.spawn([...command], {
-			cwd,
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-		const [exitCode, stdout, stderr] = await Promise.all([
-			child.exited,
-			new Response(child.stdout).text(),
-			new Response(child.stderr).text(),
-		]);
-		return { exitCode, stdout, stderr };
-	},
-};
 
 export interface LinkIssue {
 	file: string;
@@ -239,9 +233,9 @@ function verifyLanguageSwitches(siteDir: string): void {
 	}
 }
 
-async function requireMdBook(rootDir: string, runner: CommandRunner): Promise<string> {
+async function requireMdBook(rootDir: string): Promise<string> {
 	const binary = process.env.MDBOOK_BIN || "mdbook";
-	const result = await runner.run([binary, "--version"], rootDir);
+	const result = await run([binary, "--version"], rootDir);
 	if (result.exitCode !== 0) {
 		throw new Error(
 			`mdBook ${MDBOOK_VERSION} is required. Install it with: cargo install mdbook --version ${MDBOOK_VERSION} --locked`,
@@ -264,11 +258,11 @@ function resetSiteDir(rootDir: string): string {
 	return siteDir;
 }
 
-export async function buildDocumentation(rootDir: string, runner: CommandRunner = defaultRunner): Promise<string> {
-	const mdbook = await requireMdBook(rootDir, runner);
+export async function buildDocumentation(rootDir: string): Promise<string> {
+	const mdbook = await requireMdBook(rootDir);
 	const siteDir = resetSiteDir(rootDir);
 	for (const book of BOOKS) {
-		const result = await runner.run(
+		const result = await run(
 			[mdbook, "build", resolve(rootDir, book.root), "--dest-dir", resolve(siteDir, book.language)],
 			rootDir,
 		);
@@ -281,11 +275,8 @@ export async function buildDocumentation(rootDir: string, runner: CommandRunner 
 	return siteDir;
 }
 
-export async function checkDocumentation(
-	rootDir: string,
-	runner: CommandRunner = defaultRunner,
-): Promise<LinkReport[]> {
-	const siteDir = await buildDocumentation(rootDir, runner);
+export async function checkDocumentation(rootDir: string): Promise<LinkReport[]> {
+	const siteDir = await buildDocumentation(rootDir);
 	const source = checkRepositoryMarkdownLinks(rootDir);
 	const generated = checkGeneratedHtmlLinks(siteDir);
 	assertClean(source, "Markdown source check");
