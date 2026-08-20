@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import {
-	chmodSync,
 	closeSync,
 	fsyncSync,
 	mkdirSync,
@@ -58,13 +57,22 @@ export type LocalMediaResult =
 	  }
 	| { ok: false; outcome: LocalMediaFailure };
 
+export type MediaBytesBucket = "unavailable" | "lt_32_kib" | "32_128_kib" | "128_512_kib";
+
+/** Bucket encoded byte size; the caller pins its own top-band label so telemetry bands never drift. */
+export function bytesBucket<TopBand extends string>(bytes: number, topBand: TopBand): MediaBytesBucket | TopBand {
+	if (bytes < 32 * 1024) return "lt_32_kib";
+	if (bytes < 128 * 1024) return "32_128_kib";
+	if (bytes < 512 * 1024) return "128_512_kib";
+	return topBand;
+}
+
 export interface MediaCacheFileOps {
 	mkdir(path: string): void;
 	read(path: string): Uint8Array;
 	stat(path: string): { isFile(): boolean; size: number };
 	writeExclusive(path: string, bytes: Uint8Array): void;
 	rename(from: string, to: string): void;
-	chmod(path: string, mode: number): void;
 	remove(path: string): void;
 }
 
@@ -82,7 +90,6 @@ const defaultFileOps: MediaCacheFileOps = {
 		}
 	},
 	rename: renameSync,
-	chmod: chmodSync,
 	remove: (path) => rmSync(path, { force: true }),
 };
 
@@ -163,24 +170,27 @@ function downloadSource(
 	return null;
 }
 
-export function isDisplayReadyPath(path: string | null, fileOps: MediaCacheFileOps = defaultFileOps): boolean {
-	if (!path || !staticMediaMimeForPath(path)) return false;
+function isReadyPath(
+	path: string | null,
+	mimeForPath: (path: string) => unknown,
+	maxBytes: number,
+	fileOps: MediaCacheFileOps,
+): boolean {
+	if (!path || !mimeForPath(path)) return false;
 	try {
 		const stat = fileOps.stat(path);
-		return stat.isFile() && stat.size > 0 && stat.size <= MEDIA_CACHE_MAX_BYTES;
+		return stat.isFile() && stat.size > 0 && stat.size <= maxBytes;
 	} catch {
 		return false;
 	}
 }
 
+export function isDisplayReadyPath(path: string | null, fileOps: MediaCacheFileOps = defaultFileOps): boolean {
+	return isReadyPath(path, staticMediaMimeForPath, MEDIA_CACHE_MAX_BYTES, fileOps);
+}
+
 export function isSourceReadyPath(path: string | null, fileOps: MediaCacheFileOps = defaultFileOps): boolean {
-	if (!path || !sourceMediaMimeForPath(path)) return false;
-	try {
-		const stat = fileOps.stat(path);
-		return stat.isFile() && stat.size > 0 && stat.size <= MEDIA_DOWNLOAD_MAX_BYTES;
-	} catch {
-		return false;
-	}
+	return isReadyPath(path, sourceMediaMimeForPath, MEDIA_DOWNLOAD_MAX_BYTES, fileOps);
 }
 
 /** Resolve a cache-relative source filename inside this deployment's media directory. */
@@ -264,22 +274,40 @@ export function installMediaCacheFile(
 	const basename = createHash("sha256").update(fileUniqueId).digest("hex").slice(0, 32);
 	const target = join(cacheDir, `${basename}.${extension}`);
 	const temporary = `${target}.${process.pid}.${temporarySequence++}.tmp`;
-	let renamed = false;
 	try {
 		fileOps.writeExclusive(temporary, bytes);
-		fileOps.chmod(temporary, 0o600);
 		fileOps.rename(temporary, target);
-		renamed = true;
-		fileOps.chmod(target, 0o600);
 		return target;
 	} catch {
 		try {
-			fileOps.remove(renamed ? target : temporary);
+			fileOps.remove(temporary);
 		} catch {
 			// A failed cleanup must not expose the original filesystem error or media identity.
 		}
 		throw new Error("media cache install failed");
 	}
+}
+
+/** Coalesce concurrent same-identity async work per database; each caller owns its WeakMap namespace. */
+export function dedupeInFlight<T>(
+	byDb: WeakMap<Database, Map<string, Promise<T>>>,
+	db: Database,
+	key: string,
+	work: () => Promise<T>,
+): Promise<T> {
+	let inFlight = byDb.get(db);
+	if (!inFlight) {
+		inFlight = new Map();
+		byDb.set(db, inFlight);
+	}
+	const existing = inFlight.get(key);
+	if (existing) return existing;
+	const map = inFlight;
+	const promise = work().finally(() => {
+		map.delete(key);
+	});
+	map.set(key, promise);
+	return promise;
 }
 
 const inFlightByDb = new WeakMap<Database, Map<string, Promise<LocalMediaResult>>>();
@@ -292,18 +320,9 @@ export function ensureLocalMedia(
 	fileUniqueId: string,
 	options: EnsureLocalMediaOptions = {},
 ): Promise<LocalMediaResult> {
-	let inFlight = inFlightByDb.get(db);
-	if (!inFlight) {
-		inFlight = new Map();
-		inFlightByDb.set(db, inFlight);
-	}
-	const existing = inFlight.get(fileUniqueId);
-	if (existing) return existing;
-	const promise = ensureLocalMediaInner(db, api, botId, fileUniqueId, options).finally(() => {
-		inFlight!.delete(fileUniqueId);
-	});
-	inFlight.set(fileUniqueId, promise);
-	return promise;
+	return dedupeInFlight(inFlightByDb, db, fileUniqueId, () =>
+		ensureLocalMediaInner(db, api, botId, fileUniqueId, options),
+	);
 }
 
 async function ensureLocalMediaInner(

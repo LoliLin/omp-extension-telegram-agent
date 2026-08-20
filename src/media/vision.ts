@@ -4,7 +4,7 @@
 
 import type { Database } from "bun:sqlite";
 import { log } from "../observability/log.ts";
-import { convertToPng, type ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { convertToPng, type ModelRuntime, resizeImage } from "@earendil-works/pi-coding-agent";
 import { contentText, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
 import type { BotApi } from "../telegram/api.ts";
 import { parsePiModelReference } from "../agent/model-ref.ts";
@@ -14,11 +14,14 @@ import {
 	type PiProviderFailureCategory,
 } from "../agent/model-runtime.ts";
 import {
+	bytesBucket,
+	dedupeInFlight,
 	ensureLocalMedia,
 	isVideoMedia,
 	isVisionMedia,
 	staticMediaMimeForPath,
 	type LocalMediaFailure,
+	type MediaBytesBucket,
 	type MediaDownloadApi,
 } from "./local-cache.ts";
 import { appendMediaUpdateEvents } from "../db/message-events.ts";
@@ -46,7 +49,7 @@ export const VISION_TIMEOUT_MS = 90_000;
 export const VISION_MAX_OUTPUT_TOKENS = 256;
 
 export type VisionKind = "photo" | "sticker" | "video";
-export type VisionBytesBucket = "unavailable" | "lt_32_kib" | "32_128_kib" | "128_512_kib" | "gte_512_kib";
+export type VisionBytesBucket = MediaBytesBucket | "gte_512_kib";
 export type VisionOutcome =
 	| "ok"
 	| "empty_response"
@@ -126,17 +129,11 @@ export interface EnsureVisionOptions {
 
 interface PiVisionExecutorOptions {
 	convert?: typeof convertToPng;
+	resize?: typeof resizeImage;
 	monotonicNow?: () => number;
 }
 
 type VisionModelRuntime = Pick<ModelRuntime, "getModel" | "completeSimple">;
-
-function bytesBucket(size: number): VisionBytesBucket {
-	if (size < 32 * 1024) return "lt_32_kib";
-	if (size < 128 * 1024) return "32_128_kib";
-	if (size < 512 * 1024) return "128_512_kib";
-	return "gte_512_kib";
-}
 
 function boundedNumber(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
@@ -168,8 +165,8 @@ function usageTelemetry(
 ): VisionTelemetry {
 	return {
 		kind,
-		sourceBytesBucket: bytesBucket(sourceBytes),
-		convertedBytesBucket: convertedBytes == null ? "unavailable" : bytesBucket(convertedBytes),
+		sourceBytesBucket: bytesBucket(sourceBytes, "gte_512_kib"),
+		convertedBytesBucket: convertedBytes == null ? "unavailable" : bytesBucket(convertedBytes, "gte_512_kib"),
 		latencyMs: Math.max(0, Math.round(latencyMs)),
 		inputTokens: boundedNumber(message?.usage.input),
 		outputTokens: boundedNumber(message?.usage.output),
@@ -194,6 +191,7 @@ export function createPiVisionExecutor(
 	const model = runtime.getModel(selection.provider, selection.model);
 	const readinessFailure = !model ? "unknown_model" : !model.input.includes("image") ? "image_input_unsupported" : null;
 	const convert = options.convert ?? convertToPng;
+	const resize = options.resize ?? resizeImage;
 	const monotonicNow = options.monotonicNow ?? (() => performance.now());
 
 	return {
@@ -204,48 +202,27 @@ export function createPiVisionExecutor(
 		async describe(input): Promise<VisionDescriptionResult> {
 			const startedAt = monotonicNow();
 			const sourceBytes = input.sourceBytes;
-			if (readinessFailure) {
-				return {
-					text: null,
-					telemetry: usageTelemetry(
-						input.kind,
-						sourceBytes,
-						null,
-						monotonicNow() - startedAt,
-						readinessFailure,
-						undefined,
-						input.images.length,
-					),
-				};
-			}
-
-			if (input.images.length === 0) {
-				return {
-					text: null,
-					telemetry: usageTelemetry(input.kind, sourceBytes, null, monotonicNow() - startedAt, "unsupported_format"),
-				};
-			}
 
 			const images: Array<{ data: string; mimeType: string; position?: number }> = [];
-			let convertedBytes = input.kind === "video" ? 0 : null;
+			let convertedBytes = 0;
+			let converted = input.kind === "video";
 			for (const source of input.images) {
-				let image: { data: string; mimeType: string } = {
-					data: Buffer.from(source.bytes).toString("base64"),
-					mimeType: source.mimeType,
-				};
+				let bytes: Uint8Array = source.bytes;
+				let mimeType: string = source.mimeType;
 				if (source.mimeType === "image/webp" || source.mimeType === "image/gif") {
 					try {
-						const converted = await convert(image.data, source.mimeType);
-						if (!converted) throw new Error("conversion failed");
-						image = converted;
-						convertedBytes = (convertedBytes ?? 0) + Buffer.from(converted.data, "base64").byteLength;
+						const convertedImage = await convert(Buffer.from(bytes).toString("base64"), source.mimeType);
+						if (!convertedImage) throw new Error("conversion failed");
+						bytes = new Uint8Array(Buffer.from(convertedImage.data, "base64"));
+						mimeType = convertedImage.mimeType;
+						converted = true;
 					} catch {
 						return {
 							text: null,
 							telemetry: usageTelemetry(
 								input.kind,
 								sourceBytes,
-								convertedBytes,
+								converted ? convertedBytes : null,
 								monotonicNow() - startedAt,
 								"conversion_failed",
 								undefined,
@@ -253,10 +230,23 @@ export function createPiVisionExecutor(
 							),
 						};
 					}
-				} else if (input.kind === "video") {
-					convertedBytes! += source.bytes.byteLength;
 				}
-				images.push({ ...image, ...(source.position == null ? {} : { position: source.position }) });
+				if (input.kind !== "video") {
+					// Video frames are already bounded by ffmpeg scale=1280; only static images need a cap.
+					// A resize failure falls back to the original image rather than failing the description.
+					const resized = await resize(bytes, mimeType).catch(() => null);
+					if (resized) {
+						bytes = new Uint8Array(Buffer.from(resized.data, "base64"));
+						mimeType = resized.mimeType;
+						converted = converted || resized.wasResized;
+					}
+				}
+				convertedBytes += bytes.byteLength;
+				images.push({
+					data: Buffer.from(bytes).toString("base64"),
+					mimeType,
+					...(source.position == null ? {} : { position: source.position }),
+				});
 			}
 
 			const prompt =
@@ -304,7 +294,7 @@ export function createPiVisionExecutor(
 					telemetry: usageTelemetry(
 						input.kind,
 						sourceBytes,
-						convertedBytes,
+						converted ? convertedBytes : null,
 						monotonicNow() - startedAt,
 						classifyPiProviderFailure(error),
 						undefined,
@@ -321,7 +311,7 @@ export function createPiVisionExecutor(
 					telemetry: usageTelemetry(
 						input.kind,
 						sourceBytes,
-						convertedBytes,
+						converted ? convertedBytes : null,
 						monotonicNow() - startedAt,
 						category,
 						message,
@@ -338,7 +328,7 @@ export function createPiVisionExecutor(
 				telemetry: usageTelemetry(
 					input.kind,
 					sourceBytes,
-					convertedBytes,
+					converted ? convertedBytes : null,
 					monotonicNow() - startedAt,
 					outcome,
 					message,
@@ -368,18 +358,9 @@ export function ensureVision(
 	executor: VisionExecutor,
 	options: EnsureVisionOptions = {},
 ): Promise<string | null> {
-	let inFlight = inFlightByDb.get(db);
-	if (!inFlight) {
-		inFlight = new Map();
-		inFlightByDb.set(db, inFlight);
-	}
-	const existing = inFlight.get(fileUniqueId);
-	if (existing) return existing;
-	const promise = ensureVisionInner(db, api, botId, fileUniqueId, executor, options).finally(() => {
-		inFlight!.delete(fileUniqueId);
-	});
-	inFlight.set(fileUniqueId, promise);
-	return promise;
+	return dedupeInFlight(inFlightByDb, db, fileUniqueId, () =>
+		ensureVisionInner(db, api, botId, fileUniqueId, executor, options),
+	);
 }
 
 function emitTelemetry(options: EnsureVisionOptions, telemetry: VisionTelemetry): void {
@@ -462,14 +443,6 @@ async function ensureVisionPrepared(
 			);
 		}
 		emitTelemetry(options, emptyTelemetry(kind, outcome, monotonicNow() - startedAt));
-		return null;
-	}
-	if (local.kind !== media.kind) {
-		db.query("UPDATE media SET vision = ? WHERE file_unique_id = ?").run(
-			JSON.stringify({ model: "none", kind, text: null, outcome: "media_unavailable", at: Date.now() }),
-			fileUniqueId,
-		);
-		emitTelemetry(options, emptyTelemetry(kind, "media_unavailable", monotonicNow() - startedAt));
 		return null;
 	}
 	if (!video && media.kind === "sticker" && local.mimeType.startsWith("video/")) {

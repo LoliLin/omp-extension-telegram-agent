@@ -2,10 +2,12 @@ import type { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { log } from "../observability/log.ts";
 import {
+	bytesBucket,
 	ensureLocalMedia,
 	isDisplayReadyPath,
 	isVideoMedia,
 	MEDIA_CACHE_MAX_BYTES,
+	type MediaBytesBucket,
 	resolveMediaCachePath,
 	type EnsureLocalMediaOptions,
 	type LocalMediaCacheOutcome,
@@ -17,9 +19,10 @@ import { listReferencedMissingDisplayMediaIds } from "./lifecycle.ts";
 export const MEDIA_CACHE_CONCURRENCY = 2;
 export const MEDIA_CACHE_MAX_PENDING = 128;
 export const MEDIA_CACHE_BACKFILL_LIMIT = 100;
+const MEDIA_CACHE_STOP_TIMEOUT_MS = 5_000;
 
 export type DisplayMediaKind = "photo" | "sticker";
-export type MediaCacheBytesBucket = "unavailable" | "lt_32_kib" | "32_128_kib" | "128_512_kib" | "512_kib_1_mib";
+export type MediaCacheBytesBucket = MediaBytesBucket | "512_kib_1_mib";
 export type MediaCacheOutcome = LocalMediaFailure | LocalMediaCacheOutcome | "queue_overflow" | "observer_failed";
 
 export interface MediaCacheTelemetry {
@@ -31,25 +34,14 @@ export interface MediaCacheTelemetry {
 }
 
 export interface MediaCacheOptions extends EnsureLocalMediaOptions {
-	concurrency?: number;
-	maxPending?: number;
-	backfillLimit?: number;
 	onReady?: (fileUniqueId: string, mediaPath: string) => void;
 	onTelemetry?: (telemetry: MediaCacheTelemetry) => void;
-	stopTimeoutMs?: number;
 }
 
 interface MediaJob {
 	botId: string;
 	fileUniqueId: string;
 	kind: DisplayMediaKind;
-}
-
-function bytesBucket(bytes: number): MediaCacheBytesBucket {
-	if (bytes < 32 * 1024) return "lt_32_kib";
-	if (bytes < 128 * 1024) return "32_128_kib";
-	if (bytes < 512 * 1024) return "128_512_kib";
-	return "512_kib_1_mib";
 }
 
 /** Bounded, sender-agnostic display cache queue for Telegram photos and stickers. */
@@ -59,43 +51,14 @@ export class MediaCacheQueue {
 	private readonly activeTasks = new Set<Promise<void>>();
 	private readonly idleWaiters = new Set<() => void>();
 	private readonly controller = new AbortController();
-	private readonly concurrency: number;
-	private readonly maxPending: number;
-	private readonly backfillLimit: number;
-	private readonly stopTimeoutMs: number;
 	private active = 0;
-	private peak = 0;
 	private stopped = false;
 
 	constructor(
 		private readonly db: Database,
 		private readonly apis: ReadonlyMap<string, MediaDownloadApi>,
 		private readonly options: MediaCacheOptions = {},
-	) {
-		this.concurrency = Math.min(
-			MEDIA_CACHE_CONCURRENCY,
-			Math.max(1, Math.floor(options.concurrency ?? MEDIA_CACHE_CONCURRENCY)),
-		);
-		this.maxPending = Math.min(
-			MEDIA_CACHE_MAX_PENDING,
-			Math.max(1, Math.floor(options.maxPending ?? MEDIA_CACHE_MAX_PENDING)),
-		);
-		this.backfillLimit = Math.min(
-			MEDIA_CACHE_BACKFILL_LIMIT,
-			Math.max(1, Math.floor(options.backfillLimit ?? MEDIA_CACHE_BACKFILL_LIMIT)),
-		);
-		this.stopTimeoutMs = Math.max(0, Math.floor(options.stopTimeoutMs ?? 5_000));
-	}
-
-	get pendingCount(): number {
-		return this.queue.length;
-	}
-	get activeCount(): number {
-		return this.active;
-	}
-	get peakActiveCount(): number {
-		return this.peak;
-	}
+	) {}
 
 	/** Queue one canonical display-media identity. Returns immediately and never blocks polling. */
 	schedule(botId: string, fileUniqueId: string): boolean {
@@ -117,7 +80,7 @@ export class MediaCacheQueue {
 		const kind = row.kind as DisplayMediaKind;
 		const cacheDir = this.options.cacheDir ?? join(process.cwd(), "data", "media");
 		if (isDisplayReadyPath(resolveMediaCachePath(cacheDir, row.local_path), this.options.fileOps)) return false;
-		if (this.queue.length >= this.maxPending) {
+		if (this.queue.length >= MEDIA_CACHE_MAX_PENDING) {
 			this.emit(kind, "media_cache_skip", "queue_overflow", "unavailable");
 			return false;
 		}
@@ -143,7 +106,11 @@ export class MediaCacheQueue {
 	/** Enqueue only the newest bounded set; daemon ready never awaits these jobs. */
 	scheduleBackfill(): number {
 		if (this.stopped) return 0;
-		const fileUniqueIds = listReferencedMissingDisplayMediaIds(this.db, [...this.apis.keys()], this.backfillLimit);
+		const fileUniqueIds = listReferencedMissingDisplayMediaIds(
+			this.db,
+			[...this.apis.keys()],
+			MEDIA_CACHE_BACKFILL_LIMIT,
+		);
 		let count = 0;
 		for (const fileUniqueId of fileUniqueIds) {
 			const mappings = this.db
@@ -174,16 +141,15 @@ export class MediaCacheQueue {
 		}
 		await Promise.race([
 			Promise.allSettled([...this.activeTasks]),
-			new Promise<void>((resolve) => setTimeout(resolve, this.stopTimeoutMs)),
+			new Promise<void>((resolve) => setTimeout(resolve, MEDIA_CACHE_STOP_TIMEOUT_MS)),
 		]);
 	}
 
 	private pump(): void {
 		if (this.stopped) return;
-		while (this.active < this.concurrency && this.queue.length > 0) {
+		while (this.active < MEDIA_CACHE_CONCURRENCY && this.queue.length > 0) {
 			const job = this.queue.shift()!;
 			this.active++;
-			this.peak = Math.max(this.peak, this.active);
 			const task = this.run(job).finally(() => {
 				this.active--;
 				this.scheduled.delete(job.fileUniqueId);
@@ -196,8 +162,9 @@ export class MediaCacheQueue {
 	}
 
 	private async run(job: MediaJob): Promise<void> {
-		const api = this.apis.get(job.botId);
-		if (!api || this.stopped) return;
+		if (this.stopped) return;
+		// schedule() already verified the bot mapping and `apis` never changes after construction.
+		const api = this.apis.get(job.botId)!;
 		const result = await ensureLocalMedia(this.db, api, job.botId, job.fileUniqueId, {
 			cacheDir: this.options.cacheDir,
 			fileOps: this.options.fileOps,
@@ -216,7 +183,7 @@ export class MediaCacheQueue {
 			);
 			return;
 		}
-		const bucket = bytesBucket(Math.min(result.bytes.byteLength, MEDIA_CACHE_MAX_BYTES));
+		const bucket = bytesBucket(Math.min(result.bytes.byteLength, MEDIA_CACHE_MAX_BYTES), "512_kib_1_mib");
 		if (!result.mediaPath) {
 			this.emit(
 				job.kind,
