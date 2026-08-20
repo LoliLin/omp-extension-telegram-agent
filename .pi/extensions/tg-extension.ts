@@ -1584,7 +1584,10 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			}
 			if (sub === "open") {
 				const result = await runChildProcess(openDirectoryCommand(), [rootDir], { cwd: rootDir });
-				if (result.status !== 0) {
+				// Windows explorer always exits 1 even when it opened the folder;
+				// only a spawn failure (status null) is a real error there.
+				const failed = result.status === null || (process.platform !== "win32" && result.status !== 0);
+				if (failed) {
 					ctx.ui.notify(`failed to open the Telegram workdir: ${redactDaemonLog(result.stderr)}`, "error");
 				} else {
 					ctx.ui.notify(`Opened the Telegram workdir: ${rootDir}`, "info");
