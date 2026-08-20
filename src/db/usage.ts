@@ -1,6 +1,14 @@
 import type { Database } from "bun:sqlite";
 import type { BotStats, UsageRun } from "../ipc.ts";
 
+interface LastRunRow extends Omit<UsageRun, "cacheEstimated"> {
+	cacheEstimated: number;
+	systemTokens: number;
+	toolsTokens: number;
+	compactedHistoryTokens: number;
+	messageTokens: number;
+}
+
 /** One bot's retention-window totals plus its latest main-conversation provider response. */
 export function loadBotStats(db: Database, botId: string): BotStats {
 	const aggregate = db
@@ -44,13 +52,13 @@ export function loadBotStats(db: Database, botId: string): BotStats {
 			  WHERE bot_id = ? AND compaction = 0
 			  ORDER BY ts DESC, id DESC LIMIT 1`,
 		)
-		.get(botId) as (Omit<UsageRun, "cacheEstimated"> & { cacheEstimated: number }) | null;
+		.get(botId) as LastRunRow | null;
 	const breakdown = lastRow
 		? {
-				system: (lastRow as never as { systemTokens: number }).systemTokens,
-				tools: (lastRow as never as { toolsTokens: number }).toolsTokens,
-				compactedHistory: (lastRow as never as { compactedHistoryTokens: number }).compactedHistoryTokens,
-				messages: (lastRow as never as { messageTokens: number }).messageTokens,
+				system: lastRow.systemTokens,
+				tools: lastRow.toolsTokens,
+				compactedHistory: lastRow.compactedHistoryTokens,
+				messages: lastRow.messageTokens,
 			}
 		: null;
 	const last = lastRow

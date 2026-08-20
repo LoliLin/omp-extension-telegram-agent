@@ -213,7 +213,7 @@ export function appendMediaUpdateEvents(db: Database, fileUniqueId: string, text
 		`)
 		.all(fileUniqueId) as { chatId: number; messageId: number; date: number; mediaKind: string }[];
 	const revisionHex = createHash("sha256").update(normalized).digest("hex").slice(0, 12);
-	const revision = Number.parseInt(revisionHex.slice(0, 12), 16);
+	const revision = Number.parseInt(revisionHex, 16);
 	const insert = db.query(`
 		INSERT OR IGNORE INTO message_events
 			(event_key, chat_id, message_id, revision, kind, event_date, payload_json)
