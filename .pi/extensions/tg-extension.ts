@@ -232,7 +232,8 @@ export type TgCommandDispatch =
 	| "start"
 	| "restart"
 	| "stop"
-	| "status-daemon";
+	| "status-daemon"
+	| "open";
 
 export interface TgBotChoice {
 	id: string;
@@ -298,7 +299,15 @@ export const TG_COMMAND_TREE: readonly TgCommandNode[] = [
 	{ token: "restart", description: "Gracefully restart every configured bot", dispatch: "restart" },
 	{ token: "stop", description: "Stop the Telegram daemon", dispatch: "stop" },
 	{ token: "status-daemon", description: "Show daemon process status", dispatch: "status-daemon" },
+	{ token: "open", description: "Open the Telegram workdir in the file manager", dispatch: "open" },
 ];
+
+/** Open a directory in the host's file manager. */
+function openDirectoryCommand(): string {
+	if (process.platform === "win32") return "explorer";
+	if (process.platform === "darwin") return "open";
+	return "xdg-open";
+}
 
 function runChildProcess(
 	command: string,
@@ -1571,6 +1580,15 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			}
 			if (ctx.mode !== "tui" && !daemonSub) {
 				ctx.ui.notify("Telegram UI requires interactive mode", "error");
+				return;
+			}
+			if (sub === "open") {
+				const result = await runChildProcess(openDirectoryCommand(), [rootDir], { cwd: rootDir });
+				if (result.status !== 0) {
+					ctx.ui.notify(`failed to open the Telegram workdir: ${redactDaemonLog(result.stderr)}`, "error");
+				} else {
+					ctx.ui.notify(`Opened the Telegram workdir: ${rootDir}`, "info");
+				}
 				return;
 			}
 			if (sub === "config") {

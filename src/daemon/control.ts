@@ -37,8 +37,8 @@ export interface DaemonControlResult {
 export class DaemonController {
 	private readonly port: ReturnType<typeof createNodeDaemonControlPort>;
 
-	constructor(rootDir: string) {
-		this.port = createNodeDaemonControlPort(rootDir);
+	constructor(rootDir: string, daemonEntry?: string) {
+		this.port = createNodeDaemonControlPort(rootDir, daemonEntry);
 	}
 
 	async start(): Promise<DaemonControlResult> {
@@ -390,7 +390,7 @@ function readBoundedLogTail(logPath: string): string {
 	}
 }
 
-function createNodeDaemonControlPort(rootDir: string) {
+function createNodeDaemonControlPort(rootDir: string, daemonEntry?: string) {
 	const dataDir = join(rootDir, "data");
 	const pidPath = join(dataDir, "daemon.pid");
 	const sockPath = join(dataDir, "daemon.sock");
@@ -420,8 +420,10 @@ function createNodeDaemonControlPort(rootDir: string) {
 			mkdirSync(dataDir, { recursive: true });
 			rotateLogFile(logPath);
 			const logFd = openSync(logPath, "a", 0o600);
+			// The daemon entry ships with the plugin; the workdir only holds config/data.
+			const entry = daemonEntry ?? join(rootDir, "src/daemon/index.ts");
 			try {
-				const child = spawn("bun", ["run", join(rootDir, "src/daemon/index.ts")], {
+				const child = spawn("bun", ["run", entry], {
 					cwd: rootDir,
 					detached: true,
 					stdio: ["ignore", logFd, logFd],

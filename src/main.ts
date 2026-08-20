@@ -1,5 +1,6 @@
 // CLI: start | restart | status | stop.
 
+import { join } from "node:path";
 import { DaemonController, type DaemonControlResult } from "./daemon/control.ts";
 import { loadConfig } from "./config.ts";
 import { inspectVideoTranscoder, videoTranscoderAdvisory } from "./media/video-frames.ts";
@@ -24,7 +25,7 @@ function reportAdvisory(): void {
 	}
 }
 
-const controller = new DaemonController(rootDir);
+const controller = new DaemonController(rootDir, join(import.meta.dir, "daemon", "index.ts"));
 
 switch (cmd) {
 	case "start": {
