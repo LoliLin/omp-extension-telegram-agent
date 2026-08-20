@@ -38,6 +38,7 @@ export function pidAlive(pid: number): boolean {
 }
 
 function processArgv(pid: number): string[] | null {
+	if (process.platform === "win32") return windowsProcessArgv(pid);
 	try {
 		return readFileSync(`/proc/${pid}/cmdline`, "utf8")
 			.split("\0")
@@ -47,7 +48,28 @@ function processArgv(pid: number): string[] | null {
 	}
 }
 
+/** Windows: Win32_Process has no argv array, so the PowerShell CommandLine is returned as one string. */
+function windowsProcessArgv(pid: number): string[] | null {
+	try {
+		const result = Bun.spawnSync({
+			cmd: [
+				"powershell",
+				"-NoProfile",
+				"-NonInteractive",
+				"-Command",
+				`[Console]::OutputEncoding=[Text.Encoding]::UTF8; (Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`,
+			],
+		});
+		if (result.exitCode !== 0) return null;
+		const line = result.stdout.toString("utf8").trim();
+		return line ? [line] : null;
+	} catch {
+		return null;
+	}
+}
+
 function processCwd(pid: number): string | null {
+	if (process.platform === "win32") return null; // Win32_Process exposes no cwd
 	try {
 		return readlinkSync(`/proc/${pid}/cwd`);
 	} catch {
@@ -56,6 +78,15 @@ function processCwd(pid: number): string | null {
 }
 
 function daemonEntry(args: string[]): string | null {
+	if (args.length === 1) {
+		// Windows: single CommandLine string from PowerShell.
+		const line = args[0]!;
+		const daemon = line.match(/([A-Za-z]:[\\/][^"]*?[\\/]daemon[\\/]index(?:\.ts)?)/);
+		if (daemon) return daemon[1]!;
+		const foreground = line.match(/([A-Za-z]:[\\/][^"]*?[\\/]main(?:\.ts)?)/);
+		if (foreground && /\bstart\b/.test(line) && line.includes("--foreground")) return foreground[1]!;
+		return null;
+	}
 	if (basename(args[0] ?? "") !== "bun") return null;
 	const runOffset = args[1] === "run" ? 2 : 1;
 	const entry = args[runOffset];
@@ -84,6 +115,7 @@ export function isOurDaemon(pid: number, rootDir: string = process.cwd()): boole
 
 /** Enumerate every live daemon from this repository, including an orphan missing from daemon.pid. */
 export function listOurDaemons(rootDir: string = process.cwd()): number[] {
+	if (process.platform === "win32") return listWindowsOurDaemons(rootDir);
 	let procEntries: string[];
 	try {
 		procEntries = readdirSync("/proc");
@@ -99,6 +131,36 @@ export function listOurDaemons(rootDir: string = process.cwd()): number[] {
 		if (argv != null && daemonEntry(argv) != null && isOurDaemon(pid, rootDir)) pids.push(pid);
 	}
 	return pids.sort((a, b) => a - b);
+}
+
+/** Windows: enumerate all process command lines once and filter for our daemon entry. */
+function listWindowsOurDaemons(rootDir: string): number[] {
+	try {
+		const result = Bun.spawnSync({
+			cmd: [
+				"powershell",
+				"-NoProfile",
+				"-NonInteractive",
+				"-Command",
+				'[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
+			],
+		});
+		if (result.exitCode !== 0) return [];
+		const root = resolve(rootDir);
+		const pids: number[] = [];
+		for (const line of result.stdout.toString("utf8").split(/\r?\n/)) {
+			const tab = line.indexOf("\t");
+			if (tab <= 0) continue;
+			const pid = Number(line.slice(0, tab));
+			const command = line.slice(tab + 1);
+			if (!Number.isInteger(pid) || pid === process.pid) continue;
+			const entry = daemonEntry([command]);
+			if (entry && isAbsolute(entry) && resolve(entry) === join(root, "src/daemon/index.ts")) pids.push(pid);
+		}
+		return pids.sort((a, b) => a - b);
+	} catch {
+		return [];
+	}
 }
 
 /**
