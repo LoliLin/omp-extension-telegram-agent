@@ -91,4 +91,4 @@ daemon（单进程、常驻）持有 SQLite 与 IPC server：Telegram 长轮询 
 
 从 [AGENTS.md](AGENTS.md) 与[开发指南](docs/engineering/development-guide.md)开始；文档总索引在 [docs/index.md](docs/index.md)。验证漏斗：`bun test` → `bun run check` → `bun run lint` → `bun run docs:check`。
 
-项目采用 MIT 协议，见 [LICENSE](LICENSE)。
+项目采用 BSD 2-Clause 协议，见 [LICENSE](LICENSE)。

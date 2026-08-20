@@ -91,4 +91,4 @@ A single long-lived daemon owns SQLite and the IPC server: Telegram long-polling
 
 Start with [AGENTS.md](AGENTS.md) and the [development guide](docs/engineering/development-guide.md); the documentation index is [docs/index.md](docs/index.md). Verification funnel: `bun test` → `bun run check` → `bun run lint` → `bun run docs:check`.
 
-Licensed under MIT — see [LICENSE](LICENSE).
+Licensed under the BSD 2-Clause License — see [LICENSE](LICENSE).
