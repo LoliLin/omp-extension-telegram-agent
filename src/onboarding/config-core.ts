@@ -8,7 +8,6 @@ import {
 	renameSync,
 	unlinkSync,
 	writeFileSync,
-	type Stats,
 } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { defaultConfigPath, loadConfig, normalizePeerId, type AppConfig } from "../config.ts";
@@ -41,28 +40,6 @@ export interface ConfigSource {
 	source: string;
 }
 
-export interface ConfigFileOps {
-	exists(path: string): boolean;
-	readFile(path: string): string;
-	lstat(path: string): Pick<Stats, "mode" | "isFile" | "isSymbolicLink">;
-	mkdir(path: string): void;
-	writeFile(path: string, contents: string, mode: number): void;
-	rename(from: string, to: string): void;
-	chmod(path: string, mode: number): void;
-	unlink(path: string): void;
-}
-
-export const nodeConfigFileOps: ConfigFileOps = {
-	exists: existsSync,
-	readFile: (path) => readFileSync(path, "utf8"),
-	lstat: lstatSync,
-	mkdir: (path) => mkdirSync(path, { recursive: true }),
-	writeFile: (path, contents, mode) => writeFileSync(path, contents, { encoding: "utf8", flag: "wx", mode }),
-	rename: renameSync,
-	chmod: chmodSync,
-	unlink: unlinkSync,
-};
-
 export class OnboardingValidationError extends Error {
 	readonly fields: readonly string[];
 
@@ -81,20 +58,11 @@ export class OnboardingWriteError extends Error {
 }
 
 export type OnboardingWriteMode = "create" | "backup-replace";
-export type OnboardingWritePhase = "validated" | "installed" | "verified" | "rolled_back";
-
-export interface OnboardingWriteEvent {
-	phase: OnboardingWritePhase;
-	paths: string[];
-}
 
 export interface OnboardingWriteOptions {
 	mode?: OnboardingWriteMode;
-	nonce?: string;
 	/** Preflighted Pi selection to pin in newly generated configuration. */
 	modelSelection?: { provider: string; model: string };
-	fileOps?: ConfigFileOps;
-	onEvent?: (event: OnboardingWriteEvent) => void;
 }
 
 interface NormalizedDraft extends FirstRunDraft {
@@ -158,8 +126,12 @@ export function mergeEnvSource(source: string, updates: Readonly<Record<string, 
 	return `${output.join("\n")}\n`;
 }
 
+/**
+ * Render only the required fields plus what the wizard actually collected; every omitted
+ * field falls through to the defaults in src/config.ts, which stay the single source of truth.
+ */
 function renderFirstRunConfig(draft: NormalizedDraft, modelSelection?: { provider: string; model: string }): string {
-	const value = (input: string | number | boolean) => JSON.stringify(input);
+	const value = (input: string | number) => JSON.stringify(input);
 	const pinnedModel = modelSelection
 		? `\tprovider: ${value(modelSelection.provider)},\n\tmodel: ${value(modelSelection.model)},\n`
 		: "";
@@ -167,33 +139,11 @@ function renderFirstRunConfig(draft: NormalizedDraft, modelSelection?: { provide
 
 export default defineConfig({
 	group_peer_id: ${value(draft.groupPeerIdNumber)},
-${pinnedModel}	reasoning_effort: "off",
-	cache_retention: "short",
-	compaction_model: "openai-codex/gpt-5.6-luna:low",
-compaction_threshold: 32_768,
-compaction_keep_recent: 1,
-	max_suffix_tokens: 12_000,
-	max_message_tokens: 4_096,
-	sampling_cooldown_ms: 2_000,
-	db_path: "data/agent.db",
-	tinyfish_key_env: "tiny_fish_api_key",
-	vision: {
-		enabled: false,
-		foreground_media_limit: 2,
-		concurrency: 2,
-	},
-	telemetry_retention_days: 90,
-	raw_update_retention_days: 30,
-	message_event_retention_days: 365,
-	telegram_admins: [],
-	bots: [{
+${pinnedModel}	bots: [{
 		id: ${value(draft.bot.id)},
 		name: ${value(draft.bot.name)},
 		token_env: ${value(draft.bot.tokenEnv)},
 		persona_path: ${value(draft.personaRelativePath)},
-		routing_p: 0.1,
-		sticker_sets: [],
-		tools: { send: true, search: false, run_js: true },
 	}],
 });
 `;
@@ -211,17 +161,14 @@ export function writeFirstRunDeployment(
 	const root = resolve(rootDir);
 	const normalized = validateFirstRunDraft(draft);
 	const mode = options.mode ?? "create";
-	const ops = options.fileOps ?? nodeConfigFileOps;
-	const nonce = options.nonce ?? randomUUID();
 	const configPath = join(root, "telegram.config.ts");
 	const envPath = join(root, ".env");
 	const personaPath = join(root, normalized.personaRelativePath);
-	options.onEvent?.({ phase: "validated", paths: [".env", "telegram.config.ts", normalized.personaRelativePath] });
 
 	let existingEnv = "";
-	if (mode === "backup-replace" && ops.exists(envPath)) {
-		assertRegularFile(envPath, ops);
-		existingEnv = ops.readFile(envPath);
+	if (mode === "backup-replace" && existsSync(envPath)) {
+		assertRegularFile(envPath);
+		existingEnv = readFileSync(envPath, "utf8");
 	}
 	const envSource = mergeEnvSource(existingEnv, {
 		[normalized.bot.tokenEnv]: normalized.bot.token,
@@ -231,62 +178,49 @@ export function writeFirstRunDeployment(
 		{ path: configPath, contents: renderFirstRunConfig(normalized, options.modelSelection), mode: PRIVATE_MODE },
 		{ path: personaPath, contents: ensureTrailingNewline(normalized.bot.personaText), mode: PRIVATE_MODE },
 	];
-	const transaction = installAtomically(files, [], mode, nonce, ops);
-	options.onEvent?.({ phase: "installed", paths: files.map((file) => relative(root, file.path)) });
+	const transaction = installAtomically(files, mode);
 	try {
 		const config = loadConfig(root, { configPath });
 		const summary = summarizeConfig(root, config, configPath);
 		transaction.finalize();
-		options.onEvent?.({ phase: "verified", paths: [relative(root, configPath)] });
 		return { summary, backupPaths: transaction.backupPaths.map((path) => relative(root, path)) };
 	} catch {
 		transaction.rollback();
-		options.onEvent?.({ phase: "rolled_back", paths: files.map((file) => relative(root, file.path)) });
 		throw new OnboardingWriteError("final configuration validation failed; original files were restored");
 	}
 }
 
 export function validateExistingDeployment(rootDir: string): DeploymentSummary {
 	const root = resolve(rootDir);
-	const path = onboardingConfigPath(root);
+	const path = defaultConfigPath(root);
 	return summarizeConfig(root, loadConfig(root), path);
 }
 
-export function readExistingConfigSource(rootDir: string, ops: ConfigFileOps = nodeConfigFileOps): ConfigSource {
+export function readExistingConfigSource(rootDir: string): ConfigSource {
 	const root = resolve(rootDir);
-	const path = onboardingConfigPath(root);
-	if (!ops.exists(path)) throw new OnboardingWriteError("no existing telegram.config.ts configuration was found");
-	assertRegularFile(path, ops);
-	return { path, source: ops.readFile(path) };
+	const path = defaultConfigPath(root);
+	if (!existsSync(path)) throw new OnboardingWriteError("no existing telegram.config.ts configuration was found");
+	assertRegularFile(path);
+	return { path, source: readFileSync(path, "utf8") };
 }
 
-function onboardingConfigPath(rootDir: string): string {
-	return defaultConfigPath(rootDir);
-}
-
-export function validateEditedConfigSource(
-	rootDir: string,
-	path: string,
-	source: string,
-	options: Pick<OnboardingWriteOptions, "nonce" | "fileOps"> = {},
-): DeploymentSummary {
+export function validateEditedConfigSource(rootDir: string, path: string, source: string): DeploymentSummary {
 	const root = resolve(rootDir);
 	const target = resolve(path);
 	if (dirname(target) !== root || extname(target) !== ".ts") {
 		throw new OnboardingWriteError("edited configuration must be the project-root .ts source");
 	}
-	const ops = options.fileOps ?? nodeConfigFileOps;
 	const extension = extname(target);
 	const stem = basename(target, extension);
-	const temporary = join(root, `.${stem}.edit-${options.nonce ?? randomUUID()}${extension}`);
-	if (ops.exists(temporary)) throw new OnboardingWriteError(`temporary file already exists: ${basename(temporary)}`);
+	const temporary = join(root, `.${stem}.edit-${randomUUID()}${extension}`);
+	if (existsSync(temporary)) throw new OnboardingWriteError(`temporary file already exists: ${basename(temporary)}`);
 	let created = false;
 	try {
-		ops.writeFile(temporary, source, PRIVATE_MODE);
+		writeFileSync(temporary, source, { encoding: "utf8", flag: "wx", mode: PRIVATE_MODE });
 		created = true;
 		return summarizeConfig(root, loadConfig(root, { configPath: temporary }), target);
 	} finally {
-		if (created) unlinkIfExists(temporary, ops);
+		if (created) unlinkIfExists(temporary);
 	}
 }
 
@@ -294,22 +228,15 @@ export function replaceExistingConfigSource(
 	rootDir: string,
 	path: string,
 	source: string,
-	options: OnboardingWriteOptions & { confirmed: boolean },
+	options: { confirmed: boolean },
 ): { summary: DeploymentSummary; backupPath: string } {
 	if (!options.confirmed)
 		throw new OnboardingWriteError("replacement was not confirmed; original configuration was preserved");
 	const root = resolve(rootDir);
 	const target = resolve(path);
-	const ops = options.fileOps ?? nodeConfigFileOps;
-	assertRegularFile(target, ops);
-	validateEditedConfigSource(root, target, source, options);
-	const transaction = installAtomically(
-		[{ path: target, contents: source, mode: PRIVATE_MODE }],
-		[],
-		"backup-replace",
-		options.nonce ?? randomUUID(),
-		ops,
-	);
+	assertRegularFile(target);
+	validateEditedConfigSource(root, target, source);
+	const transaction = installAtomically([{ path: target, contents: source, mode: PRIVATE_MODE }], "backup-replace");
 	try {
 		const summary = summarizeConfig(root, loadConfig(root, { configPath: target }), target);
 		transaction.finalize();
@@ -368,33 +295,27 @@ function replaceBotFieldValue(source: string, botId: string, field: BotControlCo
 	return source.slice(0, start) + inserted + source.slice(end);
 }
 
-function installAtomically(
-	files: InstallFile[],
-	retirePaths: string[],
-	mode: OnboardingWriteMode,
-	nonce: string,
-	ops: ConfigFileOps,
-): AtomicInstall {
-	const allProtected = [...new Set([...files.map((file) => file.path), ...retirePaths])];
-	const existing = allProtected.filter((path) => ops.exists(path));
+function installAtomically(files: InstallFile[], mode: OnboardingWriteMode): AtomicInstall {
+	const nonce = randomUUID();
+	const existing = files.map((file) => file.path).filter((path) => existsSync(path));
 	if (mode === "create" && existing.length > 0) {
 		throw new OnboardingWriteError(
 			`existing files were preserved: ${existing.map((path) => basename(path)).join(", ")}`,
 		);
 	}
-	for (const path of existing) assertRegularFile(path, ops);
+	for (const path of existing) assertRegularFile(path);
 	const backups = existing.map((path) => ({ original: path, backup: `${path}.bak-${nonce}` }));
 	for (const { backup } of backups) {
-		if (ops.exists(backup)) throw new OnboardingWriteError(`backup already exists: ${basename(backup)}`);
+		if (existsSync(backup)) throw new OnboardingWriteError(`backup already exists: ${basename(backup)}`);
 	}
 	const staged = files.map((file) => ({
 		...file,
 		temporary: join(dirname(file.path), `.${basename(file.path)}.tmp-${nonce}`),
 	}));
 	for (const file of staged) {
-		if (ops.exists(file.temporary))
+		if (existsSync(file.temporary))
 			throw new OnboardingWriteError(`temporary file already exists: ${basename(file.temporary)}`);
-		ops.mkdir(dirname(file.path));
+		mkdirSync(dirname(file.path), { recursive: true });
 	}
 
 	const movedBackups: typeof backups = [];
@@ -410,14 +331,14 @@ function installAtomically(
 				failures.push(label);
 			}
 		};
-		for (const path of [...installed].reverse()) attempt(basename(path), () => unlinkIfExists(path, ops));
+		for (const path of [...installed].reverse()) attempt(basename(path), () => unlinkIfExists(path));
 		for (const { original, backup } of [...movedBackups].reverse()) {
-			attempt(basename(original), () => unlinkIfExists(original, ops));
+			attempt(basename(original), () => unlinkIfExists(original));
 			attempt(basename(backup), () => {
-				if (ops.exists(backup)) ops.rename(backup, original);
+				if (existsSync(backup)) renameSync(backup, original);
 			});
 		}
-		for (const file of staged) attempt(basename(file.temporary), () => unlinkIfExists(file.temporary, ops));
+		for (const file of staged) attempt(basename(file.temporary), () => unlinkIfExists(file.temporary));
 		closed = true;
 		if (failures.length > 0) {
 			throw new OnboardingWriteError(`automatic rollback was incomplete for: ${[...new Set(failures)].join(", ")}`);
@@ -425,15 +346,16 @@ function installAtomically(
 	};
 
 	try {
-		for (const file of staged) ops.writeFile(file.temporary, file.contents, file.mode);
+		for (const file of staged)
+			writeFileSync(file.temporary, file.contents, { encoding: "utf8", flag: "wx", mode: file.mode });
 		for (const item of backups) {
-			ops.rename(item.original, item.backup);
+			renameSync(item.original, item.backup);
 			movedBackups.push(item);
 		}
 		for (const file of staged) {
-			ops.rename(file.temporary, file.path);
+			renameSync(file.temporary, file.path);
 			installed.push(file.path);
-			ops.chmod(file.path, file.mode);
+			chmodSync(file.path, file.mode);
 		}
 	} catch {
 		try {
@@ -463,16 +385,16 @@ function summarizeConfig(root: string, config: AppConfig, configPath: string): D
 	};
 }
 
-function assertRegularFile(path: string, ops: ConfigFileOps): void {
-	const stat = ops.lstat(path);
+function assertRegularFile(path: string): void {
+	const stat = lstatSync(path);
 	if (stat.isSymbolicLink() || !stat.isFile()) {
 		throw new OnboardingWriteError(`refusing non-regular local file: ${basename(path)}`);
 	}
 }
 
-function unlinkIfExists(path: string, ops: ConfigFileOps): void {
-	if (!ops.exists(path)) return;
-	ops.unlink(path);
+function unlinkIfExists(path: string): void {
+	if (!existsSync(path)) return;
+	unlinkSync(path);
 }
 
 function ensureTrailingNewline(value: string): string {
