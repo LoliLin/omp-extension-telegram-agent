@@ -1395,7 +1395,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		}
 		return undefined;
 	};
-	const attachFeed = (filter: string | null, ctx: ExtensionContext) => {
+	const attachFeed = async (filter: string | null, ctx: ExtensionContext) => {
 		closeCompose(ctx.ui);
 		active?.detach("replaced by a new /tg attach");
 		clearFeedUi(ctx.ui);
@@ -1413,6 +1413,8 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			},
 		};
 		pi.appendEntry<FeedEntry>(ENTRY_TYPE, data);
+		// omp's transcript rebuild is async; give it a tick to mount
+		await new Promise<void>((resolve) => setTimeout(resolve, 100));
 		if (pending) {
 			pending = null;
 			clearFeedUi(ctx.ui);
@@ -1624,7 +1626,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 					if (result.outcome === "ready") {
 						completionBots = undefined;
 						statusBots = undefined;
-						attachFeed(null, ctx);
+						await attachFeed(null, ctx);
 					}
 				} finally {
 					ctx.ui.setStatus("telegram-config", undefined);
@@ -1647,7 +1649,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			if (sub === "attach") {
 				const filter = resolveFilter(botArg);
 				if (filter === undefined) return;
-				attachFeed(filter, ctx);
+				await attachFeed(filter, ctx);
 			} else if (sub === "compose") {
 				if (botArg === "off") {
 					closeCompose(ctx.ui);
