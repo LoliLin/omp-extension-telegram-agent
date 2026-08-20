@@ -37,10 +37,10 @@
 
 ## 用户体验
 
-- 新 clone 运行 `bun run pi` 即可安装 lockfile 对应的项目 Pi；配置不存在时 `/tg config` 仍可用，并用 Pi 原生 dialogs 建立 typed config、private `.env` 与 persona。
+- 安装 `omp install <repo>` 后，扩展随 omp 自动加载；配置不存在时 `/tg config` 仍可用，并用 omp 原生 dialogs 建立 typed config、private `.env` 与 persona。
 - 向导只有在受控 daemon restart 明确 ready 后才自动打开 all-bots feed；credential/network 失败会保留已验证配置并给出 status/retry，不伪报连接成功。
 - 启动 daemon → 配置的 bots 长期在线 → 消息落库 → Agent 按规则运行
-- 用户随时在项目目录运行 `bun run pi`，用 `/tg attach [bot-id]` 在 Pi 原生 transcript 查看完整群聊、LOCAL 事件，并在与 Pi 原生同构的 attached footer 查看数据库 telemetry 保留期 usage；此时隐藏无关的 Pi operator usage 行，detach 后恢复；关闭 Pi 不影响 daemon，累计值不归零
+- 用户随时在 omp 里用 `/tg attach [bot-id]` 在 omp 原生 transcript 查看完整群聊、LOCAL 事件，并在与 omp 原生同构的 attached footer 查看数据库 telemetry 保留期 usage；此时隐藏无关的 omp operator usage 行，detach 后恢复；关闭 omp 不影响 daemon，累计值不归零
 - `/tg more` 加载更早历史，`/tg detach` 断开实时订阅，`/tg status [bot]` 按需查看 Telegram usage
 - `/tg ` 使用 Pi 自带分级菜单补全子命令与当前配置中的 bot，不需要记忆 id
 - daemon 运维：`start` / `restart` / `status` / `stop`；Pi中可用`/tg restart`原位恢复当前feed；详见 `docs/runbooks/daemon.md`

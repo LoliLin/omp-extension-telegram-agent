@@ -3,7 +3,7 @@
 // Any change here must bump CACHE_SCHEMA_VERSION and start a new context epoch;
 // test/cache.test.ts locks the schema hash.
 
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "@oh-my-pi/omptype/typebox";
 import { sha256Short } from "./prompt.ts";
 
 export interface SendParams {
@@ -103,11 +103,33 @@ interface ProviderToolProtocol {
 	parameters: unknown;
 }
 
+/** omptype/TypeBox schemas expose a canonical JSON-schema projection. */
+interface JsonSchemaSource {
+	toJsonSchema(options?: { target?: string }): Record<string, unknown>;
+}
+
+/** Canonical JSON-schema projection for hashing, fingerprints, and reports. */
+export function schemaJson(parameters: unknown): unknown {
+	if (
+		parameters != null &&
+		(typeof parameters === "object" || typeof parameters === "function") &&
+		"toJsonSchema" in parameters
+	) {
+		const source = parameters as JsonSchemaSource;
+		if (typeof source.toJsonSchema === "function") return source.toJsonSchema({ target: "json-schema" });
+	}
+	return parameters;
+}
+
 /** Hash every provider-visible field in registration order; labels stay local-only. */
 export function toolProtocolHash(definitions: readonly ProviderToolProtocol[]): string {
 	return sha256Short(
 		JSON.stringify(
-			definitions.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
+			definitions.map((tool) => ({
+				name: tool.name,
+				description: tool.description,
+				parameters: schemaJson(tool.parameters),
+			})),
 		),
 	);
 }

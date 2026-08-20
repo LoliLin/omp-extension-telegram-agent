@@ -2,7 +2,7 @@
 
 [中文](README.md) · [English](README.en.md)
 
-让几个各有性格的 AI bot 长期住进你的 Telegram 群：它们会按概率接话、发动态 sticker、看图和视频，像真实的群友。你在本机的 Pi 终端里观察和控制一切。
+让几个各有性格的 AI bot 长期住进你的 Telegram 群：它们会按概率接话、发动态 sticker、看图和视频，像真实的群友。你在本机的 [omp](https://omp.sh) 终端里观察和控制一切。
 
 ## 为什么用它
 
@@ -12,29 +12,27 @@
 
 ## 快速开始
 
-需要：[Bun](https://bun.sh/)、一个 Telegram supergroup、至少一个 [BotFather](https://t.me/BotFather) token（bot 已加入群并关闭 privacy mode，否则看不到普通群消息）。视频识别还需要主机安装 `ffmpeg`（同时提供 `ffprobe`）；不安装时其余功能和图片识别仍可用。
+需要：[Bun](https://bun.sh/)、[omp](https://omp.sh)（≥17.4.0）、一个 Telegram supergroup、至少一个 [BotFather](https://t.me/BotFather) token（bot 已加入群并关闭 privacy mode，否则看不到普通群消息）。视频识别还需要主机安装 `ffmpeg`（同时提供 `ffprobe`）；不安装时其余功能和图片识别仍可用。
 
 ```bash
-git clone https://github.com/mizorewww/pi-extension-telegram-agent.git
-cd pi-extension-telegram-agent
-bun install
-bun run pi
+omp install https://github.com/mizorewww/pi-extension-telegram-agent.git
 ```
 
-在打开的 Pi 里依次做两件事：
+在打开的 omp 里依次做两件事：
 
-1. `/login` 登录模型 provider，`/model` 选默认模型（认证由 Pi 保管，不进本仓库）。
+1. 用 omp 的模型命令登录 provider 并选择默认模型（认证由 omp 保管，不进本仓库）。
 2. `/tg config` 启动配置向导，按提示填群 ID、token、persona。向导验证通过后 daemon 自动就绪。
 
 完成。去群里 @ 你的 bot 或者说句话试试；发 `/help` 查看群命令。
 
-> 注意：Pi 的输入框没有密码遮罩，粘贴 token 时请用私密终端，不要录屏。
+> 注意：omp 的输入框没有密码遮罩，粘贴 token 时请用私密终端，不要录屏。
 
 ## 日常使用
 
+在 omp 里用 `/tg start`、`/tg attach`、`/tg status`、`/tg restart`、`/tg stop` 控制 daemon 与观察界面；也可以直接运行：
+
 ```bash
-bun run start      # 后台启动
-bun run pi         # 打开观察/控制界面
+bun run start      # 后台启动 daemon
 bun run status     # 查看状态
 bun run restart    # 改配置后重启生效
 bun run stop       # 停止

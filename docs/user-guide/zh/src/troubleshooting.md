@@ -2,26 +2,26 @@
 
 先从症状选择安全的下一步；不要删除data、pid或socket来“试一下”。完整进程恢复规则见[daemon runbook](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/runbooks/daemon.md)。
 
-## `bun run pi` 无法启动
+## `omp 启动（`omp install <repo>` 后直接使用 `/tg` 命令）` 无法启动
 
 运行：
 
 ```bash
 bun install --frozen-lockfile
-bun run pi --version
+omp 启动（`omp install <repo>` 后直接使用 `/tg` 命令） --version
 ```
 
-预期版本是项目锁定的 Pi 0.84.1。若安装失败，保留错误输出并修复registry/network；不要改成未锁定的全局 Pi 来掩盖问题。
+预期版本是项目锁定的 omp 0.84.1。若安装失败，保留错误输出并修复registry/network；不要改成未锁定的全局 omp 来掩盖问题。
 
 ## `/tg config` 不在菜单中
 
-确认你从仓库根运行 `bun run pi`，并且 package discovery 加载了 `.pi/extensions/tg-extension.ts`。`config` 是静态命令，不依赖已有 config；若完全缺失，优先排查Pi/package加载，而不是手工创建空配置文件。
+确认你从仓库根运行 `omp 启动（`omp install <repo>` 后直接使用 `/tg` 命令）`，并且 package discovery 加载了 `.pi/extensions/tg-extension.ts`。`config` 是静态命令，不依赖已有 config；若完全缺失，优先排查Pi/package加载，而不是手工创建空配置文件。
 
 ## 向导拒绝配置
 
 - 字段错误：按notification列出的字段修复；值不会回显。
 - 已有文件：选择validate/editor，或明确确认backup-replace；取消不会改字节。
-- Pi model preflight：退出向导，用 Pi `/login`、`/model` 修复后重试；deployment 文件尚未写入。
+- omp model preflight：退出向导，用 omp `/login`、`/model` 修复后重试；deployment 文件尚未写入。
 
 ## 配置有效但 daemon 未 ready
 
@@ -30,7 +30,7 @@ bun run pi --version
 /tg restart
 ```
 
-再检查 `data/daemon.log`。常见原因是Telegram token错误、网络不可达、Pi login/default model已变化、model不在Pi catalog或bot未加入目标群。有效配置会保留；不需要重新粘贴token。
+再检查 `data/daemon.log`。常见原因是Telegram token错误、网络不可达、omp login/default model已变化、model不在omp catalog或bot未加入目标群。有效配置会保留；不需要重新粘贴token。
 
 ## `daemon starting` 很久
 
@@ -48,7 +48,7 @@ bun run pi --version
 
 同一个token正在被另一进程长轮询。运行`bun run restart`；controller会验证并回收当前deployment的真实daemon与孤儿。不要盲目`kill` pid file中的数字，也不要并发start。
 
-## Pi feed 或 compose 断开
+## omp feed 或 compose 断开
 
 - `no connected Telegram feed`：先`/tg attach [bot]`，等snapshot连接完成。
 - `unknown bot id`：使用`/tg `补全，或检查配置id。
@@ -79,7 +79,7 @@ bun run pi --version
 收集以下非敏感信息：
 
 - `bun run status` 输出；
-- `bun run pi --version`；
+- `omp 启动（`omp install <repo>` 后直接使用 `/tg` 命令） --version`；
 - `data/daemon.log`中手工复核过的脱敏末尾；
 - 失败命令、bot id、配置是新写还是替换已有文件；
 - 是否使用tmux、Kitty/Ghostty/iTerm2。

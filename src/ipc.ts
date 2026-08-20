@@ -1,6 +1,6 @@
 // Local IPC between daemon (server) and TUI (client). Unix socket, JSONL frames.
 
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { TelegramThinkingLevel } from "./agent/model-settings.ts";
 // Protocol:
 //   C->S {type:"hello"}                       S->C {type:"snapshot", items: TimelineItem[]}
 //   C->S {type:"history", before, limit}      S->C {type:"history", items, hasMore}
@@ -119,7 +119,7 @@ export interface RuntimeControlSnapshot {
 	epoch: number;
 	provider: string;
 	model: string;
-	reasoningEffort: ThinkingLevel;
+	reasoningEffort: TelegramThinkingLevel;
 	contextWindow: number;
 	/** Live Pi session usage; null immediately after compaction until the next provider response. */
 	currentContextTokens?: number | null;

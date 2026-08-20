@@ -5,7 +5,7 @@
 ## 1. 项目哲学
 
 - **极简，最少机制**：一套设计，不留兼容层。Breaking change 随时可以做，只要求迁移干净、一步到位。
-- **Pi 原生优先**：动手前先查 `node_modules/@earendil-works` 各包导出了什么；Pi 能做的事不自造轮子（审计结论见 `docs/engineering/code-review-2608.md`）。
+- **Pi 原生优先**：动手前先查 `node_modules/@oh-my-pi` 各包导出了什么；Pi/omp 能做的事不自造轮子（审计结论见 `docs/engineering/code-review-2608.md`）。
 - **不花冤枉钱**：能用确定性代码解决的不花 LLM token；任何功能先评估 cache hit 率与每 turn 新增 token（`docs/cache.md`、`docs/engineering/development-guide.md`）。
 - 删代码优先于加抽象；防御代码只防真实可能的分支。
 
@@ -77,9 +77,9 @@
 - `bun test` 强制 UTC：涉时间序列化的测试必须 pin TZ（参考 `test/cache.test.ts`，生产为 Asia/Singapore）。
 - Bun `socket.write` 返回字节数且可能部分写入：必须编码成 Uint8Array 后按字节偏移排队写（参考 `src/ipc.ts`）。
 - `.env` 是 `key: value` 冒号格式，由 `src/config.ts` 自解析，不是 dotenv 的 `KEY=value`。
-- Pi 四包精确锁定 registry `0.84.1`；升级必须同一原子提交更新 manifest、lock 并做兼容性验证。
+- omp 包（`@oh-my-pi/pi-*`）精确锁定 registry `17.4.0`；`@earendil-works/pi-*` 是 npm 别名（`npm:@oh-my-pi/*`），供扩展源码引用——omp 运行时把旧 specifier remap 到内置 shim，保证扩展组件与宿主 TUI 同一实例。升级必须同一原子提交更新 manifest、lock 并做兼容性验证。
 - sticker / alias 的 short_id 用 rowid 分配，不用 COUNT+1（并发 / 删除下撞号）。
-- `streamFunction` 包装（`src/agent/runtime.ts`）是 Pi 的官方注入形态（`Agent.streamFunction` 是公开可变字段，函数包函数注入 `cacheRetention`）；`createAgentSession()` 不接受 streamFn 选项，只能事后覆盖。升级 Pi 时仍必须验证该包装（见 `docs/engineering/code-review-2608.md`）。
+- `streamFn` 包装（`src/agent/runtime.ts`）是 omp 的注入形态（`Agent.streamFn` 是公开可变字段，函数包函数注入 `cacheRetention`）；`createAgentSession()` 不接受 streamFn 选项，只能事后覆盖。升级 omp 时仍必须验证该包装（见 `docs/engineering/code-review-2608.md`）。
 
 ## 9. 指南更新规则
 

@@ -26,8 +26,8 @@
 
 ## 运行时与依赖
 
-- 运行时：**Bun**（Pi SDK × Bun 兼容性已经 smoke 验证）
-- Pi：registry `@earendil-works/pi-coding-agent`、`pi-ai`、`pi-agent-core`、`pi-tui` 精确锁定为 v0.84.1；`scripts/pi-launcher.ts` 在 project-local CLI 缺失时执行 `bun install --frozen-lockfile`，随后始终以 Bun 启动 lockfile 对应版本。运行与构建不读取 sibling `../pi`。
+- 运行时：**Bun**（omp SDK × Bun 兼容性已经 smoke 验证）
+- omp：`@oh-my-pi/pi-coding-agent`、`pi-ai`、`pi-agent-core`、`pi-catalog`、`pi-tui`、`pi-utils` 精确锁定 v17.4.0；`@earendil-works/pi-*` 是 npm 别名（`npm:@oh-my-pi/*`），仅扩展源码引用——omp 运行时会把它 remap 到内置 legacy shim，保证扩展组件与宿主 TUI 同一实例。daemon 进程直接使用 `@oh-my-pi/*`。
 - Telegram：raw Bot API（fetch long polling），无第三方 SDK
 
 ## Telegram ingestion
@@ -85,7 +85,7 @@
 
 ## Pi 原生 Telegram transcript
 
-- package 入口是 `.pi/extensions/tg-extension.ts`；`package.json` 的 `pi.extensions` 使项目可被 Pi 自动发现，规范启动命令是 `bun run pi`。
+- package 入口是 `.pi/extensions/tg-extension.ts`；`package.json` 的 `pi.extensions` 使项目可被 omp 作为插件自动发现（`omp install <repo>` 或 `omp plugin link <path>`），规范启动方式是在 omp 里直接使用 `/tg` 命令。
 - `/tg attach [bot-id]` 通过 `registerEntryRenderer` + `appendEntry` 在 Pi 自己的 transcript 中挂载一个 **TUI-only custom entry**。一次 attach 只写一个锚点；Telegram snapshot、实时消息和历史页只存在于该 entry 的内存组件树，不逐条写 Pi session，也不进入 provider context。
 - 消息、LOCAL 事件、日期与媒体由 Pi 的 `Container`、`Box`、`Text`、`Image`、`Spacer` 和 theme 组合。Pi fullscreen host 拥有滚动、resize、选择、editor、宽度处理及 Kitty image placement/cropping；项目不持有 viewport、终端尺寸、键盘处理或 ANSI 主题代码。
 - `src/plugin/timeline.ts` 是无展示逻辑的 IPC client，只负责连接、snapshot/live/history、复合游标、去重、stats 合并、有界媒体读取与 ephemeral stream frame 转发。

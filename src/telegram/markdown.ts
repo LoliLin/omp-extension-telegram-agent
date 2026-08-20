@@ -1,4 +1,4 @@
-import { Marked, type Token, type Tokens } from "@earendil-works/pi-tui";
+import { Marked, type Token, type Tokens } from "@oh-my-pi/pi-utils/marked";
 import { parsePublicHttpUrl } from "../net/public-url.ts";
 
 const MAX_CODE_POINTS = 4096;
@@ -331,7 +331,7 @@ export function formatTelegramMarkdown(markdown: string): TelegramFormattedMessa
 	if (typeof markdown !== "string" || markdown.trim().length === 0) throw new TelegramMarkdownError("empty");
 	if ([...markdown].length > MAX_CODE_POINTS) throw new TelegramMarkdownError("too_long");
 	try {
-		const tokens = MARKED.Lexer.lex(markdown, { gfm: true, breaks: false });
+		const tokens = MARKED.lexer(markdown, { gfm: true, breaks: false });
 		const rendered = new TelegramMarkdownRenderer().render(tokens);
 		if (!rendered.text.trim()) throw new TelegramMarkdownError("empty");
 		if ([...rendered.text].length > MAX_CODE_POINTS) throw new TelegramMarkdownError("too_long");

@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import type { MessageEventKind } from "../../db/message-events.ts";
 import { SEND_NO_RETRY_ACK, SEND_SUCCESS_ACK } from "../tools.ts";
 
@@ -81,12 +81,8 @@ export function projectTelegramContext(messages: AgentMessage[]): AgentMessage[]
 	});
 }
 
-export function makeTelegramContextExtension(): InlineExtension {
-	return {
-		name: "tg-context",
-		hidden: true,
-		factory: (pi) => {
-			pi.on("context", (event) => ({ messages: projectTelegramContext(event.messages) }));
-		},
+export function makeTelegramContextExtension(): ExtensionFactory {
+	return (pi) => {
+		pi.on("context", (event) => ({ messages: projectTelegramContext(event.messages) }));
 	};
 }

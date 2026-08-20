@@ -2,7 +2,7 @@
 
 ## 配置
 
-- **首选路径**：运行 `bun run pi`，先用 Pi `/login` 与 `/model`完成模型认证/默认选择，再执行 `/tg config`。向导在任何写入前本地预检并显示`provider/model:thinking`，随后只收集一个bot的Telegram最小配置，写入ignored `telegram.config.ts`、`.env`与`personas/<id>.local.md`，再走本runbook的受控restart。Pi当前没有密码输入控件，Telegram token输入时可见；只在私密终端操作，不要录屏或共享屏幕。
+- **首选路径**：在 omp 里先完成模型认证与默认模型选择（`/login`、`/model`），再执行 `/tg config`。向导在任何写入前本地预检并显示`provider/model:thinking`，随后只收集一个bot的Telegram最小配置，写入ignored `telegram.config.ts`、`.env`与`personas/<id>.local.md`，再走本runbook的受控restart。omp 当前没有密码输入控件，Telegram token输入时可见；只在私密终端操作，不要录屏或共享屏幕。
 - 已有配置重跑 `/tg config` 时可验证、用 Pi editor 编辑项目根 source，或在明确确认后备份并替换默认 source。
 - **手工路径**：复制 `telegram.config.example.ts`、`.env.example` 与一个 public persona template，再按下列字段编辑。
 - `telegram.config.ts`（项目根，唯一配置文件）：复制 `telegram.config.example.ts` 后编辑，`defineConfig()` 提供类型与逐字段注释。它会作为受信本机代码执行，不要粘贴来源不明的配置。
@@ -47,10 +47,10 @@ bun run debug -- --bot A --show-provider-content  # 敏感，本机单bot取证
 默认输出不含消息正文/secret/path，聚合daemon、cursor/obligation、routing claim、LLM run、安全事件、结构化log与完整provider结构元数据，并标记route无run、模型沉默、tool preflight失败和send degraded。显式`--show-provider-content`会在stdout显示完整system/当前session投影，可能包含群正文、tool result与thinking，只可本机短暂取证。`daemon.log`为JSONL，受控start/restart前按8 MiB轮转保留3代且mode 0600；不要把整个文件贴到issue。字段与判断方法见[Debug指南](../engineering/debugging-guide.md)。
 
 ```bash
-bun run pi                          # 从项目依赖启动 Pi，自动加载 Telegram extension
+omp plugin link <本仓库路径>      # 本地链接（或 omp install <repo>），扩展随 omp 自动加载
 ```
 
-进入 Pi 后：
+进入 omp 后：
 
 ```text
 /tg config              # 首配、验证或安全编辑本机配置

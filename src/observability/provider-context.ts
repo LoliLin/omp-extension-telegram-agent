@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { SessionManager, buildSessionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { buildSessionContext, SessionManager } from "@oh-my-pi/pi-coding-agent";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { DebugDeploymentIdentity } from "../config.ts";
 import { getSessionManifest } from "../db/message-events.ts";
 import { projectTelegramContext } from "../agent/extensions/context.ts";
 import { buildSystemPrompt } from "../agent/prompt.ts";
-import { TOOL_DEFS } from "../agent/tools.ts";
+import { schemaJson, TOOL_DEFS } from "../agent/tools.ts";
 import { stickerCatalogPromptBlock } from "../media/sticker-catalog.ts";
 import type { Database } from "bun:sqlite";
 import type { DebugModelReasoning } from "./debug-report.ts";
@@ -56,7 +56,7 @@ function messageMetadata(message: AgentMessage, index: number) {
  * Default output contains every message/tool identity but no prompt or conversation content.
  * Explicit content output is stdout-only diagnostic material and must never enter daemon logs.
  */
-export function inspectProviderContext(
+export async function inspectProviderContext(
 	db: Database,
 	deployment: DebugDeploymentIdentity,
 	botId: string,
@@ -67,12 +67,12 @@ export function inspectProviderContext(
 	if (!bot) throw new Error(`unknown bot: ${botId}`);
 	const manifest = getSessionManifest(db, botId);
 	if (!manifest) throw new Error(`session manifest unavailable: ${botId}`);
-	const manager = SessionManager.open(
-		manifest.sessionFile,
-		`${deployment.dataDir}/sessions/${botId}`,
-		deployment.dataDir,
-	);
+	const manager = await SessionManager.open(manifest.sessionFile, `${deployment.dataDir}/sessions/${botId}`);
 	const context = buildSessionContext(manager.getBranch(), manager.getLeafId());
+	const sessionModel = context.models.default;
+	const slash = sessionModel ? sessionModel.indexOf("/") : -1;
+	const sessionProvider = slash > 0 ? sessionModel.slice(0, slash) : null;
+	const sessionModelId = slash > 0 ? sessionModel.slice(slash + 1) : null;
 	const messages = projectTelegramContext(context.messages);
 	const lastRun = db
 		.query(`
@@ -91,7 +91,7 @@ export function inspectProviderContext(
 	);
 	const tools = TOOL_DEFS.filter((tool) =>
 		tool.name === "send" ? bot.tools.send : tool.name === "search" ? bot.tools.search : bot.tools.runJs,
-	).map(({ name, description, parameters }) => ({ name, description, parameters }));
+	).map(({ name, description, parameters }) => ({ name, description, parameters: schemaJson(parameters) }));
 	return {
 		source: "current_session_pre_adapter_projection",
 		exact_last_request: false,
@@ -101,9 +101,9 @@ export function inspectProviderContext(
 			context_fingerprint: manifest.contextFingerprint,
 		},
 		request_metadata: {
-			provider: bot.provider ?? lastRun?.provider ?? context.model?.provider ?? null,
+			provider: bot.provider ?? lastRun?.provider ?? sessionProvider,
 			api: lastRun?.api ?? null,
-			model: bot.model ?? lastRun?.model ?? context.model?.modelId ?? null,
+			model: bot.model ?? lastRun?.model ?? sessionModelId,
 			requested_reasoning_effort: reasoning?.requested ?? bot.reasoningEffort ?? context.thinkingLevel ?? null,
 			effective_reasoning_effort: reasoning?.effective ?? context.thinkingLevel ?? null,
 			supported_reasoning_efforts: reasoning?.supported ?? null,

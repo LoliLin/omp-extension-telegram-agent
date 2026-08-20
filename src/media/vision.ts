@@ -4,10 +4,12 @@
 
 import type { Database } from "bun:sqlite";
 import { log } from "../observability/log.ts";
-import { convertToPng, type ModelRuntime, resizeImage } from "@earendil-works/pi-coding-agent";
-import { contentText, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
+import { completeSimple, type Api, type AssistantMessage, type Context, type Model } from "@oh-my-pi/pi-ai";
+import { convertImageToPng } from "@oh-my-pi/pi-coding-agent/utils/image-loading";
+import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent";
+import { contentText } from "../agent/activity.ts";
 import type { BotApi } from "../telegram/api.ts";
-import { parsePiModelReference } from "../agent/model-ref.ts";
+import { EFFORT_BY_THINKING_LEVEL, parsePiModelReference } from "../agent/model-ref.ts";
 import {
 	classifyPiProviderFailure,
 	PiModelConfigurationError,
@@ -128,12 +130,16 @@ export interface EnsureVisionOptions {
 }
 
 interface PiVisionExecutorOptions {
-	convert?: typeof convertToPng;
-	resize?: typeof resizeImage;
+	convert?: (base64Data: string, mimeType: string) => Promise<{ data: string; mimeType: string } | null>;
+	complete?: (
+		model: Model<Api>,
+		context: Context,
+		options: Parameters<typeof completeSimple>[2],
+	) => Promise<AssistantMessage>;
 	monotonicNow?: () => number;
 }
 
-type VisionModelRuntime = Pick<ModelRuntime, "getModel" | "completeSimple">;
+type VisionModelRuntime = Pick<ModelRegistry, "find">;
 
 function boundedNumber(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
@@ -170,7 +176,7 @@ function usageTelemetry(
 		latencyMs: Math.max(0, Math.round(latencyMs)),
 		inputTokens: boundedNumber(message?.usage.input),
 		outputTokens: boundedNumber(message?.usage.output),
-		reasoningTokens: boundedNumber(message?.usage.reasoning),
+		reasoningTokens: boundedNumber(message?.usage.reasoningTokens),
 		cost: boundedNumber(message?.usage.cost.total),
 		outcome,
 		...(frames == null ? {} : { frames }),
@@ -188,11 +194,17 @@ export function createPiVisionExecutor(
 	if (!selection) {
 		throw new Error("invalid auxiliary_visual_model; expected provider/model:effort");
 	}
-	const model = runtime.getModel(selection.provider, selection.model);
+	const model = runtime.find(selection.provider, selection.model);
 	const readinessFailure = !model ? "unknown_model" : !model.input.includes("image") ? "image_input_unsupported" : null;
-	const convert = options.convert ?? convertToPng;
-	const resize = options.resize ?? resizeImage;
+	const convert =
+		options.convert ??
+		((base64Data, mimeType) =>
+			convertImageToPng({ type: "image", data: base64Data, mimeType }).then(
+				(converted) => ({ data: converted.data, mimeType: converted.mimeType }),
+				() => null,
+			));
 	const monotonicNow = options.monotonicNow ?? (() => performance.now());
+	const complete = options.complete ?? completeSimple;
 
 	return {
 		modelRef: selection.canonical,
@@ -231,16 +243,8 @@ export function createPiVisionExecutor(
 						};
 					}
 				}
-				if (input.kind !== "video") {
-					// Video frames are already bounded by ffmpeg scale=1280; only static images need a cap.
-					// A resize failure falls back to the original image rather than failing the description.
-					const resized = await resize(bytes, mimeType).catch(() => null);
-					if (resized) {
-						bytes = new Uint8Array(Buffer.from(resized.data, "base64"));
-						mimeType = resized.mimeType;
-						converted = converted || resized.wasResized;
-					}
-				}
+				// omp exposes no image-resize helper; static images keep their source dimensions
+				// (video frames are already bounded by ffmpeg scale=1280).
 				convertedBytes += bytes.byteLength;
 				images.push({
 					data: Buffer.from(bytes).toString("base64"),
@@ -280,13 +284,13 @@ export function createPiVisionExecutor(
 			};
 			let message: AssistantMessage;
 			try {
-				// Single timeout layer: the SDK enforces VISION_TIMEOUT_MS inside completeSimple.
-				message = await runtime.completeSimple(model!, context, {
+				// Single timeout layer: omp enforces per-request aborts via AbortSignal,
+				// so the vision call carries a hard VISION_TIMEOUT_MS deadline.
+				message = await complete(model!, context, {
 					cacheRetention: "none",
 					maxTokens: VISION_MAX_OUTPUT_TOKENS,
-					maxRetries: 0,
-					reasoning: selection.thinkingLevel,
-					timeoutMs: VISION_TIMEOUT_MS,
+					reasoning: EFFORT_BY_THINKING_LEVEL[selection.thinkingLevel],
+					signal: AbortSignal.timeout(VISION_TIMEOUT_MS),
 				});
 			} catch (error) {
 				return {

@@ -1,12 +1,8 @@
-# 在 Pi 中聊天和观察
+# 在 omp 中聊天和观察
 
 ## 打开 feed
 
-daemon 长期运行；Pi 可以随时打开或关闭：
-
-```bash
-bun run pi
-```
+daemon 长期运行；omp 可以随时打开或关闭。插件安装后扩展已随 omp 加载；`/tg` 命令直接可用。
 
 首次 `/tg config` ready 后会自动 attach 全局 feed。以后可手工选择：
 
@@ -17,7 +13,7 @@ bun run pi
 /tg detach             # 断开 live socket，保留已显示 transcript
 ```
 
-Telegram feed 是一个 TUI-only Pi custom entry。滚动、resize、选择、主题和图片布局由 Pi 原生组件负责；editor 上方的一行统一显示 feed scope、连接与 compose 状态，attached 期间则用 Pi 官方 footer API 显示路径和 Telegram usage/model，隐藏 operator usage 行。消息不会因为展示而进入当前 Pi agent 的 provider context。
+Telegram feed 是一个 TUI-only omp custom entry。滚动、resize、选择、主题和图片布局由 omp 原生组件负责；editor 上方的一行统一显示 feed scope、连接与 compose 状态，attached 期间则用 omp 官方 footer API 显示路径和 Telegram usage/model，隐藏 operator usage 行。消息不会因为展示而进入当前 omp agent 的 provider context。
 
 在 `/tg ` 后使用 Tab 或原生选择菜单。bot 参数由当前已验证配置动态补全。
 

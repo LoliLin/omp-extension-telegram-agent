@@ -2,7 +2,7 @@
 
 [中文](README.md) · [English](README.en.md)
 
-Let a few AI bots, each with its own persona, live permanently in your Telegram group: they join conversations by probability, send animated stickers, and understand images and videos — like real group members. You observe and control everything from the local Pi terminal.
+Let a few AI bots, each with its own persona, live permanently in your Telegram group: they join conversations by probability, send animated stickers, and understand images and videos — like real group members. You observe and control everything from the local [omp](https://omp.sh) terminal.
 
 ## Why use it
 
@@ -12,29 +12,27 @@ Let a few AI bots, each with its own persona, live permanently in your Telegram 
 
 ## Quick start
 
-You need: [Bun](https://bun.sh/), a Telegram supergroup, and at least one [BotFather](https://t.me/BotFather) token (the bot must be in the group with privacy mode disabled, or it cannot see ordinary messages). Video understanding additionally needs host `ffmpeg` (including `ffprobe`); without it, the rest of the agent and static-image vision continue to work.
+You need: [Bun](https://bun.sh/), [omp](https://omp.sh) (≥17.4.0), a Telegram supergroup, and at least one [BotFather](https://t.me/BotFather) token (the bot must be in the group with privacy mode disabled, or it cannot see ordinary messages). Video understanding additionally needs host `ffmpeg` (including `ffprobe`); without it, the rest of the agent and static-image vision continue to work.
 
 ```bash
-git clone https://github.com/mizorewww/pi-extension-telegram-agent.git
-cd pi-extension-telegram-agent
-bun install
-bun run pi
+omp install https://github.com/mizorewww/pi-extension-telegram-agent.git
 ```
 
-Then two things inside Pi:
+Then two things inside omp:
 
-1. `/login` to authenticate a model provider and `/model` to pick the default model (credentials stay with Pi, outside this repo).
+1. Use omp's model commands to authenticate a provider and pick the default model (credentials stay with omp, outside this repo).
 2. `/tg config` to run the setup wizard: group ID, token, persona. Once it validates, the daemon is ready.
 
 Done. Mention your bot in the group or just say something; `/help` lists the group commands.
 
-> Note: Pi's input dialog does not mask secrets — the token stays visible while you paste it. Use a private terminal and don't record your screen.
+> Note: omp's input dialog does not mask secrets — the token stays visible while you paste it. Use a private terminal and don't record your screen.
 
 ## Everyday use
 
+Control the daemon and observation UI from inside omp with `/tg start`, `/tg attach`, `/tg status`, `/tg restart`, `/tg stop`; or run the CLI directly:
+
 ```bash
 bun run start      # Start in the background
-bun run pi         # Open the observation/control UI
 bun run status     # Check status
 bun run restart    # Restart to apply config changes
 bun run stop       # Stop

@@ -158,13 +158,6 @@ export class TimelineClient implements TimelinePort {
 
 	async connect(): Promise<boolean> {
 		if (this.disposed) return false;
-		if (!existsSync(this.sockPath)) {
-			this.hooks.onEvent({
-				type: "disconnected",
-				reason: "daemon not running (no data/daemon.sock). Start with: bun run src/main.ts start",
-			});
-			return false;
-		}
 
 		return new Promise<boolean>((resolve) => {
 			let settled = false;
@@ -198,7 +191,13 @@ export class TimelineClient implements TimelinePort {
 			socket.once("error", (error) => {
 				this.connected = false;
 				this.failPendingSends("Telegram daemon connection failed before acknowledging the send");
-				if (!this.disposed) this.hooks.onEvent({ type: "disconnected", reason: `ipc error: ${error.message}` });
+				// Windows does not surface unix-socket files through existsSync, so the
+				// "daemon not running" hint is decided on the connection error itself.
+				const reason =
+					error && (error as NodeJS.ErrnoException).code === "ENOENT"
+						? "daemon not running (no data/daemon.sock). Start with: bun run src/main.ts start"
+						: `ipc error: ${error.message}`;
+				if (!this.disposed) this.hooks.onEvent({ type: "disconnected", reason });
 				finish(false);
 			});
 			socket.once("close", () => {

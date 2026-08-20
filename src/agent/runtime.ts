@@ -4,21 +4,21 @@
 import type { Database } from "bun:sqlite";
 import { readFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { contentText } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
+import { completeSimple, type Model, type Usage } from "@oh-my-pi/pi-ai";
 import {
+	AgentRegistry,
 	createAgentSession,
-	DefaultResourceLoader,
+	type ModelRegistry,
 	SessionManager,
-	SettingsManager,
+	Settings,
 	VERSION as PI_VERSION,
 	type AgentSession,
 	type AgentSessionEvent,
-	type CompactionResult,
-	type ModelRuntime,
 	type SessionEntry,
 	type SessionBeforeCompactEvent,
-} from "@earendil-works/pi-coding-agent";
+} from "@oh-my-pi/pi-coding-agent";
 import { EFFECTIVE_CONTEXT_WINDOW, MIN_COMPACTION_RESERVE, type AppConfig, type BotConfig } from "../config.ts";
 import { getBotState, setBotState } from "../db/db.ts";
 import { BotApi, TelegramApiError } from "../telegram/api.ts";
@@ -42,6 +42,7 @@ import {
 } from "./prompt.ts";
 import {
 	degradedSendResult,
+	schemaJson,
 	successfulSendResult,
 	TOOL_DEFS,
 	toolProtocolHash,
@@ -94,6 +95,7 @@ import {
 import { availableSuffixBudget, estimateProviderTokensUpperBound, packMessageEvents } from "./token-packer.ts";
 import {
 	estimateCacheReadFromPrefix,
+	hasUnpublishedAssistantText,
 	makeAssistantPersistencePolicyExtension,
 	makeCachePayloadObserverExtension,
 	makeTelegramCompactionExtension,
@@ -107,12 +109,13 @@ import {
 	type TelegramContextDetails,
 } from "./extensions/index.ts";
 import { buildContextFingerprint, canResumeContextSession, sha256 } from "./context-fingerprint.ts";
-import { parsePiModelReference, type PiRequestThinkingLevel } from "./model-ref.ts";
+import { EFFORT_BY_THINKING_LEVEL, parsePiModelReference } from "./model-ref.ts";
+import type { PiRequestThinkingLevel } from "./model-settings.ts";
 import type { VisionScheduler } from "../media/vision-scheduler.ts";
 import type { VideoTranscoderAvailability } from "../media/video-frames.ts";
 import { log } from "../observability/log.ts";
 import { fitContextBreakdown } from "../observability/usage.ts";
-import { AgentActivityCollector } from "./activity.ts";
+import { AgentActivityCollector, contentText } from "./activity.ts";
 
 const MAX_EVENT_SCAN = 256;
 const MAX_OBLIGATION_SCAN = 64;
@@ -181,13 +184,13 @@ export class BotRuntime {
 	private db: Database;
 	private bot: BotConfig;
 	private config: AppConfig;
-	private modelRuntime: ModelRuntime;
+	private modelRuntime: ModelRegistry;
 	private visionExecutor: VisionExecutor | null;
 	private api: BotApi;
 	private readonly botApis: ReadonlyMap<string, MediaDownloadApi>;
 	private session: AgentSession | null = null;
-	private model!: NonNullable<ReturnType<ModelRuntime["getModel"]>>; // resolved in init()
-	private compactionModel!: NonNullable<ReturnType<ModelRuntime["getModel"]>>;
+	private model!: Model; // resolved in init()
+	private compactionModel!: Model;
 	private compactionReasoning: PiRequestThinkingLevel = "low";
 	private running = false;
 	// Flush state machine (REQ-AGENT-0001): `flushing` is owned locally and set synchronously
@@ -246,7 +249,7 @@ export class BotRuntime {
 		db: Database,
 		bot: BotConfig,
 		config: AppConfig,
-		modelRuntime: ModelRuntime,
+		modelRuntime: ModelRegistry,
 		options: {
 			monotonicNow?: () => number;
 			chatActionSender?: (signal: AbortSignal) => Promise<unknown>;
@@ -344,13 +347,16 @@ export class BotRuntime {
 				};
 			},
 		};
-		const catalogModel = this.modelRuntime.getModel(this.bot.provider, this.bot.model);
+		const catalogModel = this.modelRuntime.find(this.bot.provider, this.bot.model);
 		if (!catalogModel) throw new Error(`model not found: ${this.bot.provider}/${this.bot.model}`);
-		const model = { ...catalogModel, contextWindow: Math.min(catalogModel.contextWindow, EFFECTIVE_CONTEXT_WINDOW) };
+		const model = {
+			...catalogModel,
+			contextWindow: Math.min(catalogModel.contextWindow ?? EFFECTIVE_CONTEXT_WINDOW, EFFECTIVE_CONTEXT_WINDOW),
+		};
 		this.model = model;
 		const compactionSelection = parsePiModelReference(this.bot.compactionModel);
 		if (!compactionSelection) throw new Error("invalid compaction_model; expected provider/model:effort");
-		const compactionModel = this.modelRuntime.getModel(compactionSelection.provider, compactionSelection.model);
+		const compactionModel = this.modelRuntime.find(compactionSelection.provider, compactionSelection.model);
 		if (!compactionModel) {
 			throw new Error(`compaction model not found: ${compactionSelection.provider}/${compactionSelection.model}`);
 		}
@@ -369,7 +375,13 @@ export class BotRuntime {
 		);
 		this.toolsHash = toolProtocolHash(activeTools);
 		this.staticPrefixTokenEstimate = estimateProviderTokensUpperBound(
-			`${systemPrompt}\n${JSON.stringify(activeTools.map(({ name, description, parameters }) => ({ name, description, parameters })))}`,
+			`${systemPrompt}\n${JSON.stringify(
+				activeTools.map(({ name, description, parameters }) => ({
+					name,
+					description,
+					parameters: schemaJson(parameters),
+				})),
+			)}`,
 		);
 		this.contextFingerprint = buildContextFingerprint({
 			piVersion: PI_VERSION,
@@ -390,7 +402,7 @@ export class BotRuntime {
 			tools: activeTools.map((tool) => ({
 				name: tool.name,
 				description: tool.description,
-				parameters: tool.parameters,
+				parameters: schemaJson(tool.parameters),
 			})),
 		});
 
@@ -404,7 +416,7 @@ export class BotRuntime {
 			manifest != null && existsSync(manifest.sessionFile),
 		);
 		const sessionManager = canResume
-			? SessionManager.open(manifest!.sessionFile, sessionsDir, this.config.dataDir)
+			? await SessionManager.open(manifest!.sessionFile, sessionsDir)
 			: SessionManager.create(this.config.dataDir, sessionsDir);
 		if (!canResume && (manifest != null || hasAnySession)) {
 			this.epoch += 1;
@@ -424,46 +436,44 @@ export class BotRuntime {
 				this.pendingPayloadObservations.push(observation);
 				if (this.pendingPayloadObservations.length > 8) this.pendingPayloadObservations.shift();
 			}),
-			makeAssistantPersistencePolicyExtension(
-				(text) => {
-					this.recordEvent("assistant_text", { text });
-					log.info("agent_runtime", "model_silence", {
-						bot_id: this.bot.id,
-						trigger_message_id: this.currentTriggerMessageId,
-					});
-				},
-				(message) => this.captureAssistantActivity(message),
-			),
+			makeAssistantPersistencePolicyExtension(),
 		];
-		const loader = new DefaultResourceLoader({
-			cwd: this.config.dataDir,
-			agentDir: join(this.config.dataDir, "pi-agent"),
-			systemPrompt,
-			noExtensions: true,
-			noSkills: true,
-			noPromptTemplates: true,
-			noContextFiles: true,
-			extensionFactories: extensions,
-		});
-		await loader.reload();
 
 		const { session } = await createAgentSession({
 			cwd: this.config.dataDir,
+			agentDir: join(this.config.dataDir, "pi-agent"),
 			model,
-			thinkingLevel: this.bot.reasoningEffort,
-			modelRuntime: this.modelRuntime,
+			thinkingLevel: this.bot.reasoningEffort === "off" ? "off" : EFFORT_BY_THINKING_LEVEL[this.bot.reasoningEffort],
+			modelRegistry: this.modelRuntime,
 			sessionManager,
-			settingsManager: SettingsManager.inMemory({
-				compaction: { enabled: true, reserveTokens, keepRecentTokens: this.bot.compactionKeepRecent },
+			settings: Settings.isolated({
+				"compaction.enabled": true,
+				"compaction.reserveTokens": reserveTokens,
+				"compaction.keepRecentTokens": this.bot.compactionKeepRecent,
 			}),
-			resourceLoader: loader,
-			noTools: "builtin",
+			extensions,
+			disableExtensionDiscovery: true,
+			skills: [],
+			rules: [],
+			contextFiles: [],
+			promptTemplates: [],
+			slashCommands: [],
 			customTools: activeTools,
+			toolNames: activeTools.map((tool) => tool.name),
+			restrictToolNames: true,
+			enableMCP: false,
+			enableLsp: false,
+			enableIrc: false,
+			hasUI: false,
+			autoApprove: true,
+			agentRegistry: new AgentRegistry(),
+			agentId: `telegram-${this.bot.id}`,
+			agentDisplayName: `telegram-${this.bot.id}`,
 		});
 		this.session = session;
-		const streamFunction = session.agent.streamFunction;
-		session.agent.streamFunction = (requestModel, context, options) =>
-			streamFunction(requestModel, context, { ...options, cacheRetention: this.bot.cacheRetention });
+		const streamFn = session.agent.streamFn;
+		session.agent.streamFn = (requestModel, context, options) =>
+			streamFn(requestModel, context, { ...options, cacheRetention: this.bot.cacheRetention });
 		const sessionFile = session.sessionFile;
 		if (!sessionFile) throw new Error(`persistent session file unavailable for bot ${this.bot.id}`);
 		setSessionManifest(this.db, {
@@ -492,7 +502,7 @@ export class BotRuntime {
 		if (!this.session) return;
 		const chatId = Number(`-100${this.config.groupPeerId}`);
 		const state = this.contextStateFromEntries(
-			this.session.sessionManager.buildContextEntries(),
+			this.session.sessionManager.getBranch(),
 			getConsumedSeq(this.db, this.bot.id, chatId),
 		);
 		setConsumedSeq(this.db, this.bot.id, chatId, state.consumedSeq);
@@ -602,10 +612,25 @@ export class BotRuntime {
 							.join("\n");
 						if (thinking.trim()) this.recordEvent("thinking", { text: thinking });
 						if (msg.usage) this.recordUsage(msg.usage, now);
+						this.captureAssistantActivity(msg);
+						if (hasUnpublishedAssistantText(msg)) {
+							this.recordEvent("assistant_text", { text: contentText(msg.content).trim() });
+							log.info("agent_runtime", "model_silence", {
+								bot_id: this.bot.id,
+								trigger_message_id: this.currentTriggerMessageId,
+							});
+						}
 					}
 					break;
 				}
 				case "agent_end":
+					// omp may emit a non-terminal agent_end when an async delivery resumes the
+					// session; settle only the true final end (pi's agent_settled equivalent).
+					if (event.isTerminal === false) break;
+					this.running = false;
+					this.typingLease.stop();
+					this.finishAssistantActivity(now);
+					// no flush re-trigger here: the flush loop owns pendingTrigger (REQ-AGENT-0001 R1)
 					break;
 				case "tool_execution_start":
 					this.recordEvent("tool_call", { tool: event.toolName, args: event.args });
@@ -636,13 +661,7 @@ export class BotRuntime {
 						trigger_message_id: this.currentTriggerMessageId,
 					});
 					break;
-				case "agent_settled":
-					this.running = false;
-					this.typingLease.stop();
-					this.finishAssistantActivity(now);
-					// no flush re-trigger here: the flush loop owns pendingTrigger (REQ-AGENT-0001 R1)
-					break;
-				case "compaction_end":
+				case "auto_compaction_end":
 					this.onCompactionEnd(event);
 					break;
 			}
@@ -751,14 +770,14 @@ export class BotRuntime {
 	}
 
 	/** Successful compaction rotates only provider visibility; the business cursor is monotonic. */
-	private onCompactionEnd(event: Extract<AgentSessionEvent, { type: "compaction_end" }>): void {
+	private onCompactionEnd(event: Extract<AgentSessionEvent, { type: "auto_compaction_end" }>): void {
 		if (event.aborted || !event.result) {
 			const category = classifyPiProviderFailure(event.errorMessage ?? "compaction failed");
-			this.recordEvent("error", { stage: "compaction", reason: event.reason, aborted: event.aborted, category });
+			this.recordEvent("error", { stage: "compaction", reason: event.action, aborted: event.aborted, category });
 			this.lastControlCompact = { at: Date.now(), outcome: "failed" };
 			log.error("agent_runtime", "compaction_failed", {
 				bot_id: this.bot.id,
-				reason: event.reason,
+				reason: event.action,
 				aborted: event.aborted,
 				category,
 			});
@@ -796,7 +815,7 @@ export class BotRuntime {
 		const gen = await this.generateCompactionSummary(prep);
 		if (!("summary" in gen)) {
 			// NOTE: the SDK swallows extension handler exceptions and would silently fall back
-			// to the default summarizer, so refusal goes through cancel -> compaction_end { aborted: true }.
+			// to the default summarizer, so refusal goes through cancel -> auto_compaction_end { aborted: true }.
 			this.recordEvent("error", { stage: "compaction", error: gen.failure });
 			return { cancel: true };
 		}
@@ -813,7 +832,6 @@ export class BotRuntime {
 				summary: gen.summary,
 				firstKeptEntryId: prep.firstKeptEntryId,
 				tokensBefore: prep.tokensBefore,
-				usage: gen.usage,
 				details: {
 					version: TELEGRAM_CONTEXT_VERSION,
 					consumedSeq: state.consumedSeq,
@@ -827,22 +845,20 @@ export class BotRuntime {
 	/** Chat-oriented compaction summary via the aux model. Failure names provider error/abort apart from empty text. */
 	private async generateCompactionSummary(
 		prep: SessionBeforeCompactEvent["preparation"],
-	): Promise<
-		{ summary: string; usage: Awaited<ReturnType<ModelRuntime["completeSimple"]>>["usage"] } | { failure: string }
-	> {
+	): Promise<{ summary: string; usage: Usage } | { failure: string }> {
 		const conversation = serializeCompactionMessages(prep.messagesToSummarize);
 		const userText =
 			`<conversation>\n${conversation}\n</conversation>\n\n` +
 			(prep.previousSummary
 				? `<previous-summary>\n${prep.previousSummary}\n</previous-summary>\n\n把上面的旧摘要与新内容合并成一份更新的摘要。`
 				: "请输出摘要。");
-		const result = await this.modelRuntime.completeSimple(
+		const result = await completeSimple(
 			this.compactionModel,
 			{
-				systemPrompt: COMPACTION_SUMMARY_PROMPT,
+				systemPrompt: [COMPACTION_SUMMARY_PROMPT],
 				messages: [{ role: "user", content: userText, timestamp: Date.now() }],
 			},
-			{ cacheRetention: "none", maxTokens: 4096, reasoning: this.compactionReasoning },
+			{ cacheRetention: "none", maxTokens: 4096, reasoning: EFFORT_BY_THINKING_LEVEL[this.compactionReasoning] },
 		);
 		this.recordCompactionUsage(result.usage, Date.now());
 		if (result.stopReason === "error" || result.stopReason === "aborted") {
@@ -1243,11 +1259,11 @@ export class BotRuntime {
 		}
 		const usage = this.session.getContextUsage();
 		const suffixBudget = availableSuffixBudget({
-			contextWindow: usage?.contextWindow ?? this.model.contextWindow,
+			contextWindow: usage?.contextWindow ?? this.model.contextWindow ?? EFFECTIVE_CONTEXT_WINDOW,
 			currentContextTokens: usage?.tokens ?? 0,
 			staticPrefixTokens: this.staticPrefixTokenEstimate,
 			maxSuffixTokens: this.bot.maxSuffixTokens,
-			outputReserve: Math.min(4096, this.model.maxTokens),
+			outputReserve: Math.min(4096, this.model.maxTokens ?? 4096),
 			reasoningReserve: this.bot.reasoningEffort === "off" ? 0 : 4096,
 			toolFollowupReserve: this.bot.tools.search || this.bot.tools.runJs ? 6144 : 2048,
 		});
@@ -1379,8 +1395,8 @@ export class BotRuntime {
 			epoch: this.epoch,
 			provider: this.model.provider,
 			model: this.model.id,
-			reasoningEffort: this.session?.thinkingLevel ?? this.bot.reasoningEffort,
-			contextWindow: this.model.contextWindow,
+			reasoningEffort: this.bot.reasoningEffort,
+			contextWindow: this.model.contextWindow ?? 0,
 			currentContextTokens: contextUsage?.tokens ?? null,
 			routingP: this.bot.routingP,
 			samplingCooldownMs: this.bot.samplingCooldownMs,
@@ -1516,20 +1532,10 @@ export class BotRuntime {
 		else this.eventSink?.(kind, payload);
 	}
 
-	private recordUsage(
-		usage: {
-			input: number;
-			output: number;
-			cacheRead: number;
-			cacheWrite: number;
-			reasoning?: number;
-			cost: { total: number };
-		},
-		now: number,
-	): void {
+	private recordUsage(usage: Usage, now: number): void {
 		this.providerCallsInRun++;
 		const contextTokens = usage.input + usage.cacheRead + usage.cacheWrite;
-		const reasoningTokens = usage.reasoning ?? 0;
+		const reasoningTokens = usage.reasoningTokens ?? 0;
 		const latencyMs = this.runStartTs ? now - this.runStartTs : null;
 		const observation = this.pendingPayloadObservations.shift();
 		const contextBreakdown = fitContextBreakdown(
@@ -1680,17 +1686,7 @@ export class BotRuntime {
 		this.usageSink?.(this.lastUsageRun);
 	}
 
-	private recordCompactionUsage(
-		usage: {
-			input: number;
-			output: number;
-			cacheRead: number;
-			cacheWrite: number;
-			reasoning?: number;
-			cost: { total: number };
-		},
-		now: number,
-	): void {
+	private recordCompactionUsage(usage: Usage, now: number): void {
 		if (!this.compactionModel) return;
 		const contextTokens = usage.input + usage.cacheRead + usage.cacheWrite;
 		const result = this.db
@@ -1711,7 +1707,7 @@ export class BotRuntime {
 				usage.cacheWrite,
 				usage.input,
 				usage.output,
-				usage.reasoning ?? 0,
+				usage.reasoningTokens ?? 0,
 				usage.cost.total,
 				sha256Short(COMPACTION_SUMMARY_PROMPT),
 				sha256Short("[]"),
@@ -1729,7 +1725,7 @@ export class BotRuntime {
 			cacheWrite: usage.cacheWrite,
 			cacheMiss: usage.input,
 			outputTokens: usage.output,
-			reasoningTokens: usage.reasoning ?? 0,
+			reasoningTokens: usage.reasoningTokens ?? 0,
 			latencyMs: null,
 			cost: usage.cost.total,
 			compaction: true,

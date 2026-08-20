@@ -1,24 +1,13 @@
-import {
-	createAgentSessionServices,
-	getAgentDir,
-	type ModelRuntime,
-	SettingsManager,
-} from "@earendil-works/pi-coding-agent";
-import {
-	clampThinkingLevel,
-	getSupportedThinkingLevels,
-	type Api,
-	type Model,
-	type ModelThinkingLevel,
-} from "@earendil-works/pi-ai";
+import { discoverAuthStorage, getAgentDir, ModelRegistry } from "@oh-my-pi/pi-coding-agent";
+import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
+import { getEnvApiKey, type Api, type Effort, type Model } from "@oh-my-pi/pi-ai";
+import type { TelegramThinkingLevel } from "./model-settings.ts";
 
+/** Narrow model/auth facade shared by config validation and runtime wiring. */
 export interface ConfigurableModelRuntime {
-	getModel(providerId: string, modelId: string): Model<Api> | undefined;
-	hasConfiguredAuth(providerId: string): boolean;
-	getProviderAuthStatus?(providerId: string): {
-		configured: boolean;
-		source?: string;
-	};
+	find(providerId: string, modelId: string): Model<Api> | undefined;
+	hasConfiguredAuth(model: Model<Api>): boolean;
+	getAvailable(): readonly Model<Api>[];
 }
 
 export type PiModelConfigurationCategory =
@@ -31,16 +20,16 @@ export type PiModelConfigurationCategory =
 export interface PiModelSelection {
 	provider: string;
 	model: string;
-	thinkingLevel?: ModelThinkingLevel;
+	thinkingLevel?: TelegramThinkingLevel;
 	purpose?: string;
 }
 
 export interface ModelReasoningCapabilities {
 	provider: string;
 	model: string;
-	requested: ModelThinkingLevel;
-	effective: ModelThinkingLevel;
-	supported: ModelThinkingLevel[];
+	requested: TelegramThinkingLevel;
+	effective: TelegramThinkingLevel;
+	supported: TelegramThinkingLevel[];
 	valid: boolean;
 }
 
@@ -55,17 +44,20 @@ export class PiModelConfigurationError extends Error {
 	) {
 		const target = `${provider}/${model}${purpose ? ` (${purpose})` : ""}`;
 		const base = reasoning
-			? `Pi model configuration invalid (${category}): ${target} requested ${reasoning.requested}; supported: ${reasoning.supported.join(", ")}. Use Pi /model, then restart.`
-			: `Pi model unavailable (${category}): ${target}. Use Pi /login and /model, then restart.`;
+			? `OMP model configuration invalid (${category}): ${target} requested ${reasoning.requested}; supported: ${reasoning.supported.join(", ") || "off"}. Use OMP /model, then restart.`
+			: `OMP model unavailable (${category}): ${target}. Use OMP /login and /model, then restart.`;
 		super(detail ? `${base} Cause: ${detail}` : base);
 		this.name = "PiModelConfigurationError";
 	}
 }
 
-/** Read Pi's model-specific reasoning contract without sending a provider request. */
-export function inspectModelReasoning(model: Model<Api>, requested: ModelThinkingLevel): ModelReasoningCapabilities {
-	const supported = getSupportedThinkingLevels(model);
-	const effective = clampThinkingLevel(model, requested);
+/** Read omp's model-specific reasoning contract without sending a provider request. */
+export function inspectModelReasoning(model: Model<Api>, requested: TelegramThinkingLevel): ModelReasoningCapabilities {
+	// omp's Effort is a const enum over exactly the config's string levels; only the
+	// nominal type differs, so the boundary cast is value-identical.
+	const supported = ["off", ...getSupportedEfforts(model)] as unknown as TelegramThinkingLevel[];
+	const effective =
+		requested === "off" ? ("off" as const) : (clampThinkingLevelForModel(model, requested as Effort) ?? "off");
 	return {
 		provider: model.provider,
 		model: model.id,
@@ -76,12 +68,12 @@ export function inspectModelReasoning(model: Model<Api>, requested: ModelThinkin
 	};
 }
 
-/** Select a Pi-owned model/auth pair without reading or injecting credential material. */
+/** Select an omp-owned model/auth pair without reading or injecting credential material. */
 export async function configureBotModelRuntime<T extends ConfigurableModelRuntime>(
 	bot: PiModelSelection,
 	runtime: T,
 ): Promise<T> {
-	const model = runtime.getModel(bot.provider, bot.model);
+	const model = runtime.find(bot.provider, bot.model);
 	if (!model) {
 		throw new PiModelConfigurationError("unknown_model", bot.provider, bot.model, undefined, bot.purpose);
 	}
@@ -97,51 +89,44 @@ export async function configureBotModelRuntime<T extends ConfigurableModelRuntim
 			);
 		}
 	}
-	if (!runtime.hasConfiguredAuth(bot.provider)) {
+	if (!runtime.hasConfiguredAuth(model)) {
 		throw new PiModelConfigurationError("unauthenticated_provider", bot.provider, bot.model, undefined, bot.purpose);
 	}
 	return runtime;
 }
 
 /**
- * Build the daemon's shared model runtime through Pi's resource loader so user-installed
- * provider extensions participate in the same catalog/auth/cost contract as interactive Pi.
- * Project extensions stay excluded: bot sessions own a fixed cache-visible extension set.
+ * Build the daemon's shared model registry through omp's native auth storage so
+ * user-installed provider plugins participate in the same catalog/auth/cost contract
+ * as interactive omp. Project extensions stay excluded: bot sessions own a fixed
+ * cache-visible extension set.
  */
 export async function createInstalledPiModelRuntime(
-	options: { cwd?: string; agentDir?: string } = {},
-): Promise<ModelRuntime> {
-	const cwd = options.cwd ?? process.cwd();
+	options: { agentDir?: string; refreshStrategy?: "online" | "offline" | "online-if-uncached" } = {},
+): Promise<ModelRegistry> {
 	const agentDir = options.agentDir ?? getAgentDir();
-	const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
-	const services = await createAgentSessionServices({
-		cwd,
-		agentDir,
-		settingsManager,
-		resourceLoaderOptions: {
-			noSkills: true,
-			noPromptTemplates: true,
-			noThemes: true,
-			noContextFiles: true,
-		},
-	});
-	return services.modelRuntime;
+	const authStorage = await discoverAuthStorage(agentDir);
+	const modelRegistry = new ModelRegistry(authStorage);
+	await modelRegistry.refresh(options.refreshStrategy ?? "online-if-uncached");
+	return modelRegistry;
 }
 
-/** Create exactly one Pi-owned runtime and preflight every configured bot before Telegram starts. */
+/** Create exactly one omp-owned registry and preflight every configured bot before Telegram starts. */
 export async function createSharedModelRuntime(
 	bots: readonly PiModelSelection[],
-	create: () => Promise<ModelRuntime> = () => createInstalledPiModelRuntime(),
-): Promise<ModelRuntime> {
-	let runtime: ModelRuntime;
+	create: () => Promise<ModelRegistry> = () => createInstalledPiModelRuntime(),
+): Promise<ModelRegistry> {
+	let runtime: ModelRegistry;
 	try {
 		runtime = await create();
-		const registered = new Set(runtime.getRegisteredProviderIds());
+		const registered = new Set(runtime.getAvailable().map((model) => model.provider));
 		const selectedExtensionProviders = [...new Set(bots.map((bot) => bot.provider))].filter((provider) =>
 			registered.has(provider),
 		);
 		if (selectedExtensionProviders.length > 0) {
-			await runtime.refresh({ allowNetwork: true, providers: selectedExtensionProviders });
+			await Promise.all(
+				selectedExtensionProviders.map((provider) => runtime.refreshProvider(provider, "online-if-uncached")),
+			);
 		}
 	} catch (error) {
 		// Untrusted provider/extension failure text: attach only a bounded single-line message, never a stack.
@@ -161,10 +146,11 @@ export async function createSharedModelRuntime(
 
 export type PiAuthSource = "stored" | "environment" | "configured";
 
-/** Return only Pi's fixed non-sensitive auth source category. */
+/** Return only omp's fixed non-sensitive auth source category. */
 export function piAuthSource(runtime: ConfigurableModelRuntime, provider: string): PiAuthSource {
-	const status = runtime.getProviderAuthStatus?.(provider);
-	if (status?.configured && (status.source === "stored" || status.source === "environment")) return status.source;
+	if (getEnvApiKey(provider)) return "environment";
+	const model = runtime.getAvailable().find((candidate) => candidate.provider === provider);
+	if (model && runtime.hasConfiguredAuth(model)) return "stored";
 	return "configured";
 }
 

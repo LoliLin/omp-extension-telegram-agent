@@ -1,13 +1,16 @@
 // SQLite access layer (bun:sqlite). See docs/data-model.md.
 
 import { Database } from "bun:sqlite";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const SCHEMA_PATH = join(import.meta.dir, "schema.sql");
 
 export function openDb(dbPath: string): Database {
-	mkdirSync(dirname(dbPath), { recursive: true });
+	// Bun's mkdirSync throws EEXIST even with recursive:true when the target already
+	// exists (notably "." for :memory:), so skip existing/empty parents explicitly.
+	const dir = dirname(dbPath);
+	if (dir !== "." && !existsSync(dir)) mkdirSync(dir, { recursive: true });
 	const db = new Database(dbPath, { create: true });
 	db.exec("PRAGMA journal_mode = WAL;");
 	db.exec("PRAGMA foreign_keys = ON;");

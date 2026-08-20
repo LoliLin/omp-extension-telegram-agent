@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { TelegramThinkingLevel } from "../agent/model-settings.ts";
 import { ConfigError } from "../config.ts";
 import {
 	createSharedModelRuntime,
@@ -52,7 +52,7 @@ export interface ConfigWizardDependencies {
 export interface PiModelSelection {
 	provider: string;
 	model: string;
-	thinkingLevel: ThinkingLevel;
+	thinkingLevel: TelegramThinkingLevel;
 }
 
 export type PiModelPreflight = (rootDir: string) => Promise<PiModelSelection>;

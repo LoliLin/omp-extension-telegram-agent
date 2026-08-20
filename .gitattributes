@@ -1,0 +1,4 @@
+# Normalize line endings: the repo stores LF. Persona templates are read as
+# exact bytes by golden tests, so force LF on checkout regardless of autocrlf.
+* text=auto
+personas/*.md text eol=lf

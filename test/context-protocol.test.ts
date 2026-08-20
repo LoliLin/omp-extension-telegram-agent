@@ -1,7 +1,7 @@
 // Pure Pi extension and cache-identity contracts from review-260808.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
@@ -20,9 +20,11 @@ import {
 	TELEGRAM_EXTENSION_ORDER,
 	applyAssistantPersistencePolicy,
 	estimateCacheReadFromPrefix,
+	hasUnpublishedAssistantText,
 	observeProviderPayload,
 	projectTelegramContext,
 } from "../src/agent/extensions/index.ts";
+import { EFFORT_BY_THINKING_LEVEL } from "../src/agent/model-ref.ts";
 
 function fingerprintInput(): ContextFingerprintInput {
 	return {
@@ -49,73 +51,53 @@ function fingerprintInput(): ContextFingerprintInput {
 }
 
 describe("Pi context protocol", () => {
-	test("loads user-installed provider extensions into the daemon model runtime", async () => {
-		const root = mkdtempSync(join(tmpdir(), "tg-provider-extension-"));
+	test("builds the daemon model registry over omp's auth storage", async () => {
+		// The registry keeps the agent-dir SQLite handle open, so the temp dir is left
+		// for the OS to reclaim (rmSync fails with EBUSY on Windows).
+		const root = mkdtempSync(join(tmpdir(), "tg-model-runtime-"));
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "workspace");
 		mkdirSync(agentDir, { recursive: true });
 		mkdirSync(cwd, { recursive: true });
-		const extensionPath = join(root, "provider.ts");
-		writeFileSync(
-			extensionPath,
-			`export default function (pi) {
-	pi.registerProvider("fixture-provider", {
-		name: "Fixture Provider",
-		baseUrl: "http://127.0.0.1:1/v1",
-		api: "openai-completions",
-		apiKey: "fixture-key",
-		models: [{
-			id: "fixture-model",
-			name: "Fixture Model",
-			reasoning: false,
-			input: ["text"],
-			contextWindow: 4096,
-			maxTokens: 1024,
-			cost: { input: 1.25, output: 2.5, cacheRead: 0.25, cacheWrite: 0 }
-		}]
-	});
-}\n`,
-		);
-		writeFileSync(join(agentDir, "settings.json"), `${JSON.stringify({ extensions: [extensionPath] })}\n`);
-
-		try {
-			const runtime = await createInstalledPiModelRuntime({ cwd, agentDir });
-			const model = runtime.getModel("fixture-provider", "fixture-model");
-			expect(model?.cost).toEqual({ input: 1.25, output: 2.5, cacheRead: 0.25, cacheWrite: 0 });
-			expect(runtime.hasConfiguredAuth("fixture-provider")).toBe(true);
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
+		const runtime = await createInstalledPiModelRuntime({ agentDir, refreshStrategy: "offline" });
+		expect(runtime.getAvailable().length).toBeGreaterThan(0);
+		const first = runtime.getAvailable()[0]!;
+		expect(runtime.find(first.provider, first.id)).toBe(first);
+		expect(typeof runtime.hasConfiguredAuth(first)).toBe("boolean");
 	});
 
-	test("rejects a model-specific reasoning level that Pi would silently clamp", async () => {
+	test("rejects a model-specific reasoning level that omp would silently clamp", async () => {
 		// Fixture model keeps this test hermetic: reasoning capabilities must not depend on the
-		// ambient Pi catalog in ~/.pi, which is absent on CI runners. supported levels are a pure
-		// function of reasoning + thinkingLevelMap (pi-ai getSupportedThinkingLevels).
-		const model: Model<"openai-completions"> = {
+		// ambient omp catalog. Supported efforts are a pure function of reasoning + thinking.
+		// compat is a large resolved record the fixture never feeds; only reasoning/thinking are read.
+		const model = {
 			id: "fixture-reasoning-model",
 			name: "Fixture Reasoning Model",
 			api: "openai-completions",
 			provider: "fixture",
 			baseUrl: "http://127.0.0.1:1/v1",
 			reasoning: true,
-			thinkingLevelMap: { minimal: null, medium: null, max: "max" },
+			thinking: {
+				mode: "effort",
+				efforts: [EFFORT_BY_THINKING_LEVEL.low, EFFORT_BY_THINKING_LEVEL.high, EFFORT_BY_THINKING_LEVEL.max],
+			},
 			input: ["text"],
 			cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
 			contextWindow: 4096,
 			maxTokens: 1024,
-		};
+		} as unknown as Model;
 		const runtime = {
-			getModel: (provider: string, modelId: string) =>
+			find: (provider: string, modelId: string) =>
 				provider === "fixture" && modelId === "fixture-reasoning-model" ? model : undefined,
 			hasConfiguredAuth: () => true,
+			getAvailable: () => [model],
 		};
 
 		expect(inspectModelReasoning(model, "medium")).toEqual({
 			provider: "fixture",
 			model: "fixture-reasoning-model",
 			requested: "medium",
-			effective: "high",
+			effective: "low",
 			supported: ["off", "low", "high", "max"],
 			valid: false,
 		});
@@ -132,7 +114,7 @@ describe("Pi context protocol", () => {
 		).rejects.toMatchObject({
 			category: "unsupported_reasoning_effort",
 			purpose: "bot:A",
-			reasoning: { requested: "medium", effective: "high", supported: ["off", "low", "high", "max"] },
+			reasoning: { requested: "medium", effective: "low", supported: ["off", "low", "high", "max"] },
 		});
 		expect(
 			await configureBotModelRuntime(
@@ -332,29 +314,16 @@ describe("Pi context protocol", () => {
 	});
 
 	test("unpublished assistant prose is absent from the next context", () => {
-		let unpublished = "";
-		let displayed: unknown = null;
-		const result = applyAssistantPersistencePolicy(
-			{
-				role: "assistant",
-				content: [
-					{ type: "thinking", thinking: "real chain of thought" },
-					{ type: "text", text: "private draft that was never sent" },
-				],
-			} as never,
-			(text) => {
-				unpublished = text;
-			},
-			(message) => {
-				displayed = message.content;
-			},
-		);
+		const message = {
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "real chain of thought" },
+				{ type: "text", text: "private draft that was never sent" },
+			],
+		} as never;
 
-		expect(unpublished).toBe("private draft that was never sent");
-		expect(displayed).toEqual([
-			{ type: "thinking", thinking: "real chain of thought" },
-			{ type: "text", text: "private draft that was never sent" },
-		]);
+		expect(hasUnpublishedAssistantText(message)).toBe(true);
+		const result = applyAssistantPersistencePolicy(message);
 		expect((result as { content: unknown }).content).toEqual([{ type: "text", text: NO_SEND_MARKER }]);
 		expect(JSON.stringify(result)).not.toContain("private draft");
 	});

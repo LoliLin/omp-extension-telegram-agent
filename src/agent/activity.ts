@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type {
 	AgentActivity,
 	AgentActivityAssistantSection,
@@ -8,6 +8,14 @@ import type {
 
 export const AGENT_ACTIVITY_MAX_SECTIONS = 64;
 export const AGENT_ACTIVITY_MAX_CHARS = 512 * 1024;
+
+/** Plain text projection of an assistant message's text blocks (pi-ai `contentText` equivalent). */
+export function contentText(content: Extract<AgentMessage, { role: "assistant" }>["content"]): string {
+	return content
+		.filter((block): block is Extract<typeof block, { type: "text" }> => block.type === "text")
+		.map((block) => block.text)
+		.join("");
+}
 
 function take(value: string, limit: number): { value: string; complete: boolean } {
 	if (value.length <= limit) return { value, complete: true };

@@ -35,12 +35,12 @@ import {
 } from "../src/agent/extensions/index.ts";
 
 const GOLDEN = {
-	schemaVersion: 13,
+	schemaVersion: 14,
 	systemZhTemplate: "0dadcaf37061",
 	systemEnTemplate: "fabd0ba82eab",
 	serialize: "68a17d6e5c05",
 	eventSerialize: "4a57de738bf9",
-	tools: "b16b54cf6564",
+	tools: "f608664acecd",
 	compactionPrompt: "045a5241fdd7",
 	extensionOrder: "e04f7032d531",
 	contextProtocol: "c810cd1e5ab3",

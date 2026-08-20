@@ -3,8 +3,8 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { createInstalledPiModelRuntime } from "../src/agent/model-runtime.ts";
+import type { TelegramThinkingLevel } from "../src/agent/model-settings.ts";
 import { loadDebugDeploymentIdentity } from "../src/config.ts";
 import { readPid, pidAlive } from "../src/daemon/pid.ts";
 import { buildDebugReport, parseDebugDuration, type DebugModelReasoning } from "../src/observability/debug-report.ts";
@@ -65,7 +65,7 @@ export async function main(args = process.argv.slice(2), rootDir = process.cwd()
 		}
 		let modelReasoning: DebugModelReasoning[] | undefined;
 		try {
-			const runtime = await ModelRuntime.create();
+			const runtime = await createInstalledPiModelRuntime();
 			const selections = [
 				...config.bots.flatMap((bot) => {
 					if (!bot.provider || !bot.model) return [];
@@ -76,14 +76,14 @@ export async function main(args = process.argv.slice(2), rootDir = process.cwd()
 							scope: "main" as const,
 							provider: bot.provider,
 							model: bot.model,
-							requested: (bot.reasoningEffort ?? "off") as ModelThinkingLevel,
+							requested: (bot.reasoningEffort ?? "off") as TelegramThinkingLevel,
 						},
 						{
 							bot_id: bot.id,
 							scope: "compaction" as const,
 							provider: compact.provider,
 							model: compact.model,
-							requested: compact.thinkingLevel as ModelThinkingLevel,
+							requested: compact.thinkingLevel as TelegramThinkingLevel,
 						},
 					];
 				}),
@@ -96,14 +96,14 @@ export async function main(args = process.argv.slice(2), rootDir = process.cwd()
 									scope: "vision" as const,
 									provider: vision.provider,
 									model: vision.model,
-									requested: vision.thinkingLevel as ModelThinkingLevel,
+									requested: vision.thinkingLevel as TelegramThinkingLevel,
 								},
 							];
 						})()
 					: []),
 			];
 			modelReasoning = selections.flatMap((selection) => {
-				const model = runtime.getModel(selection.provider, selection.model);
+				const model = runtime.find(selection.provider, selection.model);
 				if (!model) return [];
 				const capability = inspectModelReasoning(model, selection.requested);
 				return [{ ...selection, ...capability }];
@@ -123,22 +123,24 @@ export async function main(args = process.argv.slice(2), rootDir = process.cwd()
 			videoTranscoder: { required: config.visionEnabled, ...inspectVideoTranscoder() },
 		});
 		const providerContexts = Object.fromEntries(
-			botIds.map((id) => {
-				try {
-					return [
-						id,
-						inspectProviderContext(
-							db!,
-							config,
+			await Promise.all(
+				botIds.map(async (id) => {
+					try {
+						return [
 							id,
-							showProviderContent,
-							modelReasoning?.find((entry) => entry.bot_id === id && entry.scope === "main"),
-						),
-					];
-				} catch {
-					return [id, { unavailable: true }];
-				}
-			}),
+							await inspectProviderContext(
+								db!,
+								config,
+								id,
+								showProviderContent,
+								modelReasoning?.find((entry) => entry.bot_id === id && entry.scope === "main"),
+							),
+						];
+					} catch {
+						return [id, { unavailable: true }];
+					}
+				}),
+			),
 		);
 		process.stdout.write(`${JSON.stringify({ ...report, provider_contexts: providerContexts }, null, 2)}\n`);
 		return 0;

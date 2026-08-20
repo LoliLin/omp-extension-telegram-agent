@@ -14,8 +14,12 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { join, resolve, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { createJiti } from "jiti";
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { isPiThinkingLevel, loadPiModelDefaults, type PiModelDefaults } from "./agent/model-settings.ts";
+import {
+	isPiThinkingLevel,
+	loadPiModelDefaults,
+	type PiModelDefaults,
+	type TelegramThinkingLevel,
+} from "./agent/model-settings.ts";
 import { canonicalPiModelReference, DEFAULT_AUXILIARY_VISUAL_MODEL } from "./agent/model-ref.ts";
 
 // Effective main-model context window passed to Pi, and the minimum reserve Pi keeps for the
@@ -56,7 +60,7 @@ export interface TelegramBotConfigInput {
 	sampling_cooldown_ms?: number;
 	provider?: string;
 	model?: string;
-	reasoning_effort?: ThinkingLevel;
+	reasoning_effort?: TelegramThinkingLevel;
 	compaction_threshold?: number;
 	compaction_keep_recent?: number;
 	/** Cheap task model used only for compaction: provider/model:effort. */
@@ -78,7 +82,7 @@ export interface TelegramConfigInput {
 	auxiliary_visual_model?: string;
 	provider?: string;
 	model?: string;
-	reasoning_effort?: ThinkingLevel;
+	reasoning_effort?: TelegramThinkingLevel;
 	compaction_threshold?: number;
 	compaction_keep_recent?: number;
 	compaction_model?: string;
@@ -126,7 +130,7 @@ export interface BotConfig {
 	samplingCooldownMs: number; // probability-only cooldown after a completed run (REQ-ROUTE-0001)
 	provider: string;
 	model: string;
-	reasoningEffort: ThinkingLevel;
+	reasoningEffort: TelegramThinkingLevel;
 	compactionThreshold: number;
 	compactionKeepRecent: number;
 	compactionModel: string;

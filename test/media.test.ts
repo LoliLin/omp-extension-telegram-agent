@@ -47,8 +47,8 @@ const temporaryDirectories = new Set<string>();
 const logLines: string[] = [];
 let restoreLogSink: (() => void) | null = null;
 
-beforeAll(() => {
-	initTheme("dark");
+beforeAll(async () => {
+	await initTheme(false);
 	restoreLogSink = setLogSink((line) => logLines.push(line));
 });
 
@@ -57,9 +57,16 @@ afterAll(() => {
 });
 
 afterEach(() => {
-	Tui.resetCapabilitiesCache();
+	Tui.setTerminalImageProtocol(null);
 	logLines.length = 0;
-	for (const directory of temporaryDirectories) rmSync(directory, { recursive: true, force: true });
+	for (const directory of temporaryDirectories) {
+		try {
+			rmSync(directory, { recursive: true, force: true });
+		} catch {
+			// Windows may hold a transient handle on a just-closed SQLite file;
+			// the OS temp dir reclaims the leftovers.
+		}
+	}
 	temporaryDirectories.clear();
 });
 
@@ -692,19 +699,20 @@ describe("video frame sampling", () => {
 		let calls = 0;
 		let captured: unknown = null;
 		const runtime = {
-			getModel: () => ({ input: ["text", "image"] }),
-			completeSimple: async (_model: unknown, context: unknown) => {
+			find: () => ({ input: ["text", "image"] }),
+		};
+		const executor = createPiVisionExecutor(runtime as never, "test/vision:low", {
+			complete: async (_model, context) => {
 				calls++;
 				captured = context;
 				return {
 					role: "assistant",
 					content: [{ type: "text", text: "video description" }],
 					stopReason: "stop",
-					usage: { input: 3, output: 2, reasoning: 0, cost: { total: 0 } },
-				};
+					usage: { input: 3, output: 2, reasoningTokens: 0, cost: { total: 0 } },
+				} as never;
 			},
-		};
-		const executor = createPiVisionExecutor(runtime as never, "test/vision:low");
+		});
 		const result = await executor.describe({
 			kind: "video",
 			sourceBytes: 100,
@@ -897,6 +905,7 @@ describe("Pi attach media presentation", () => {
 			fg: (_color: string, value: string) => value,
 			bg: (_color: string, value: string) => value,
 			bold: (value: string) => value,
+			getColorMode: () => "256color" as const,
 		} as Theme;
 		const longText = `normal-output-start ${"x".repeat(700)} normal-output-end`;
 		const activity: AgentActivity = {
@@ -930,7 +939,7 @@ describe("Pi attach media presentation", () => {
 		expect(rendered).toContain("normal-output-start");
 		expect(rendered).toContain("normal-output-end");
 		expect(rendered).toContain("send");
-		expect(rendered).toContain('"message": "hello"');
+		expect(rendered).toContain('message="hello"');
 		expect(rendered).toContain("markdown sent");
 		expect(rendered).toContain("bot A · Activity");
 	});
@@ -940,6 +949,7 @@ describe("Pi attach media presentation", () => {
 			fg: (_color: string, value: string) => value,
 			bg: (_color: string, value: string) => value,
 			bold: (value: string) => value,
+			getColorMode: () => "256color" as const,
 		} as Theme;
 		const human = itemComponent(
 			message({ senderName: "Alice Example", username: "alice", mediaKind: null, text: "hello" }),

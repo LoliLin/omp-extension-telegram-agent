@@ -2,10 +2,10 @@
 
 ## Open the feed
 
-The daemon stays online independently. Open or close Pi whenever needed:
+The daemon stays online independently. Open or close omp whenever needed:
 
 ```bash
-bun run pi
+omp (install via `omp install <repo>`, then use `/tg` directly)
 ```
 
 Successful first setup attaches the global feed automatically. Later, choose the scope explicitly:
@@ -17,13 +17,13 @@ Successful first setup attaches the global feed automatically. Later, choose the
 /tg detach             # Disconnect live IPC but retain the transcript
 ```
 
-The Telegram feed is one TUI-only Pi custom entry. Pi owns scrolling, resizing, selection, themes, and image layout. One line above the editor groups the feed scope, connection state, and compose guidance. While attached, the extension uses Pi's official footer API for the path and Telegram usage/model rows, while hiding the unrelated operator-usage row. Displaying messages does not put them into the current Pi agent's provider context.
+The Telegram feed is one TUI-only omp custom entry. omp owns scrolling, resizing, selection, themes, and image layout. One line above the editor groups the feed scope, connection state, and compose guidance. While attached, the extension uses Pi's official footer API for the path and Telegram usage/model rows, while hiding the unrelated operator-usage row. Displaying messages does not put them into the current omp agent's provider context.
 
 Use Tab or Pi's selection menu after `/tg `. Bot arguments come from the currently validated config.
 
 ## Send directly
 
-After attach, the Pi editor sends to Telegram by default. A filtered feed uses that bot directly. A global feed opens Pi's native selector for every submission when several bots exist, and bypasses it when only one exists.
+After attach, the omp editor sends to Telegram by default. A filtered feed uses that bot directly. A global feed opens Pi's native selector for every submission when several bots exist, and bypasses it when only one exists.
 
 ```text
 /tg attach friend       # Send directly as friend
@@ -51,7 +51,7 @@ This boundary prevents a remote success plus local acknowledgement failure from 
 /tg status friend      # Lifetime + latest details
 ```
 
-Pi `/tg status` and Telegram `/status` share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md): lifetime covers retained SQLite `llm_runs`, including compaction calls, while detailed status takes live `used/window/percent` from the corresponding Pi session rather than the latest run or a historical prompt sum. The attached footer keeps its previous latest-run semantics and Pi-native path and usage/model rows, while compose guidance stays in the feed header; `/tg detach` restores Pi's default footer.
+omp `/tg status` and Telegram `/status` share the [unified telemetry semantics](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/telemetry.md): lifetime covers retained SQLite `llm_runs`, including compaction calls, while detailed status takes live `used/window/percent` from the corresponding omp session rather than the latest run or a historical prompt sum. The attached footer keeps its previous latest-run semantics and Pi-native path and usage/model rows, while compose guidance stays in the feed header; `/tg detach` restores Pi's default footer.
 
 ## Local events, streams, and media
 
@@ -59,7 +59,7 @@ Pi `/tg status` and Telegram `/status` share the [unified telemetry semantics](h
 - Local assistant text when a bot does not call `send` remains feed-only and never reaches the group.
 - Vision is off by default. When explicitly enabled, photo, sticker, and video vision runs lazily only when a real bot turn needs media context. A video contributes at most three fixed representative frames, all interpreted in one vision call. Opening the UI never adds a provider call.
 - A vision description belongs to the shared group message, so global and every one-bot feed render it directly below the media. A one-bot filter limits only LOCAL events and usage.
-- User- and bot-sent static photos/stickers share the local display path. Videos, animations, video notes, video documents, and video stickers retain a media placeholder and can receive a vision description. Inline visibility still follows Pi terminal capabilities; text, media labels, and vision descriptions remain readable fallbacks.
+- User- and bot-sent static photos/stickers share the local display path. Videos, animations, video notes, video documents, and video stickers retain a media placeholder and can receive a vision description. Inline visibility still follows omp terminal capabilities; text, media labels, and vision descriptions remain readable fallbacks.
 
 ## Web search and link reading
 

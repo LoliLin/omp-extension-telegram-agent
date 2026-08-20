@@ -2,19 +2,17 @@
 
 This project runs 1..N AI bots, each with its own persona, inside one Telegram supergroup. It is designed to be fast (a resident daemon routes messages directly), context-optimized (the provider prefix cache means repeated context is not billed again), and simple (one configuration track, no intermediate concepts) — low cost is the result of those three.
 
-There is exactly one configuration track: `telegram.config.ts` for non-secret settings, `.env` for secrets such as tokens, and Pi for model authentication. The wizard below writes these files for you in its final step.
+There is exactly one configuration track: `telegram.config.ts` for non-secret settings, `.env` for secrets such as tokens, and omp for model authentication. The wizard below writes these files for you in its final step.
 
 ## 1. Prepare the local environment
 
 Install Bun, clone the repository, and enter the project directory:
 
 ```bash
-git clone <repository-url> pi-extension-telegram-agent
-cd pi-extension-telegram-agent
-bun run pi
+omp install <repository-url>
 ```
 
-`bun run pi` performs a frozen-lockfile install only when the project Pi CLI is missing, then starts the locked Pi 0.84.1. It does not read a sibling `../pi` checkout. Run `bun install --frozen-lockfile` when you need an explicit installation step.
+The extension loads with omp automatically (for local development, `omp plugin link <repo-path>`). Run `bun install` in the checkout when you want the test/typecheck toolchain locally.
 
 ## 2. Prepare Telegram
 
@@ -27,18 +25,18 @@ For every bot:
 
 Never paste a token into the group, an issue, logs, or Git. Give every bot a distinct token environment-key name.
 
-## 3. Prepare the Pi model
+## 3. Prepare the omp model
 
-In the project Pi session:
+In the omp session:
 
 1. Run `/login` and complete Pi's native provider authentication.
 2. Run `/model` and select the default provider and chat model. The Telegram runtime uses reasoning `off` unless `telegram.config.ts` explicitly overrides it, even if the interactive Pi session uses another thinking level.
 
-The Telegram project reads Pi's merged global/project model settings and Pi auth store. It does not copy model credentials into this repository. First setup uses `tools.search: false`, so a TinyFish key is not required.
+The Telegram project reads omp's merged model settings and auth store (`~/.omp/agent`). It does not copy model credentials into this repository. First setup uses `tools.search: false`, so a TinyFish key is not required.
 
 ## 4. Run `/tg config`
 
-`/tg config` remains available in Pi help and completion when configuration is missing or invalid. The daemon does not need to be running.
+`/tg config` remains available in omp help and completion when configuration is missing or invalid. The daemon does not need to be running.
 
 Before opening input dialogs, the wizard locally preflights the displayed `provider/model:thinking` against Pi's catalog and authentication. It makes no model request. The wizard then asks for:
 

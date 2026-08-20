@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
 	AssistantMessageComponent,
-	convertToPng,
 	ToolExecutionComponent,
 	VERSION,
 	type ExtensionAPI,
@@ -12,6 +12,7 @@ import {
 	type Theme,
 	type ThemeColor,
 } from "@earendil-works/pi-coding-agent";
+import { convertImageToPng } from "@oh-my-pi/pi-coding-agent/utils/image-loading";
 import * as Tui from "@earendil-works/pi-tui";
 import { loadConfig, type BotConfig } from "../../src/config.ts";
 import { redactDaemonLog } from "../../src/daemon/control.ts";
@@ -81,7 +82,6 @@ type StatusBot = Pick<
 type StatusHost = {
 	modelRegistry: { getAvailable(): readonly StatusModel[] };
 	model: StatusModel | undefined;
-	thinkingLevel?: ExtensionContext["thinkingLevel"];
 };
 
 type MediaReadyListener = (filename: string) => void;
@@ -112,13 +112,7 @@ export class NativeMediaCache {
 		const source = readMediaImage(message);
 		if (!source) return null;
 		if (source.mime === "image/png") return source;
-		let protocol: Tui.ImageProtocol;
-		try {
-			protocol = Tui.getCapabilities().images;
-		} catch {
-			return null;
-		}
-		if (protocol !== "kitty") return source;
+		if (Tui.TERMINAL.imageProtocol !== Tui.ImageProtocol.Kitty) return source;
 
 		const cached = this.touch(source.revision);
 		if (cached) return cached.kind === "ready" ? cached.image : null;
@@ -147,7 +141,7 @@ export class NativeMediaCache {
 	private async prepare(source: MediaImage, entry: PendingMediaConversion): Promise<void> {
 		let shouldNotify = false;
 		try {
-			const converted = await convertToPng(source.base64, source.mime);
+			const converted = await convertImageToPng({ type: "image", data: source.base64, mimeType: source.mime });
 			if (mediaFileRevision(source.filename) !== source.revision) {
 				shouldNotify = true;
 				return;
@@ -178,9 +172,7 @@ export class NativeMediaCache {
 		}
 	}
 
-	private isValidPng(
-		value: { data: string; mimeType: string } | null,
-	): value is { data: string; mimeType: "image/png" } {
+	private isValidPng(value: { data: string; mimeType: string }): value is { data: string; mimeType: "image/png" } {
 		if (
 			!value ||
 			value.mimeType !== "image/png" ||
@@ -442,7 +434,7 @@ export function telegramFeedHeaderLine(
 	const text =
 		`${theme.bold(theme.fg("accent", "Telegram"))}${theme.fg("dim", ` · ${sanitize(scope)} · `)}` +
 		`${theme.fg("success", "attached")}${indicator}${theme.fg("dim", " · /tg more · /tg detach")}`;
-	return Tui.truncateToWidth(` ${text}`, width, theme.fg("dim", "..."));
+	return Tui.truncateToWidth(` ${text}`, width, Tui.Ellipsis.Ascii);
 }
 
 function fmtClock(ts: number): string {
@@ -475,7 +467,14 @@ function resolveStatusModel(
 	const configured = host.modelRegistry
 		.getAvailable()
 		.find((model) => model.provider === provider && model.id === modelId);
-	if (configured) return configured;
+	if (configured) {
+		return {
+			id: configured.id,
+			provider: configured.provider,
+			contextWindow: configured.contextWindow ?? 0,
+			reasoning: configured.reasoning,
+		};
+	}
 	const activeModel = host.model;
 	if (activeModel && activeModel.provider === provider && activeModel.id === modelId) return activeModel;
 	return {
@@ -499,7 +498,7 @@ export function statsText(
 		name: botId,
 		provider: status?.provider ?? model?.provider ?? "unknown",
 		model: status?.model ?? model?.id ?? "unknown",
-		reasoningEffort: status?.reasoningEffort ?? host.thinkingLevel ?? "off",
+		reasoningEffort: status?.reasoningEffort ?? "off",
 		routingP: status?.routingP ?? 0,
 		samplingCooldownMs: status?.samplingCooldownMs ?? 0,
 	};
@@ -618,6 +617,17 @@ export interface TelegramFooterView {
 	statuses: ReadonlyMap<string, string>;
 }
 
+/** Read the current branch without spawning git; null outside a work tree. */
+function gitBranch(cwd: string): string | null {
+	try {
+		const head = readFileSync(join(cwd, ".git", "HEAD"), "utf8").trim();
+		if (head.startsWith("ref: refs/heads/")) return head.slice("ref: refs/heads/".length);
+		return head.slice(0, 8);
+	} catch {
+		return null;
+	}
+}
+
 function footerCwd(cwd: string, home: string | undefined): string {
 	if (!home) return cwd;
 	const relativeToHome = relative(resolve(home), resolve(cwd));
@@ -640,7 +650,7 @@ export function telegramFooterLines(width: number, theme: Pick<Theme, "fg">, vie
 	let path = footerCwd(view.cwd, view.home);
 	if (view.branch) path += ` (${view.branch})`;
 	if (view.sessionName) path += ` • ${view.sessionName}`;
-	const lines = [Tui.truncateToWidth(theme.fg("dim", path), width, theme.fg("dim", "..."))];
+	const lines = [Tui.truncateToWidth(theme.fg("dim", path), width, Tui.Ellipsis.Ascii)];
 
 	if (view.usage) {
 		const usage = view.usage;
@@ -669,7 +679,7 @@ export function telegramFooterLines(width: number, theme: Pick<Theme, "fg">, vie
 		let statsLeft = parts.join(" ");
 		let statsLeftWidth = Tui.visibleWidth(statsLeft);
 		if (statsLeftWidth > width) {
-			statsLeft = Tui.truncateToWidth(statsLeft, width, "...");
+			statsLeft = Tui.truncateToWidth(statsLeft, width, Tui.Ellipsis.Ascii);
 			statsLeftWidth = Tui.visibleWidth(statsLeft);
 		}
 
@@ -705,7 +715,7 @@ export function telegramFooterLines(width: number, theme: Pick<Theme, "fg">, vie
 		.sort(([left], [right]) => left.localeCompare(right))
 		.map(([, text]) => footerStatusText(text))
 		.join(" ");
-	if (status) lines.push(Tui.truncateToWidth(status, width, theme.fg("dim", "...")));
+	if (status) lines.push(Tui.truncateToWidth(status, width, Tui.Ellipsis.Ascii));
 	return lines;
 }
 
@@ -767,7 +777,8 @@ function nativeAssistantSection(section: AgentActivityAssistantSection, ts: numb
 			totalTokens: 0,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		},
-		stopReason: section.stopReason,
+		// The IPC activity sections store the same omp stop reason that produced them.
+		stopReason: section.stopReason as AssistantMessage["stopReason"],
 		timestamp: ts,
 	} satisfies AssistantMessage;
 	return new AssistantMessageComponent(message, false);
@@ -796,12 +807,12 @@ export function activityComponent(
 			if (toolHost && payload && section.kind === "tool_call") {
 				const component = new ToolExecutionComponent(
 					tool,
-					`${activity.activityId}:${index}`,
 					payload.args ?? {},
 					{ showImages: false },
 					undefined,
 					toolHost.ui,
 					toolHost.cwd,
+					`${activity.activityId}:${index}`,
 				);
 				const queue = pendingTools.get(tool) ?? [];
 				queue.push(component);
@@ -853,13 +864,7 @@ function parsedActivity(event: EvtItem): AgentActivity | null {
 function cardHeader(identity: string, metadata: string, theme: Theme, color: ThemeColor): Tui.Component {
 	const left = theme.bold(theme.fg(color, sanitize(identity))),
 		right = theme.fg("dim", metadata);
-	return new Tui.HStack(
-		[
-			{ component: new Tui.TruncatedText(left), basis: Tui.visibleWidth(left), grow: 1, minSize: 8 },
-			{ component: new Tui.TruncatedText(right), basis: Tui.visibleWidth(right), minSize: 12 },
-		],
-		{ gap: 2 },
-	);
+	return new Tui.TruncatedText(`${left}  ${right}`, 1, 0);
 }
 
 export type MediaImageResolver = (item: MsgItem) => MediaImage | null;
@@ -1343,25 +1348,21 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			},
 			{ placement: "aboveEditor" },
 		);
-		ctx.ui.setFooter((tui, theme, footerData) => {
-			const dispose = footerData.onBranchChange(() => tui.requestRender());
-			return {
-				render(width) {
-					const feed = active?.filter === filter ? active : null;
-					return telegramFooterLines(width, theme, {
-						cwd: ctx.sessionManager.getCwd(),
-						home: process.env.HOME || process.env.USERPROFILE,
-						branch: footerData.getGitBranch(),
-						sessionName: ctx.sessionManager.getSessionName(),
-						usage: feed ? telegramFooterUsage(filter, feed.stats, feed.statuses, getStatusBots(), ctx) : undefined,
-						availableProviderCount: footerData.getAvailableProviderCount(),
-						statuses: footerData.getExtensionStatuses(),
-					});
-				},
-				invalidate() {},
-				dispose,
-			};
-		});
+		ctx.ui.setFooter((_tui, theme) => ({
+			render(width) {
+				const feed = active?.filter === filter ? active : null;
+				return telegramFooterLines(width, theme, {
+					cwd: ctx.sessionManager.getCwd(),
+					home: process.env.HOME || process.env.USERPROFILE,
+					branch: gitBranch(ctx.sessionManager.getCwd()),
+					sessionName: ctx.sessionManager.getSessionName(),
+					usage: feed ? telegramFooterUsage(filter, feed.stats, feed.statuses, getStatusBots(), ctx) : undefined,
+					availableProviderCount: new Set(ctx.modelRegistry.getAvailable().map((model) => model.provider)).size,
+					statuses: new Map(),
+				});
+			},
+			invalidate() {},
+		}));
 	};
 	const resolveBot = (arg: string | undefined, ui: ExtensionContext["ui"]): BotConfig | undefined => {
 		if (!arg) {
@@ -1408,8 +1409,8 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 		}
 	};
 
-	pi.registerEntryRenderer<FeedEntry>(ENTRY_TYPE, (entry, _renderOptions, theme) => {
-		const data = entry.data as FeedEntry | undefined;
+	pi.registerMessageRenderer<FeedEntry>(ENTRY_TYPE, (message, _renderOptions, theme) => {
+		const data = message.details as FeedEntry | undefined;
 		if (!data) return new Tui.Text(theme.fg("error", "invalid Telegram feed entry"), 1, 0);
 		const existing = feeds.get(data.instanceId);
 		if (existing) return existing;
@@ -1439,28 +1440,28 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 
 	pi.on("input", async (event, ctx) => {
 		lastUi = ctx.ui;
-		if (!compose || event.source !== "interactive") return { action: "continue" };
+		if (!compose || event.source !== "interactive") return {};
 		const original = event.text;
 		if (event.images && event.images.length > 0) {
 			ctx.ui.setEditorText(original);
 			ctx.ui.notify("Telegram compose does not support attachments; remove them or leave compose mode", "error");
-			return { action: "handled" };
+			return { handled: true };
 		}
 		if (!original.trim()) {
 			ctx.ui.setEditorText(original);
 			ctx.ui.notify("Telegram message cannot be empty", "warning");
-			return { action: "handled" };
+			return { handled: true };
 		}
 		if (sending) {
 			ctx.ui.setEditorText(original);
 			ctx.ui.notify("A Telegram message is already being sent; this submission was not sent", "warning");
-			return { action: "handled" };
+			return { handled: true };
 		}
 		if (!active?.client.isConnected) {
 			closeCompose(ctx.ui);
 			ctx.ui.setEditorText(original);
 			ctx.ui.notify("Telegram daemon is disconnected; compose mode was closed and the message was not sent", "error");
-			return { action: "handled" };
+			return { handled: true };
 		}
 
 		const mode = compose;
@@ -1477,7 +1478,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 					ctx.ui.setEditorText(original);
 					ctx.ui.notify("No configured bot matches the active Telegram feed", "error");
 					closeCompose(ctx.ui);
-					return { action: "handled" };
+					return { handled: true };
 				}
 				if (identities.length === 1) {
 					identity = identities[0]!;
@@ -1489,23 +1490,23 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 					} catch {
 						ctx.ui.setEditorText(original);
 						ctx.ui.notify("Telegram bot selection failed; the message was restored and was not sent", "error");
-						return { action: "handled" };
+						return { handled: true };
 					}
 					if (composeGeneration !== generation || compose !== mode || active !== feed || !feed.client.isConnected) {
 						ctx.ui.setEditorText(original);
 						ctx.ui.notify("Telegram feed changed while choosing a bot; the message was not sent", "warning");
-						return { action: "handled" };
+						return { handled: true };
 					}
 					if (selected === undefined) {
 						ctx.ui.setEditorText(original);
 						ctx.ui.notify("Telegram send canceled; the message was restored", "info");
-						return { action: "handled" };
+						return { handled: true };
 					}
 					const selectedIndex = identities.map(composeLabel).indexOf(selected);
 					if (selectedIndex < 0) {
 						ctx.ui.setEditorText(original);
 						ctx.ui.notify("Telegram bot selection was invalid; the message was not sent", "error");
-						return { action: "handled" };
+						return { handled: true };
 					}
 					identity = identities[selectedIndex]!;
 				}
@@ -1513,7 +1514,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			if (composeGeneration !== generation || compose !== mode || active !== feed || !feed.client.isConnected) {
 				ctx.ui.setEditorText(original);
 				ctx.ui.notify("Telegram feed changed before sending; the message was not sent", "warning");
-				return { action: "handled" };
+				return { handled: true };
 			}
 			showComposeIndicator(ctx.ui, { kind: "sending", identity });
 			const result = await feed.client.sendText(identity.id, original, randomUUID());
@@ -1541,7 +1542,7 @@ export function registerTelegramExtension(pi: ExtensionAPI, options: TelegramExt
 			sending = false;
 			if (composeGeneration === generation && compose === mode) showComposeIndicator(ctx.ui);
 		}
-		return { action: "handled" };
+		return { handled: true };
 	});
 
 	pi.registerCommand("tg", {

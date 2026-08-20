@@ -1,4 +1,4 @@
-# Pi Telegram Agent user guide
+# omp Telegram Agent user guide
 
 [中文指南](https://mizorewww.github.io/pi-extension-telegram-agent/zh/) · [Back to the project README](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/README.en.md)
 
@@ -6,9 +6,9 @@ This guide is for operators and users. You can connect 1..N configurable AI comp
 
 ## Shortest path
 
-1. Prepare the group ID and a BotFather token; authenticate and select the default model with Pi `/login` and `/model`.
-2. Run `bun run pi` from the repository.
-3. Run `/tg config` in Pi and wait for the all-bots feed to open.
+1. Prepare the group ID and a BotFather token; authenticate and select the default model with omp `/login` and `/model`.
+2. Run `omp (install via `omp install <repo>`, then use `/tg` directly)` from the repository.
+3. Run `/tg config` in omp and wait for the all-bots feed to open.
 
 Read in order:
 
@@ -22,7 +22,7 @@ Read in order:
 ## Product boundaries
 
 - One deployment = one Telegram supergroup + 1..N bots.
-- Closing Pi does not stop the daemon. Telegram is the chat venue; Pi is the local observation and control interface.
+- Closing omp does not stop the daemon. Telegram is the chat venue; omp is the local observation and control interface.
 - Multiple groups require isolated working directories and all data/session/process resources.
 - `telegram.config.ts` is trusted executable local code, not a sandbox for downloaded configuration.
 - Tracked files contain no valid credentials or deployment personas; older Git history may still contain removed personas.

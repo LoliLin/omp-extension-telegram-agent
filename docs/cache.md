@@ -14,7 +14,9 @@
 
 ## CACHE_SCHEMA_VERSION
 
-当前：**13**。
+当前：**14**。
+
+v14 是平台移植：daemon 从 Pi 0.84.1 迁移到 omp 17.4.0（`@oh-my-pi/*` 精确锁定；`@earendil-works/pi-*` 为 npm 别名，扩展源码引用、运行时由 omp remap 到内置 shim）。tool parameter schema 从 pi TypeBox 改为 omptype，以 `toJsonSchema()` 的确定性 JSON 参与 fingerprint/hash；`createAgentSessionServices`/`ModelRuntime`/`InlineExtension` 由 omp 的 `ModelRegistry`、`context`/`session_before_compact`/`before_provider_request` 钩子替代；compaction 序列化显式保留 custom (developer) 消息（omp 的 `serializeConversation` 会丢弃它们）；事件订阅改用 omp 的 `agent_end`（isTerminal）与 `auto_compaction_end`。升级会为每个 bot 创建新 epoch，旧 session 文件保留。
 
 v13 把最近 sticker 候选从每个历史 Telegram entry 的永久正文拆为结构化字段；context 投影只在最后一个 Telegram batch 后追加一次候选，因此历史形态从 `msg1+candidates, msg2+candidates, msg3+candidates` 变为 `msg1, msg2, msg3+candidates`。这会让相邻请求从上一轮候选位置分叉，但把候选总量从随turn线性增长降为恒定最多8条；对当前缺少provider cache usage的deployment，选择显著更小的64K输入。主模型有效窗口同时固定为64K，Pi估算32K时触发compaction，压缩后按 `compaction_keep_recent` token 预算保留近期原文。升级会为每个 bot 创建新 epoch，旧 session 文件保留。
 
@@ -36,7 +38,7 @@ cache-visible protocol 包括：
 - compaction prompt、details 与所选 compaction model；
 - extension 顺序和 assistant persistence policy；
 - provider/api/model/reasoning/cache retention；
-- Pi 版本及当前 bot 的 sticker catalog identity snapshot。
+- omp 版本及当前 bot 的 sticker catalog identity snapshot。
 
 `CACHE_SCHEMA_VERSION` 是 fingerprint 中的强制失效字段，不是恢复 session 后再补记的一项 telemetry。任何上述内容变化都必须先 bump version、更新本文件与 golden；runtime 在打开旧 session **之前**计算 fingerprint，不匹配时保留旧文件、创建新 session 并推进 epoch。
 

@@ -1,6 +1,8 @@
-import { COMPACTION_SUMMARY_PREFIX } from "@earendil-works/pi-agent-core";
-import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { createHmac } from "node:crypto";
+
+/** omp wraps persisted compaction summaries in `<summary>...</summary>`; pi used a longer prose prefix. */
+const COMPACTION_SUMMARY_PREFIX = "<summary>";
 
 export interface ProviderPayloadObservation {
 	systemHash: string;
@@ -198,17 +200,13 @@ export function observeProviderPayload(
 export function makeCachePayloadObserverExtension(
 	key: string,
 	onObservation: (observation: ProviderPayloadObservation) => void,
-): InlineExtension {
+): ExtensionFactory {
 	let previous: ProviderPayloadObservation | undefined;
-	return {
-		name: "tg-cache-observer",
-		hidden: true,
-		factory: (pi) => {
-			pi.on("before_provider_request", (event) => {
-				const observation = observeProviderPayload(event.payload, key, previous);
-				previous = observation;
-				onObservation(observation);
-			});
-		},
+	return (pi) => {
+		pi.on("before_provider_request", (event) => {
+			const observation = observeProviderPayload(event.payload, key, previous);
+			previous = observation;
+			onObservation(observation);
+		});
 	};
 }

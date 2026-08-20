@@ -2,26 +2,26 @@
 
 Choose a safe next action from the observable symptom. Do not delete data, PID files, or sockets just to experiment. The [daemon runbook](https://github.com/mizorewww/pi-extension-telegram-agent/blob/main/docs/runbooks/daemon.md) owns full recovery procedures.
 
-## `bun run pi` does not start
+## `omp (install via `omp install <repo>`, then use `/tg` directly)` does not start
 
 Run:
 
 ```bash
 bun install --frozen-lockfile
-bun run pi --version
+omp (install via `omp install <repo>`, then use `/tg` directly) --version
 ```
 
-The expected version is the project-locked Pi 0.84.1. If installation fails, retain the error and fix registry/network access. Do not hide the problem by switching to an unlocked global Pi.
+The expected version is the project-locked omp 0.84.1. If installation fails, retain the error and fix registry/network access. Do not hide the problem by switching to an unlocked global Pi.
 
 ## `/tg config` is missing
 
-Confirm you started `bun run pi` from the repository root and package discovery loaded `.pi/extensions/tg-extension.ts`. `config` is static and does not depend on an existing deployment. If it is completely absent, inspect Pi/package loading instead of creating an empty config file.
+Confirm you started `omp (install via `omp install <repo>`, then use `/tg` directly)` from the repository root and package discovery loaded `.pi/extensions/tg-extension.ts`. `config` is static and does not depend on an existing deployment. If it is completely absent, inspect Pi/package loading instead of creating an empty config file.
 
 ## The wizard refuses configuration
 
 - Field error: correct the fields named in the notification; values are never echoed.
 - Existing files: choose validate/editor or explicitly confirm backup-replace. Cancellation preserves bytes.
-- Pi model preflight: leave the wizard, use Pi `/login` and `/model`, then retry. No deployment file was written.
+- omp model preflight: leave the wizard, use omp `/login` and `/model`, then retry. No deployment file was written.
 
 ## Config is valid but the daemon is not ready
 
@@ -30,7 +30,7 @@ Confirm you started `bun run pi` from the repository root and package discovery 
 /tg restart
 ```
 
-Then inspect `data/daemon.log`. Typical causes include an invalid Telegram token, unreachable network, changed Pi login/default-model settings, a model absent from Pi's catalog, or a bot missing from the target group. Valid files remain, so you do not need to paste the token again.
+Then inspect `data/daemon.log`. Typical causes include an invalid Telegram token, unreachable network, changed omp login/default-model settings, a model absent from Pi's catalog, or a bot missing from the target group. Valid files remain, so you do not need to paste the token again.
 
 ## `daemon starting` persists
 
@@ -48,20 +48,20 @@ After changing a model, persona, cache policy, tools, or another cache-visible f
 
 Another process is long-polling with the same token. Run `bun run restart`; the controller verifies and recovers this deployment's real daemon and orphans. Do not blindly signal the PID-file number or start concurrently.
 
-## Pi feed or compose disconnects
+## omp feed or compose disconnects
 
 - `no connected Telegram feed`: run `/tg attach [bot]` and wait for the snapshot connection.
 - `unknown bot id`: use `/tg ` completion or inspect configured IDs.
 - Unknown compose outcome: inspect the group and retry only when absent.
-- `/tg detach` and closing Pi do not stop the daemon; attach again later.
+- `/tg detach` and closing omp do not stop the daemon; attach again later.
 
 ## Images do not render inline
 
-A new user- or bot-sent static photo/sticker first shows its media label, then the daemon downloads it in the background and updates the same Pi card. This does not depend on routing or vision; animated/video media retains a text placeholder. On startup, legacy absolute cache paths are rebased by filename when the file exists in the current `data/media`; missing entries are cleared before at most 100 recent static display gaps still referenced by current context, an unconsumed event, or a pending reply are backfilled.
+A new user- or bot-sent static photo/sticker first shows its media label, then the daemon downloads it in the background and updates the same omp card. This does not depend on routing or vision; animated/video media retains a text placeholder. On startup, legacy absolute cache paths are rebased by filename when the file exists in the current `data/media`; missing entries are cleared before at most 100 recent static display gaps still referenced by current context, an unconsumed event, or a pending reply are backfilled.
 
-After successful compaction, a bounded batch of local media files no longer referenced by any configured bot is removed automatically. An old Pi card falling back to its label is therefore expected and does not mean that the message, vision result, or Telegram file mapping was lost. Restart does not unconditionally download those files again just for historical display.
+After successful compaction, a bounded batch of local media files no longer referenced by any configured bot is removed automatically. An old omp card falling back to its label is therefore expected and does not mean that the message, vision result, or Telegram file mapping was lost. Restart does not unconditionally download those files again just for historical display.
 
-If new media remains label-only, inspect only the fixed `media_cache_ready/skip/error` category and queue number in redacted logs, then check the 1 MiB limit, static-image format, terminal image capability, and project Pi version. Pi still selects Kitty, iTerm2, or native text fallback. Do not add terminal escapes or bypass Pi components. Record terminal type, tmux state, media kind, fixed outcome, and whether a local path exists—never a token, absolute path, or private image contents.
+If new media remains label-only, inspect only the fixed `media_cache_ready/skip/error` category and queue number in redacted logs, then check the 1 MiB limit, static-image format, terminal image capability, and project omp version. omp still selects Kitty, iTerm2, or native text fallback. Do not add terminal escapes or bypass omp components. Record terminal type, tmux state, media kind, fixed outcome, and whether a local path exists—never a token, absolute path, or private image contents.
 
 ## A video has no vision description
 
@@ -79,7 +79,7 @@ Run `bun run debug` first. `video_transcoder_unavailable` means the host lacks `
 Collect only non-sensitive evidence:
 
 - `bun run status` output;
-- `bun run pi --version`;
+- `omp (install via `omp install <repo>`, then use `/tg` directly) --version`;
 - a manually reviewed, redacted tail of `data/daemon.log`;
 - the failed command, bot ID, and whether the config was newly written or replaced an existing file;
 - terminal and tmux details when UI is involved.
